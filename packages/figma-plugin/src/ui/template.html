@@ -851,6 +851,191 @@
       gap: 8px;
       margin-top: 2px;
     }
+
+    /* Design System & Site Settings (Impeccable & Unslop) */
+    .ds-summary-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      padding: 8px 10px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-bottom: 10px;
+    }
+
+    .ds-badge-row {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      flex-wrap: wrap;
+    }
+
+    .ds-section-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 11px 12px;
+      margin-bottom: 10px;
+    }
+
+    .ds-section-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 8px;
+    }
+
+    .ds-section-title {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .ds-grid-colors {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 6px;
+      max-height: 120px;
+      overflow-y: auto;
+      margin-top: 8px;
+      padding-right: 2px;
+    }
+
+    .ds-color-card {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 8px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 10.5px;
+    }
+
+    .ds-swatch {
+      width: 16px;
+      height: 16px;
+      border-radius: 4px;
+      border: 1px solid rgba(255, 255, 255, 0.15);
+      flex-shrink: 0;
+    }
+
+    .ds-color-info {
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .ds-color-name {
+      color: var(--text);
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ds-color-val {
+      color: var(--muted);
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-size: 9.5px;
+    }
+
+    .ds-role-pill {
+      font-size: 9px;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: rgba(37, 99, 235, 0.15);
+      color: #60a5fa;
+      border: 1px solid rgba(37, 99, 235, 0.3);
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .ds-fonts-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 110px;
+      overflow-y: auto;
+      margin-top: 8px;
+      padding-right: 2px;
+    }
+
+    .ds-font-row {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 8px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      font-size: 10.5px;
+    }
+
+    .ds-font-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      overflow: hidden;
+    }
+
+    .ds-font-tag {
+      font-size: 9px;
+      font-weight: 600;
+      padding: 1px 4px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+      flex-shrink: 0;
+    }
+
+    .ds-font-name {
+      color: var(--text);
+      font-weight: 500;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .ds-font-spec {
+      color: var(--muted);
+      font-size: 9.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      flex-shrink: 0;
+    }
+
+    .ds-theme-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 8px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-top: 6px;
+      font-size: 10.5px;
+    }
+
+    .ds-theme-left {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .ds-preview-badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      font-size: 10px;
+      color: var(--text-secondary);
+    }
   </style>
 </head>
 
@@ -1103,126 +1288,157 @@
         </div>
       </section>
 
-      <!-- BƯỚC 3: THIẾT LẬP DESIGN SYSTEM & TOKENS -->
+      <!-- BƯỚC 3: THIẾT LẬP DESIGN SYSTEM & SITE SETTINGS -->
       <section id="step-3" class="step-pane">
-        <div class="card">
-          <div class="card-title">
-            <span class="title-left">
-              <span class="btn-icon" data-ui-icon="settings"></span>
-              <span>Bảng màu & Hiệu ứng viền Gradient</span>
-            </span>
-            <span class="badge"
-              style="background:rgba(59,130,246,0.15);color:#60a5fa;border-color:rgba(59,130,246,0.3);">Chuẩn Figma
-              2026</span>
+        <!-- Live Detection Summary Bar -->
+        <div class="ds-summary-bar">
+          <div class="ds-badge-row">
+            <span class="badge" id="ds-badge-colors">0 Global Colors</span>
+            <span class="badge" id="ds-badge-fonts">0 Global Fonts</span>
+            <span class="badge" id="ds-badge-theme">Theme H1-H6</span>
+            <span class="badge" id="ds-badge-layout">1200px Layout</span>
           </div>
-          <p class="hint">
-            Xử lý tự động các thuộc tính thẩm mỹ nâng cao không hỗ trợ nguyên bản trên Elementor:
-          </p>
+          <button class="btn btn-secondary btn-sm" id="btn-scan-ds" title="Quét lại Design System từ Figma">
+            <span class="btn-icon" data-ui-icon="refresh"></span>
+            <span>Quét lại</span>
+          </button>
+        </div>
 
-          <div
-            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
-            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
-              <input type="checkbox" id="chk-linear-border" checked style="accent-color:#3b82f6;" />
+        <!-- Section 1: DESIGN SYSTEM (Global Colors & Global Fonts) -->
+        <div class="ds-section-card">
+          <div class="ds-section-header">
+            <span class="ds-section-title">
+              <span class="btn-icon" data-ui-icon="settings"></span>
+              <span>1. Design System (Colors & Fonts)</span>
+            </span>
+            <label class="checkbox-row" style="margin:0;font-size:10.5px;">
+              <input type="checkbox" id="chk-sync-global-colors" checked style="accent-color:#2563eb;" />
+              <span>Đồng bộ</span>
+            </label>
+          </div>
+          <p class="hint" style="margin-bottom:6px;">
+            Đồng bộ Figma Variables & Styles vào Elementor Global Colors và Global Fonts (<code style="color:#60a5fa;">__globals__</code>).
+          </p>
+          <!-- Color Swatches Grid -->
+          <div style="font-size:10.5px;color:var(--text-secondary);font-weight:600;margin-top:8px;">Bảng màu phát hiện:</div>
+          <div class="ds-grid-colors" id="ds-colors-preview">
+            <div style="color:var(--muted);font-size:10.5px;padding:6px;grid-column:span 2;">Chưa quét hoặc file chưa có Local Colors...</div>
+          </div>
+          <!-- Typography List -->
+          <div style="font-size:10.5px;color:var(--text-secondary);font-weight:600;margin-top:10px;">Kiểu chữ phát hiện:</div>
+          <div class="ds-fonts-list" id="ds-fonts-preview">
+            <div style="color:var(--muted);font-size:10.5px;padding:6px;">Chưa quét hoặc file chưa có Text Styles...</div>
+          </div>
+        </div>
+
+        <!-- Section 2: THEME STYLE (Typography, Buttons & Form Fields) -->
+        <div class="ds-section-card">
+          <div class="ds-section-header">
+            <span class="ds-section-title">
+              <span class="btn-icon" data-eicon="editor-paragraph"></span>
+              <span>2. Theme Style (Typography & Buttons)</span>
+            </span>
+            <label class="checkbox-row" style="margin:0;font-size:10.5px;">
+              <input type="checkbox" id="chk-sync-theme-styles" checked style="accent-color:#2563eb;" />
+              <span>Đồng bộ</span>
+            </label>
+          </div>
+          <p class="hint" style="margin-bottom:6px;">
+            Thiết lập phong cách mặc định toàn trang trong Elementor Site Settings:
+          </p>
+          <div id="ds-theme-preview">
+            <div class="ds-theme-item">
+              <div class="ds-theme-left">
+                <span class="ds-font-tag">TYPO</span>
+                <span style="font-weight:500;">Headings & Body</span>
+              </div>
+              <span class="ds-preview-badge" id="ds-theme-typo-spec">H1–H6, Body, Link tự động map</span>
+            </div>
+            <div class="ds-theme-item">
+              <div class="ds-theme-left">
+                <span class="ds-font-tag">BUTTON</span>
+                <span style="font-weight:500;">Primary Button Style</span>
+              </div>
+              <span class="ds-preview-badge" id="ds-theme-button-spec">Từ component Button Figma</span>
+            </div>
+            <div class="ds-theme-item">
+              <div class="ds-theme-left">
+                <span class="ds-font-tag">FORM</span>
+                <span style="font-weight:500;">Form Fields & Input</span>
+              </div>
+              <span class="ds-preview-badge" id="ds-theme-form-spec">Từ frame Input Figma</span>
+            </div>
+          </div>
+        </div>
+
+        <!-- Section 3: SETTINGS (Layout & Background) -->
+        <div class="ds-section-card">
+          <div class="ds-section-header">
+            <span class="ds-section-title">
+              <span class="btn-icon" data-eicon="flexbox"></span>
+              <span>3. Site Settings (Layout & Background)</span>
+            </span>
+            <label class="checkbox-row" style="margin:0;font-size:10.5px;">
+              <input type="checkbox" id="chk-sync-layout-settings" checked style="accent-color:#2563eb;" />
+              <span>Đồng bộ</span>
+            </label>
+          </div>
+          <div class="ds-theme-item">
+            <div class="ds-theme-left">
+              <span class="ds-font-tag">LAYOUT</span>
+              <span style="font-weight:500;">Container Max Width</span>
+            </div>
+            <span class="ds-preview-badge" id="ds-layout-width-spec">1200px (tự động theo Frame)</span>
+          </div>
+          <div class="ds-theme-item">
+            <div class="ds-theme-left">
+              <span class="ds-font-tag">BG</span>
+              <span style="font-weight:500;">Site Background Color</span>
+            </div>
+            <span class="ds-preview-badge" id="ds-layout-bg-spec">Theo màu nền Frame</span>
+          </div>
+        </div>
+
+        <!-- Advanced CSS Options -->
+        <div class="ds-section-card">
+          <div class="ds-section-header">
+            <span class="ds-section-title">
+              <span class="btn-icon" data-ui-icon="code"></span>
+              <span>4. CSS Engine & Hiệu ứng đặc biệt</span>
+            </span>
+          </div>
+          <div style="padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;">
+            <label class="checkbox-row" style="margin-bottom:2px;font-weight:600;">
+              <input type="checkbox" id="chk-linear-border" checked style="accent-color:#2563eb;" />
               <span>Tự động sinh Custom CSS cho Viền dải màu (Linear Border)</span>
             </label>
-            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
-              Elementor không có control viền gradient trực tiếp. Plugin tự động sinh CSS
-              <code>background-clip: padding-box, border-box</code> giữ nguyên góc bo tròn (<code>border-radius</code>),
-              kèm fallback màu đơn sắc cho bản Free.
+            <p style="font-size:10px;color:var(--muted);margin:0;line-height:1.35;">
+              Sinh CSS <code>background-clip: padding-box, border-box</code> giữ nguyên góc bo tròn bo cong viền gradient.
             </p>
           </div>
-
-          <div
-            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
-            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
-              <input type="checkbox" id="chk-sync-colors-opt" checked style="accent-color:#3b82f6;" />
-              <span>Trích xuất Color Variables từ Figma</span>
+          <div style="padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);">
+            <label class="checkbox-row" style="margin-bottom:2px;font-weight:600;">
+              <input type="checkbox" id="chk-dev-mode-css" checked style="accent-color:#2563eb;" />
+              <span>Đồng bộ Full CSS từ Figma Dev Mode (node.getCSSAsync)</span>
             </label>
-            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
-              Tự động nhận diện màu chủ đạo, màu phụ, màu trung tính và màu nền từ Local Variables của file Figma để
-              đồng bộ vào Elementor Global Colors.
+            <p style="font-size:10px;color:var(--muted);margin:0;line-height:1.35;">
+              Trích xuất chính xác 100% margin, padding, border-radius, font style từ engine Dev Mode Figma.
             </p>
           </div>
         </div>
 
-        <div class="card">
-          <div class="card-title">
-            <span class="title-left">
-              <span class="btn-icon" data-eicon="editor-paragraph"></span>
-              <span>Hệ thống Kiểu chữ & Typography</span>
-            </span>
+        <!-- Action Sync Button -->
+        <div class="ds-section-card" style="background:rgba(37,99,235,0.06);border-color:rgba(37,99,235,0.25);">
+          <div style="margin-bottom:8px;font-weight:600;font-size:11.5px;color:var(--text);display:flex;align-items:center;justify-content:space-between;">
+            <span>Đồng bộ sang WordPress Active Kit</span>
+            <span class="badge" style="background:rgba(37,99,235,0.2);color:#93c5fd;border-color:rgba(37,99,235,0.4);">Site Settings</span>
           </div>
-          <p class="hint">
-            Bảo toàn độ nét và tỷ lệ hiển thị chữ tương đương 100% bản thiết kế:
-          </p>
-
-          <div
-            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
-            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
-              <input type="checkbox" id="chk-text-pixel-perfect" checked style="accent-color:#3b82f6;" />
-              <span>Ưu tiên Pixel-Perfect Typography (Tránh bị Theme ghi đè)</span>
-            </label>
-            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
-              Giữ nguyên font-size, font-weight, line-height và màu kèm opacity (ví dụ số thống kê lớn 40px Bold,
-              opacity 30%) thay vì bị theme kit mặc định của Elementor ghi đè.
-            </p>
-          </div>
-
-          <div
-            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
-            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
-              <input type="checkbox" id="chk-calc-lineheight" checked style="accent-color:#3b82f6;" />
-              <span>Tự động tính Line-Height khi Figma để 'Auto'</span>
-            </label>
-            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
-              Tự động tính tỷ lệ line-height chuẩn (~1.2 - 1.4) theo kích cỡ chữ khi Figma đặt chế độ Auto, đảm bảo chữ
-              không bị dính vào nhau trên Elementor.
-            </p>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">
-            <span class="title-left">
-              <span class="btn-icon" data-ui-icon="code"></span>
-              <span>Figma Dev Mode Engine (node.getCSSAsync)</span>
-            </span>
-            <span class="badge"
-              style="background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3);">Đang kích
-              hoạt</span>
-          </div>
-          <p class="hint">
-            Trích xuất trực tiếp 100% thuộc tính CSS từ Dev Mode (Inspect) của Figma sang Elementor JSON:
-          </p>
-
-          <div
-            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
-            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
-              <input type="checkbox" id="chk-dev-mode-css" checked style="accent-color:#10b981;" />
-              <span>Đồng bộ Full CSS từ Figma Dev Mode</span>
-            </label>
-            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
-              Tự động lấy chính xác <code>width</code>, <code>height</code>, <code>padding</code>, <code>gap</code>,
-              <code>border-image-source</code>, <code>color</code>, <code>font-size</code>, <code>line-height</code> từ
-              API Dev Mode của Figma, loại bỏ hoàn toàn tình trạng thiếu thông số style.
-            </p>
-          </div>
-        </div>
-
-        <div class="card">
-          <div class="card-title">
-            <span class="title-left">
-              <span class="btn-icon" data-ui-icon="refresh"></span>
-              <span>Đồng bộ Design System vào WordPress</span>
-            </span>
-          </div>
-          <p class="hint">
-            Đẩy trực tiếp các biến màu và Text Styles từ Figma vào Site Settings Kit của website WordPress:
-          </p>
-          <button class="btn btn-secondary" id="btn-sync-tokens-step3" style="width:100%;">
+          <button class="btn btn-primary" id="btn-sync-all-ds" style="width:100%;padding:8px 12px;font-weight:600;">
             <span class="btn-icon" data-ui-icon="upload"></span>
-            <span>Đồng bộ Global Colors & Fonts vào WP</span>
+            <span>⚡ Đồng bộ toàn bộ Site Settings vào WordPress</span>
           </button>
+          <div id="ds-sync-report" style="display:none;margin-top:8px;padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:10.5px;color:var(--text-secondary);">
+          </div>
         </div>
 
         <!-- Navigation footer to Step 4 -->
@@ -1587,6 +1803,8 @@
 
       if (stepId === 'step-2') {
         postToPlugin('get-outline');
+      } else if (stepId === 'step-3') {
+        postToPlugin('scan-design-system');
       }
     }
 
@@ -1631,9 +1849,41 @@
     document.getElementById('btn-back-step-2')?.addEventListener('click', () => switchStep('step-2'));
     document.getElementById('btn-go-step-4')?.addEventListener('click', () => switchStep('step-4'));
     document.getElementById('btn-back-step-3')?.addEventListener('click', () => switchStep('step-3'));
-    document.getElementById('btn-sync-tokens-step3')?.addEventListener('click', () => {
+
+    document.getElementById('btn-scan-ds')?.addEventListener('click', () => {
+      postToPlugin('scan-design-system');
+    });
+
+    document.getElementById('btn-sync-all-ds')?.addEventListener('click', () => {
+      const siteSelect = document.getElementById('site-select');
+      const siteUrl = siteSelect ? siteSelect.value : '';
+      if (!siteUrl) {
+        setStatus('Vui lòng kết nối và chọn website WordPress trước (ở Bước 4).', true);
+        switchStep('step-4');
+        return;
+      }
       postToPlugin('sync-design-system', {
-        siteUrl: document.getElementById('site-select').value,
+        siteUrl,
+        options: {
+          syncColors: document.getElementById('chk-sync-global-colors')?.checked !== false,
+          syncTypography: document.getElementById('chk-sync-global-colors')?.checked !== false,
+          syncThemeStyles: document.getElementById('chk-sync-theme-styles')?.checked !== false,
+          syncLayout: document.getElementById('chk-sync-layout-settings')?.checked !== false,
+        },
+      });
+    });
+
+    document.getElementById('btn-sync-tokens-step3')?.addEventListener('click', () => {
+      const siteSelect = document.getElementById('site-select');
+      const siteUrl = siteSelect ? siteSelect.value : '';
+      postToPlugin('sync-design-system', {
+        siteUrl,
+        options: {
+          syncColors: true,
+          syncTypography: true,
+          syncThemeStyles: true,
+          syncLayout: true,
+        },
       });
     });
 
@@ -2228,6 +2478,108 @@ HÃY TRẢ VỀ DUY NHẤT MỘT MẢNG JSON HỢP LỆ (KHÔNG KÈM TEXT GIẢI
       }
     }
 
+    function renderDesignSystemPreview(tokens) {
+      if (!tokens) return;
+      const colors = Array.isArray(tokens.colors) ? tokens.colors : [];
+      const typo = Array.isArray(tokens.typography) ? tokens.typography : [];
+      const theme = tokens.themeStyles || {};
+      const settings = tokens.settings || {};
+
+      // Badges
+      const bColors = document.getElementById('ds-badge-colors');
+      if (bColors) bColors.textContent = `${colors.length} Global Colors`;
+      const bFonts = document.getElementById('ds-badge-fonts');
+      if (bFonts) bFonts.textContent = `${typo.length} Global Fonts`;
+      const bTheme = document.getElementById('ds-badge-theme');
+      const themeCount = Object.keys(theme.typography || {}).length + (theme.buttons ? 1 : 0);
+      if (bTheme) bTheme.textContent = `${themeCount} Theme Styles`;
+      const bLayout = document.getElementById('ds-badge-layout');
+      if (bLayout && settings.layout && settings.layout.containerWidth) {
+        bLayout.textContent = `${settings.layout.containerWidth}px Layout`;
+      }
+
+      // Colors Grid
+      const colorsEl = document.getElementById('ds-colors-preview');
+      if (colorsEl) {
+        if (colors.length === 0) {
+          colorsEl.innerHTML = '<div style="color:var(--muted);font-size:10.5px;padding:6px;grid-column:span 2;">Chưa phát hiện Local Color Variables hoặc Paint Styles trong file.</div>';
+        } else {
+          colorsEl.innerHTML = colors.map((c) => {
+            const rolePill = c.role && c.role !== 'custom' ? `<span class="ds-role-pill">${c.role}</span>` : '';
+            return `
+              <div class="ds-color-card" title="${c.name} (${c.value})">
+                <div class="ds-swatch" style="background:${c.value};"></div>
+                <div class="ds-color-info">
+                  <span class="ds-color-name">${c.name}</span>
+                  <span class="ds-color-val">${c.value}</span>
+                </div>
+                ${rolePill}
+              </div>
+            `;
+          }).join('');
+        }
+      }
+
+      // Fonts List
+      const fontsEl = document.getElementById('ds-fonts-preview');
+      if (fontsEl) {
+        if (typo.length === 0) {
+          fontsEl.innerHTML = '<div style="color:var(--muted);font-size:10.5px;padding:6px;">Chưa phát hiện Local Text Styles trong file.</div>';
+        } else {
+          fontsEl.innerHTML = typo.map((f) => {
+            const roleTag = f.role && f.role !== 'custom' ? f.role.toUpperCase() : 'STYLE';
+            return `
+              <div class="ds-font-row" title="${f.name}">
+                <div class="ds-font-left">
+                  <span class="ds-font-tag">${roleTag}</span>
+                  <span class="ds-font-name">${f.name}</span>
+                </div>
+                <span class="ds-font-spec">${f.fontFamily} ${f.fontSize}px / ${f.fontWeight}</span>
+              </div>
+            `;
+          }).join('');
+        }
+      }
+
+      // Theme Spec Preview
+      const typoSpec = document.getElementById('ds-theme-typo-spec');
+      if (typoSpec) {
+        const mapped = Object.keys(theme.typography || {});
+        typoSpec.textContent = mapped.length > 0 ? `Đã nhận: ${mapped.map(m => m.toUpperCase()).join(', ')}` : 'Chưa có text style H1–H6';
+      }
+
+      const btnSpec = document.getElementById('ds-theme-button-spec');
+      if (btnSpec) {
+        if (theme.buttons) {
+          const b = theme.buttons;
+          btnSpec.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${b.backgroundColor};border:1px solid rgba(255,255,255,0.2);vertical-align:middle;margin-right:3px;"></span> ${b.typography.fontSize}px / ${b.borderRadius.top}px radius`;
+        } else {
+          btnSpec.textContent = 'Mặc định (Chưa phát hiện button)';
+        }
+      }
+
+      const formSpec = document.getElementById('ds-theme-form-spec');
+      if (formSpec) {
+        if (theme.formFields) {
+          const f = theme.formFields;
+          formSpec.textContent = `${f.typography.fontSize}px / ${f.borderRadius.top}px radius`;
+        } else {
+          formSpec.textContent = 'Mặc định';
+        }
+      }
+
+      // Layout Spec Preview
+      const widthSpec = document.getElementById('ds-layout-width-spec');
+      if (widthSpec && settings.layout && settings.layout.containerWidth) {
+        widthSpec.textContent = `${settings.layout.containerWidth}px (theo Frame)`;
+      }
+
+      const bgSpec = document.getElementById('ds-layout-bg-spec');
+      if (bgSpec && settings.background && settings.background.color) {
+        bgSpec.innerHTML = `<span style="display:inline-block;width:10px;height:10px;border-radius:2px;background:${settings.background.color};border:1px solid rgba(255,255,255,0.2);vertical-align:middle;margin-right:3px;"></span> ${settings.background.color}`;
+      }
+    }
+
     // Handle messages from Figma Sandbox
     window.onmessage = (event) => {
       const msg = event.data && event.data.pluginMessage;
@@ -2287,6 +2639,8 @@ HÃY TRẢ VỀ DUY NHẤT MỘT MẢNG JSON HỢP LỆ (KHÔNG KÈM TEXT GIẢI
         currentPages = msg.pages || [];
         currentTemplates = msg.templates || [];
         refreshTargetPostDropdown();
+      } else if (msg.type === 'design-system-preview') {
+        renderDesignSystemPreview(msg.tokens);
       } else if (msg.type === 'clipboard-ready') {
         copyTextToClipboard(msg.json);
       } else if (msg.type === 'download-ready') {

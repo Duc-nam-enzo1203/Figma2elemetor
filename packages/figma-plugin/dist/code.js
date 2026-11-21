@@ -6,11 +6,9 @@
  * Pure-JS Crypto, Hashing, and Encoding utilities for the Figma Plugin Sandbox.
  * The Figma main thread sandbox does not expose Web Crypto (`crypto.subtle`)
  * or `TextEncoder` / `btoa`, so all implementations here are dependency-free.
- */
-function uuid() {
+ */function uuid() {
   return `${Date.now().toString(36)}-${Math.random().toString(16).slice(2, 10)}-${Math.random().toString(16).slice(2, 10)}`;
-}
-function shortId(seed = '') {
+}function shortId(seed = '') {
   const randomPart = Math.random().toString(16).slice(2, 9);
   if (!seed) return randomPart.padEnd(7, '0').slice(0, 7);
   let h = 2166136261;
@@ -22,8 +20,7 @@ function shortId(seed = '') {
   return (h >>> 0).toString(16).padStart(7, '0').slice(0, 7);
 }
 
-/** UTF-8 encode a string to Uint8Array without TextEncoder */
-function utf8Bytes(text) {
+/** UTF-8 encode a string to Uint8Array without TextEncoder */function utf8Bytes(text) {
   const str = String(text || '');
   const out = [];
   for (let i = 0; i < str.length; i += 1) {
@@ -53,8 +50,7 @@ function utf8Bytes(text) {
   return new Uint8Array(out);
 }
 
-/** Decode a Uint8Array of UTF-8 bytes back into a JS string (for SVG exports) */
-function utf8Decode(bytes) {
+/** Decode a Uint8Array of UTF-8 bytes back into a JS string (for SVG exports) */function utf8Decode(bytes) {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes || []);
   let out = '';
   let i = 0;
@@ -80,8 +76,7 @@ function utf8Decode(bytes) {
   return out;
 }
 
-/** Pure-JS Base64 encoder for Uint8Array */
-function bytesToBase64(input) {
+/** Pure-JS Base64 encoder for Uint8Array */function bytesToBase64(input) {
   const bytes = input instanceof Uint8Array ? input : new Uint8Array(input || []);
   const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   let result = '';
@@ -107,8 +102,7 @@ function bytesToBase64(input) {
   return result;
 }
 
-/** Pure-JS SHA-256 (FIPS 180-4) over Uint8Array/ArrayBuffer */
-async function sha256(input) {
+/** Pure-JS SHA-256 (FIPS 180-4) over Uint8Array/ArrayBuffer */async function sha256(input) {
   const bytes = typeof input === 'string'
     ? utf8Bytes(input)
     : (input instanceof Uint8Array ? input : new Uint8Array(input));
@@ -162,9 +156,7 @@ async function sha256(input) {
 /**
  * 3-Layer Widget Resolver (Override -> Naming Convention -> Heuristics)
  * Covers the full Elementor Free + Elementor Pro widget catalog with official eicon names.
- */
-const WIDGET_PLUGIN_KEY = 'f2e-widget';
-const WIDGET_CATALOG = [
+ */const WIDGET_PLUGIN_KEY = 'f2e-widget';const WIDGET_CATALOG = [
   // ── Layout & Containers ──
   { value: 'container', label: 'Flexbox Container', category: 'Layout', icon: 'container', pro: false },
   { value: 'container-grid', label: 'Grid Container (CSS Grid)', category: 'Layout', icon: 'container-grid', pro: false },
@@ -263,9 +255,7 @@ const WIDGET_CATALOG = [
 
   // ── Skip ──
   { value: 'skip', label: 'Bỏ qua Layer (Skip)', category: 'System', icon: 'ban', pro: false },
-];
-const SUPPORTED_WIDGETS = WIDGET_CATALOG.map((w) => w.value);
-const CONTAINER_WIDGETS = new Set([
+];const SUPPORTED_WIDGETS = WIDGET_CATALOG.map((w) => w.value);const CONTAINER_WIDGETS = new Set([
   'container',
   'container-grid',
   'inner-section',
@@ -274,17 +264,14 @@ const CONTAINER_WIDGETS = new Set([
   'nested-accordion',
   'nested-carousel',
   'off-canvas',
-]);
-function isAtomicLeafWidget(widget) {
+]);function isAtomicLeafWidget(widget) {
   if (!widget) return false;
   if (widget === 'skip') return true;
   if (widget === 'unwrap') return false;
   return !CONTAINER_WIDGETS.has(widget);
-}
-function isContainerWidget(widget) {
+}function isContainerWidget(widget) {
   return CONTAINER_WIDGETS.has(widget);
-}
-function isAtomicWidget(widget) {
+}function isAtomicWidget(widget) {
   return !CONTAINER_WIDGETS.has(widget);
 }
 
@@ -416,23 +403,19 @@ const VECTOR_TYPES = new Set([
   'BOOLEAN_OPERATION',
   'STAR',
   'POLYGON',
-]);
-function visibleChildren(node) {
+]);function visibleChildren(node) {
   if (!node || !Array.isArray(node.children)) return [];
   return node.children.filter((child) => child && child.visible !== false);
-}
-function hasImageFill(node) {
+}function hasImageFill(node) {
   return Array.isArray(node && node.fills) && node.fills.some((fill) => fill && fill.type === 'IMAGE' && fill.visible !== false);
-}
-function hasSolidOrGradientFill(node) {
+}function hasSolidOrGradientFill(node) {
   return Array.isArray(node && node.fills) && node.fills.some((fill) => fill && (fill.type === 'SOLID' || String(fill.type || '').startsWith('GRADIENT_')) && fill.visible !== false);
 }
 
 /**
  * Checks if a node is a pure vector icon or a composite vector graphic (such as a multi-path SVG logo).
  * When true, the entire node is exported as a single composite SVG instead of splitting into 20 tiny containers!
- */
-function isVectorGraphic(node, depth = 0) {
+ */function isVectorGraphic(node, depth = 0) {
   if (!node) return false;
   if (VECTOR_TYPES.has(node.type)) return true;
   if (depth > 6) return false;
@@ -463,8 +446,7 @@ function isVectorGraphic(node, depth = 0) {
   });
 
   return allVectorCompatible && hasAtLeastOneVector;
-}
-function collectTextDescendants(node, depth = 0) {
+}function collectTextDescendants(node, depth = 0) {
   if (!node || depth > 4) return [];
   const found = [];
   for (const child of visibleChildren(node)) {
@@ -481,8 +463,7 @@ function collectTextDescendants(node, depth = 0) {
  * Layer 1: Explicit plugin override (`node.getPluginData('f2e-widget')`)
  * Layer 2: Bracket tag `[btn]`, `[form]` or token naming convention
  * Layer 3: Structural Heuristics
- */
-function resolveWidget(node) {
+ */function resolveWidget(node) {
   if (!node) return { widget: 'container', source: 'heuristic' };
 
   // 1. Explicit Override via UI Tagging
@@ -727,12 +708,10 @@ function isIconListNode(node, kids) {
  *    Like UIChemy's Layout Optimizer, converts non-auto-layout frames/groups on the Figma canvas into real
  *    Figma Auto-Layout frames and groups scattered vector paths into clean Icon Frames.
  */
-
 /**
  * Infers Flexbox or Grid layout parameters from child coordinates (x, y, width, height)
  * when `node.layoutMode === 'NONE'` or `node.type === 'GROUP'`.
- */
-function inferVirtualLayout(node) {
+ */function inferVirtualLayout(node) {
   const nodeW = Math.round(Number(node.width) || 0);
   const nodeH = Math.round(Number(node.height) || 0);
   const kids = visibleChildren(node);
@@ -921,8 +900,7 @@ function inferCrossAlign(items, posKey, centerKey, sizeKey) {
 /**
  * Mutates the selected Figma nodes on the canvas to apply real Figma Auto Layout
  * where missing, without breaking visual appearance.
- */
-function fixAndOptimizeCanvasSelection(selection) {
+ */function fixAndOptimizeCanvasSelection(selection) {
   let convertedFrames = 0;
   let taggedIcons = 0;
 
@@ -988,9 +966,6 @@ function fixAndOptimizeCanvasSelection(selection) {
  * - Exports Vector/Icon/Logo groups as clean inline SVG strings + SHA-256 hash
  * - Exports Image nodes as PNG/JPG (1x/2x) + Base64 & SHA-256 hash
  */
-
-
-
 const WEIGHT_MAP = {
   thin: '100',
   hairline: '100',
@@ -1010,8 +985,7 @@ const WEIGHT_MAP = {
   heavy: '900',
 };
 
-/** Safe number coercion that never throws on `Symbol(figma.mixed)` */
-function safeNum(val, fallback = 0) {
+/** Safe number coercion that never throws on `Symbol(figma.mixed)` */function safeNum(val, fallback = 0) {
   if (typeof val === 'number' && Number.isFinite(val)) return val;
   if (typeof val === 'string') {
     const n = Number(val);
@@ -1020,17 +994,14 @@ function safeNum(val, fallback = 0) {
   return fallback;
 }
 
-/** Safe string coercion that never throws on `Symbol(figma.mixed)` */
-function safeStr(val, fallback = '') {
+/** Safe string coercion that never throws on `Symbol(figma.mixed)` */function safeStr(val, fallback = '') {
   if (typeof val === 'string') return val;
   if (typeof val === 'number') return String(val);
   return fallback;
-}
-function fontWeightOf(styleName) {
+}function fontWeightOf(styleName) {
   const key = safeStr(styleName, '').toLowerCase().replace(/[\s_-]|italic|oblique/g, '');
   return WEIGHT_MAP[key] || '400';
-}
-function rgbToHex(color, alpha = 1) {
+}function rgbToHex(color, alpha = 1) {
   if (!color || typeof color !== 'object') return '#000000';
   const r = Math.round(Math.max(0, Math.min(1, safeNum(color.r, 0))) * 255);
   const g = Math.round(Math.max(0, Math.min(1, safeNum(color.g, 0))) * 255);
@@ -1040,16 +1011,14 @@ function rgbToHex(color, alpha = 1) {
     return `rgba(${r}, ${g}, ${b}, ${Math.round(a * 100) / 100})`;
   }
   return `#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
-}
-function extractSolidColor(paints) {
+}function extractSolidColor(paints) {
   if (!Array.isArray(paints)) return null;
   const paint = [...paints].reverse().find(
     (item) => item && item.type === 'SOLID' && item.visible !== false && safeNum(item.opacity, 1) > 0
   );
   if (!paint || !paint.color) return null;
   return rgbToHex(paint.color, safeNum(paint.opacity, 1));
-}
-function extractGradient(paints) {
+}function extractGradient(paints) {
   if (!Array.isArray(paints)) return null;
   const paint = [...paints].reverse().find(
     (item) => item && safeStr(item.type).startsWith('GRADIENT_') && item.visible !== false && safeNum(item.opacity, 1) > 0
@@ -1076,8 +1045,7 @@ function extractGradient(paints) {
     stop2: Math.round(safeNum(stop1.position, 1) * 100),
     angle,
   };
-}
-function extractLayout(node, parentNode = null) {
+}function extractLayout(node, parentNode = null) {
   const width = Math.round(safeNum(node.width, 0));
   const height = Math.round(safeNum(node.height, 0));
   const x = Math.round(safeNum(node.x, 0));
@@ -1160,8 +1128,7 @@ function extractLayout(node, parentNode = null) {
   }
 
   return layout;
-}
-function extractStyle(node) {
+}function extractStyle(node) {
   const style = {};
 
   if (node.type !== 'TEXT') {
@@ -1242,8 +1209,7 @@ function extractStyle(node) {
   }
 
   return style;
-}
-function extractTypography(node) {
+}function extractTypography(node) {
   if (!node) return null;
   const characters = safeStr(node.characters, '');
 
@@ -1326,8 +1292,7 @@ function extractTypography(node) {
   if (color) text.color = color;
 
   return text;
-}
-function extractLink(node) {
+}function extractLink(node) {
   const reactions = Array.isArray(node && node.reactions) ? node.reactions : [];
   for (const reaction of reactions) {
     const action = (reaction && reaction.action) || (Array.isArray(reaction && reaction.actions) ? reaction.actions[0] : null);
@@ -1336,8 +1301,7 @@ function extractLink(node) {
     }
   }
   return null;
-}
-function extractButtonIcon(node) {
+}function extractButtonIcon(node) {
   if (!node || !Array.isArray(node.children)) return null;
   const kids = node.children.filter((c) => c && c.visible !== false);
   const textChild = kids.find((c) => c.type === 'TEXT');
@@ -1388,8 +1352,7 @@ function extractButtonIcon(node) {
     library: 'fa-solid',
     align,
   };
-}
-function captureResponsiveTree(rootNode) {
+}function captureResponsiveTree(rootNode) {
   const walk = (node, path = [], parent = null) => {
     const kids = visibleChildren(node);
     const name = safeStr(node.name).trim();
@@ -1406,8 +1369,7 @@ function captureResponsiveTree(rootNode) {
     };
   };
   return walk(rootNode, [], null);
-}
-function matchResponsiveOverride(capturedTree, pathNames, expectedType) {
+}function matchResponsiveOverride(capturedTree, pathNames, expectedType) {
   if (!capturedTree) return null;
   let current = capturedTree;
   for (const seg of pathNames) {
@@ -1428,8 +1390,7 @@ function matchResponsiveOverride(capturedTree, pathNames, expectedType) {
 
 /**
  * Apply full Dev Mode CSS from Figma (node.getCSSAsync()) to an IR entry
- */
-function applyDevModeCSSToNode(entry, devModeCSS) {
+ */function applyDevModeCSSToNode(entry, devModeCSS) {
   if (!entry || !devModeCSS || typeof devModeCSS !== 'object') return;
   entry.devModeCSS = devModeCSS;
   entry.devModeCSSString = Object.entries(devModeCSS)
@@ -1576,8 +1537,7 @@ function applyDevModeCSSToNode(entry, devModeCSS) {
 
 /**
  * Full extraction of selected Figma nodes into the F2E Intermediate Representation (IR)
- */
-async function extractDesignSelection(selection, options = {}) {
+ */async function extractDesignSelection(selection, options = {}) {
   const {
     fileKey = 'local-figma',
     imageFormat = 'PNG',
@@ -1951,10 +1911,43 @@ async function extractDesignSelection(selection, options = {}) {
   };
 
   return { document, assetPayloads };
+}function detectColorRole(name) {
+  const lower = safeStr(name).toLowerCase();
+  if (/(^|[-_/ ])(primary|brand|main)([-_/ ]|$)/i.test(lower)) return 'primary';
+  if (/(^|[-_/ ])(secondary)([-_/ ]|$)/i.test(lower)) return 'secondary';
+  if (/(^|[-_/ ])(text|body|content|foreground)([-_/ ]|$)/i.test(lower)) return 'text';
+  if (/(^|[-_/ ])(accent|highlight)([-_/ ]|$)/i.test(lower)) return 'accent';
+  return 'custom';
+}function detectTypographyRole(name) {
+  const lower = safeStr(name).toLowerCase();
+  if (/^h1\b|heading[\s_/-]?1/i.test(lower)) return 'h1';
+  if (/^h2\b|heading[\s_/-]?2/i.test(lower)) return 'h2';
+  if (/^h3\b|heading[\s_/-]?3/i.test(lower)) return 'h3';
+  if (/^h4\b|heading[\s_/-]?4/i.test(lower)) return 'h4';
+  if (/^h5\b|heading[\s_/-]?5/i.test(lower)) return 'h5';
+  if (/^h6\b|heading[\s_/-]?6/i.test(lower)) return 'h6';
+  if (/body|paragraph|regular|base/i.test(lower)) return 'body';
+  if (/link|anchor/i.test(lower)) return 'link';
+  return 'custom';
 }
-async function extractLocalDesignSystem(figmaApi) {
+
+function findNodeCandidate(nodes, predicate, depth = 0) {
+  if (!Array.isArray(nodes) || depth > 5) return null;
+  for (const n of nodes) {
+    if (!n || n.visible === false) continue;
+    if (predicate(n)) return n;
+    if (Array.isArray(n.children)) {
+      const found = findNodeCandidate(n.children, predicate, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}async function extractLocalDesignSystem(figmaApi, activeSelection = null) {
   const colors = [];
   const typography = [];
+  const selection = Array.isArray(activeSelection)
+    ? activeSelection
+    : (figmaApi && figmaApi.currentPage && Array.isArray(figmaApi.currentPage.selection) ? figmaApi.currentPage.selection : []);
 
   try {
     if (figmaApi && figmaApi.variables && typeof figmaApi.variables.getLocalVariablesAsync === 'function') {
@@ -1969,7 +1962,13 @@ async function extractLocalDesignSystem(figmaApi) {
       for (const v of colorVars || []) {
         const val = v.valuesByMode ? v.valuesByMode[defaultModes[v.variableCollectionId]] : null;
         if (val && typeof val === 'object' && val.type !== 'VARIABLE_ALIAS' && typeof val.r === 'number') {
-          colors.push({ name: safeStr(v.name, 'Color'), value: rgbToHex(val, val.a !== undefined ? val.a : 1) });
+          const hex = rgbToHex(val, val.a !== undefined ? val.a : 1);
+          const name = safeStr(v.name, 'Color');
+          colors.push({
+            name,
+            value: hex,
+            role: detectColorRole(name),
+          });
         }
       }
     }
@@ -1980,7 +1979,14 @@ async function extractLocalDesignSystem(figmaApi) {
       const paintStyles = await figmaApi.getLocalPaintStylesAsync();
       for (const ps of paintStyles || []) {
         const hex = extractSolidColor(ps.paints);
-        if (hex) colors.push({ name: safeStr(ps.name, 'Style'), value: hex });
+        if (hex) {
+          const name = safeStr(ps.name, 'Style');
+          colors.push({
+            name,
+            value: hex,
+            role: detectColorRole(name),
+          });
+        }
       }
     }
   } catch (e) { }
@@ -1990,8 +1996,10 @@ async function extractLocalDesignSystem(figmaApi) {
       const textStyles = await figmaApi.getLocalTextStylesAsync();
       for (const ts of textStyles || []) {
         const fn = ts.fontName && typeof ts.fontName === 'object' ? ts.fontName : null;
+        const name = safeStr(ts.name, 'Text Style');
         const entry = {
-          name: safeStr(ts.name, 'Text Style'),
+          name,
+          role: detectTypographyRole(name),
           fontSize: Math.round(safeNum(ts.fontSize, 16)),
           fontFamily: fn ? safeStr(fn.family, 'Inter') : 'Inter',
           fontWeight: fn ? fontWeightOf(fn.style) : '400',
@@ -2010,9 +2018,141 @@ async function extractLocalDesignSystem(figmaApi) {
     }
   } catch (e) { }
 
-  return { colors, typography };
-}
-function findFirstVisualDescendant(node, depth = 0) {
+  // Extract Theme Styles (Typography H1-H6, Buttons, Form Fields)
+  const themeStyles = {
+    typography: {},
+    buttons: null,
+    formFields: null,
+  };
+
+  for (const t of typography) {
+    if (t.role && t.role !== 'custom' && !themeStyles.typography[t.role]) {
+      themeStyles.typography[t.role] = {
+        fontFamily: t.fontFamily,
+        fontSize: t.fontSize,
+        fontWeight: t.fontWeight,
+        lineHeight: t.lineHeight,
+        lineHeightUnit: t.lineHeightUnit,
+        letterSpacing: t.letterSpacing,
+      };
+    }
+  }
+
+  // Find button candidate in active selection
+  const btnNode = findNodeCandidate(selection, (n) => {
+    const name = safeStr(n.name).toLowerCase();
+    const isTaggedBtn = typeof n.getPluginData === 'function' && n.getPluginData('f2e-widget') === 'button';
+    const isNamedBtn = name.includes('button') || name.includes('btn') || name.includes('cta');
+    return (isTaggedBtn || isNamedBtn) && (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE');
+  });
+
+  if (btnNode) {
+    const bg = extractSolidColor(btnNode.fills) || '#2563EB';
+    const textChild = findNodeCandidate(btnNode.children, (c) => c.type === 'TEXT');
+    const textColor = textChild ? (extractSolidColor(textChild.fills) || '#FFFFFF') : '#FFFFFF';
+    const textFn = textChild && textChild.fontName ? textChild.fontName : null;
+
+    const r = typeof btnNode.cornerRadius === 'number'
+      ? { top: btnNode.cornerRadius, right: btnNode.cornerRadius, bottom: btnNode.cornerRadius, left: btnNode.cornerRadius }
+      : {
+        top: safeNum(btnNode.topLeftRadius, 6),
+        right: safeNum(btnNode.topRightRadius, 6),
+        bottom: safeNum(btnNode.bottomRightRadius, 6),
+        left: safeNum(btnNode.bottomLeftRadius, 6),
+      };
+
+    const pad = {
+      top: safeNum(btnNode.paddingTop, 12),
+      right: safeNum(btnNode.paddingRight, 20),
+      bottom: safeNum(btnNode.paddingBottom, 12),
+      left: safeNum(btnNode.paddingLeft, 20),
+    };
+
+    themeStyles.buttons = {
+      backgroundColor: bg,
+      textColor,
+      typography: {
+        fontFamily: textFn ? safeStr(textFn.family, 'Inter') : 'Inter',
+        fontSize: textChild && typeof textChild.fontSize === 'number' ? Math.round(textChild.fontSize) : 15,
+        fontWeight: textFn ? fontWeightOf(textFn.style) : '500',
+      },
+      borderRadius: r,
+      padding: pad,
+    };
+  }
+
+  // Find input / form field candidate in active selection
+  const inputNode = findNodeCandidate(selection, (n) => {
+    const name = safeStr(n.name).toLowerCase();
+    const isTaggedForm = typeof n.getPluginData === 'function' && n.getPluginData('f2e-widget') === 'form';
+    const isNamedInput = name.includes('input') || name.includes('field') || name.includes('text-field');
+    return (isTaggedForm || isNamedInput) && (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE');
+  });
+
+  if (inputNode) {
+    const bg = extractSolidColor(inputNode.fills) || '#FFFFFF';
+    const border = extractSolidColor(inputNode.strokes) || '#E2E8F0';
+    const textChild = findNodeCandidate(inputNode.children, (c) => c.type === 'TEXT');
+    const textColor = textChild ? (extractSolidColor(textChild.fills) || '#1E293B') : '#1E293B';
+    const textFn = textChild && textChild.fontName ? textChild.fontName : null;
+
+    const r = typeof inputNode.cornerRadius === 'number'
+      ? { top: inputNode.cornerRadius, right: inputNode.cornerRadius, bottom: inputNode.cornerRadius, left: inputNode.cornerRadius }
+      : {
+        top: safeNum(inputNode.topLeftRadius, 6),
+        right: safeNum(inputNode.topRightRadius, 6),
+        bottom: safeNum(inputNode.bottomRightRadius, 6),
+        left: safeNum(inputNode.bottomLeftRadius, 6),
+      };
+
+    const pad = {
+      top: safeNum(inputNode.paddingTop, 10),
+      right: safeNum(inputNode.paddingRight, 14),
+      bottom: safeNum(inputNode.paddingBottom, 10),
+      left: safeNum(inputNode.paddingLeft, 14),
+    };
+
+    themeStyles.formFields = {
+      backgroundColor: bg,
+      borderColor: border,
+      textColor,
+      typography: {
+        fontFamily: textFn ? safeStr(textFn.family, 'Inter') : 'Inter',
+        fontSize: textChild && typeof textChild.fontSize === 'number' ? Math.round(textChild.fontSize) : 14,
+        fontWeight: textFn ? fontWeightOf(textFn.style) : '400',
+      },
+      borderRadius: r,
+      padding: pad,
+    };
+  }
+
+  // Extract General Settings (Layout width, background color)
+  const settings = {
+    layout: {},
+    background: {},
+  };
+
+  const rootNode = selection[0] || null;
+  if (rootNode && typeof rootNode.width === 'number') {
+    const rawW = Math.round(rootNode.width);
+    let containerWidth = 1200;
+    if (rawW >= 960 && rawW <= 1600) {
+      containerWidth = rawW;
+    } else if (rawW > 1600) {
+      containerWidth = 1440;
+    }
+    settings.layout.containerWidth = containerWidth;
+  }
+
+  if (rootNode && Array.isArray(rootNode.fills)) {
+    const bg = extractSolidColor(rootNode.fills);
+    if (bg) {
+      settings.background.color = bg;
+    }
+  }
+
+  return { colors, typography, themeStyles, settings };
+}function findFirstVisualDescendant(node, depth = 0) {
   if (!node || depth > 4) return null;
   const kids = visibleChildren(node);
   for (const child of kids) {
@@ -2055,15 +2195,13 @@ function findFirstVisualDescendant(node, depth = 0) {
  *    when pasted via Clipboard (`Ctrl+V`) or when no WP attachment ID exists yet, so multi-color SVG paths render
  *    with 100% visual accuracy instead of falling back to a generic FontAwesome star!
  */
-
 const FLEX_ALIGN_MAP = {
   MIN: 'flex-start',
   CENTER: 'center',
   MAX: 'flex-end',
   SPACE_BETWEEN: 'space-between',
   BASELINE: 'baseline',
-};
-function compileElementorV3(doc, options = {}) {
+};function compileElementorV3(doc, options = {}) {
   const { attachmentMap = {} } = options;
   const nodes = doc.nodes || {};
   const usedIds = new Set();
@@ -2377,16 +2515,14 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
       settings._element_width = 'inherit';
     }
   }
-}
-function compileElementorClipboard(doc, options = {}) {
+}function compileElementorClipboard(doc, options = {}) {
   const v3 = compileElementorV3(doc, options);
   return {
     type: 'elementor',
     siteurl: options.siteUrl || 'https://localhost/wp-json/',
     elements: v3.content,
   };
-}
-function compileElementorV4(doc) {
+}function compileElementorV4(doc) {
   const nodes = doc.nodes || {};
 
   const buildV4Node = (nodeId) => {
@@ -3999,11 +4135,6 @@ function escapeHtml(str) {
  * F2E Bridge — Figma Plugin Main Thread (Sandbox)
  * Runs inside Figma Desktop (100% Free, Zero REST API limits).
  */
-
-
-
-
-
 const STORAGE_SITES_KEY = 'f2e.sites.v1';
 const STORAGE_PREFS_KEY = 'f2e.prefs.v1';
 const STORAGE_AI_KEY = 'f2e.ai.config.v1';
@@ -4470,25 +4601,63 @@ async function handleLivePushToWordPress(payload) {
   await handleLoadSiteTargets(site.siteUrl);
 }
 
-async function handleSyncDesignSystemOnly(siteUrl) {
+async function handleScanDesignSystemPreview() {
+  postStatus('Đang quét Color Variables, Text Styles & Theme Styles từ Figma…');
+  const tokens = await extractLocalDesignSystem(figma, figma.currentPage.selection);
+  figma.ui.postMessage({
+    type: 'design-system-preview',
+    tokens,
+  });
+  postStatus(`Đã tìm thấy ${tokens.colors.length} màu, ${tokens.typography.length} font`, { done: true });
+}
+
+async function handleSyncDesignSystemOnly(siteUrl, options = {}) {
   const stored = (await figma.clientStorage.getAsync(STORAGE_SITES_KEY)) || [];
   const site = Array.isArray(stored) ? stored.find((s) => s.siteUrl === siteUrl) : null;
   if (!site) {
     throw new Error('Vui lòng kết nối website WordPress trước.');
   }
-  postStatus('Đang đọc Color Variables & Text Styles từ Figma…');
-  const tokens = await extractLocalDesignSystem(figma);
-  if (tokens.colors.length === 0 && tokens.typography.length === 0) {
+  postStatus('Đang trích xuất Design System & Theme Styles từ Figma…');
+  const tokens = await extractLocalDesignSystem(figma, figma.currentPage.selection);
+  if (tokens.colors.length === 0 && tokens.typography.length === 0 && !tokens.themeStyles?.buttons && !tokens.settings?.layout?.containerWidth) {
     throw new Error('File Figma này chưa khai báo Local Color Variables hoặc Text Styles.');
   }
-  postStatus(`Đang đồng bộ ${tokens.colors.length} màu và ${tokens.typography.length} kiểu chữ…`);
+
+  const payload = {
+    colors: options.syncColors !== false ? tokens.colors : [],
+    typography: options.syncTypography !== false ? tokens.typography : [],
+    themeStyles: options.syncThemeStyles !== false ? tokens.themeStyles : {},
+    settings: options.syncLayout !== false ? tokens.settings : {},
+  };
+
+  const colorCount = payload.colors.length;
+  const typoCount = payload.typography.length;
+  const themeItems = Object.keys(payload.themeStyles.typography || {}).length + (payload.themeStyles.buttons ? 1 : 0);
+
+  postStatus(`Đang đẩy ${colorCount} màu, ${typoCount} font, ${themeItems} theme styles vào Site Settings Kit…`);
   const res = await wpRequest(site.siteUrl, site.token, '/design-system', {
     method: 'POST',
-    body: JSON.stringify(tokens),
+    body: JSON.stringify(payload),
   });
-  const newColors = (res && res.colors && res.colors.created && res.colors.created.length) || 0;
-  const newFonts = (res && res.typography && res.typography.created && res.typography.created.length) || 0;
-  announce(`Đã đồng bộ Design System! (Màu mới: ${newColors}, Font mới: ${newFonts})`);
+
+  const rep = (res && res.data) || res || {};
+  const newColors = (rep.colors && rep.colors.created && rep.colors.created.length) || 0;
+  const newFonts = (rep.typography && rep.typography.created && rep.typography.created.length) || 0;
+  const updatedStyles = (rep.themeStyles && rep.themeStyles.updated && rep.themeStyles.updated.join(', ')) || '';
+  const updatedSettings = (rep.settings && rep.settings.updated && rep.settings.updated.join(', ')) || '';
+
+  const details = [];
+  if (colorCount) details.push(`${colorCount} màu (${newColors} mới)`);
+  if (typoCount) details.push(`${typoCount} font (${newFonts} mới)`);
+  if (updatedStyles) details.push(`Theme: ${updatedStyles}`);
+  if (updatedSettings) details.push(updatedSettings);
+
+  announce(`Đã đồng bộ toàn bộ Site Settings thành công! [${details.join(' | ')}]`);
+
+  figma.ui.postMessage({
+    type: 'design-system-preview',
+    tokens,
+  });
 }
 
 function slugify(text) {
@@ -4600,6 +4769,7 @@ figma.ui.onmessage = async (msg) => {
     'verify-site',
     'live-push',
     'sync-design-system',
+    'scan-design-system',
     'export-action',
     'fix-auto-layout',
     'request-ai-scan-payload',
@@ -4651,7 +4821,10 @@ figma.ui.onmessage = async (msg) => {
         await handleLivePushToWordPress(msg.payload);
         break;
       case 'sync-design-system':
-        await handleSyncDesignSystemOnly(msg.siteUrl);
+        await handleSyncDesignSystemOnly(msg.siteUrl, msg.options || {});
+        break;
+      case 'scan-design-system':
+        await handleScanDesignSystemPreview();
         break;
       case 'export-action':
         await handleCompileForClipboardOrDownload(msg.payload);

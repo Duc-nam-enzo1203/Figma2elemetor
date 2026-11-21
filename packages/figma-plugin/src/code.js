@@ -491,25 +491,63 @@ async function handleLivePushToWordPress(payload) {
   await handleLoadSiteTargets(site.siteUrl);
 }
 
-async function handleSyncDesignSystemOnly(siteUrl) {
+async function handleScanDesignSystemPreview() {
+  postStatus('Đang quét Color Variables, Text Styles & Theme Styles từ Figma…');
+  const tokens = await extractLocalDesignSystem(figma, figma.currentPage.selection);
+  figma.ui.postMessage({
+    type: 'design-system-preview',
+    tokens,
+  });
+  postStatus(`Đã tìm thấy ${tokens.colors.length} màu, ${tokens.typography.length} font`, { done: true });
+}
+
+async function handleSyncDesignSystemOnly(siteUrl, options = {}) {
   const stored = (await figma.clientStorage.getAsync(STORAGE_SITES_KEY)) || [];
   const site = Array.isArray(stored) ? stored.find((s) => s.siteUrl === siteUrl) : null;
   if (!site) {
     throw new Error('Vui lòng kết nối website WordPress trước.');
   }
-  postStatus('Đang đọc Color Variables & Text Styles từ Figma…');
-  const tokens = await extractLocalDesignSystem(figma);
-  if (tokens.colors.length === 0 && tokens.typography.length === 0) {
+  postStatus('Đang trích xuất Design System & Theme Styles từ Figma…');
+  const tokens = await extractLocalDesignSystem(figma, figma.currentPage.selection);
+  if (tokens.colors.length === 0 && tokens.typography.length === 0 && !tokens.themeStyles?.buttons && !tokens.settings?.layout?.containerWidth) {
     throw new Error('File Figma này chưa khai báo Local Color Variables hoặc Text Styles.');
   }
-  postStatus(`Đang đồng bộ ${tokens.colors.length} màu và ${tokens.typography.length} kiểu chữ…`);
+
+  const payload = {
+    colors: options.syncColors !== false ? tokens.colors : [],
+    typography: options.syncTypography !== false ? tokens.typography : [],
+    themeStyles: options.syncThemeStyles !== false ? tokens.themeStyles : {},
+    settings: options.syncLayout !== false ? tokens.settings : {},
+  };
+
+  const colorCount = payload.colors.length;
+  const typoCount = payload.typography.length;
+  const themeItems = Object.keys(payload.themeStyles.typography || {}).length + (payload.themeStyles.buttons ? 1 : 0);
+
+  postStatus(`Đang đẩy ${colorCount} màu, ${typoCount} font, ${themeItems} theme styles vào Site Settings Kit…`);
   const res = await wpRequest(site.siteUrl, site.token, '/design-system', {
     method: 'POST',
-    body: JSON.stringify(tokens),
+    body: JSON.stringify(payload),
   });
-  const newColors = (res && res.colors && res.colors.created && res.colors.created.length) || 0;
-  const newFonts = (res && res.typography && res.typography.created && res.typography.created.length) || 0;
-  announce(`Đã đồng bộ Design System! (Màu mới: ${newColors}, Font mới: ${newFonts})`);
+
+  const rep = (res && res.data) || res || {};
+  const newColors = (rep.colors && rep.colors.created && rep.colors.created.length) || 0;
+  const newFonts = (rep.typography && rep.typography.created && rep.typography.created.length) || 0;
+  const updatedStyles = (rep.themeStyles && rep.themeStyles.updated && rep.themeStyles.updated.join(', ')) || '';
+  const updatedSettings = (rep.settings && rep.settings.updated && rep.settings.updated.join(', ')) || '';
+
+  const details = [];
+  if (colorCount) details.push(`${colorCount} màu (${newColors} mới)`);
+  if (typoCount) details.push(`${typoCount} font (${newFonts} mới)`);
+  if (updatedStyles) details.push(`Theme: ${updatedStyles}`);
+  if (updatedSettings) details.push(updatedSettings);
+
+  announce(`Đã đồng bộ toàn bộ Site Settings thành công! [${details.join(' | ')}]`);
+
+  figma.ui.postMessage({
+    type: 'design-system-preview',
+    tokens,
+  });
 }
 
 function slugify(text) {
@@ -621,6 +659,7 @@ figma.ui.onmessage = async (msg) => {
     'verify-site',
     'live-push',
     'sync-design-system',
+    'scan-design-system',
     'export-action',
     'fix-auto-layout',
     'request-ai-scan-payload',
@@ -672,7 +711,10 @@ figma.ui.onmessage = async (msg) => {
         await handleLivePushToWordPress(msg.payload);
         break;
       case 'sync-design-system':
-        await handleSyncDesignSystemOnly(msg.siteUrl);
+        await handleSyncDesignSystemOnly(msg.siteUrl, msg.options || {});
+        break;
+      case 'scan-design-system':
+        await handleScanDesignSystemPreview();
         break;
       case 'export-action':
         await handleCompileForClipboardOrDownload(msg.payload);

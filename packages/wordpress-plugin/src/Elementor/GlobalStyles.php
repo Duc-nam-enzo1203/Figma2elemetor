@@ -16,17 +16,31 @@ final class GlobalStyles
     /**
      * @param list<array<string,mixed>> $colors
      * @param list<array<string,mixed>> $typography
+     * @param array<string,mixed> $themeStyles
+     * @param array<string,mixed> $generalSettings
      * @return array<string,mixed>
      */
-    public function sync(array $colors, array $typography): array
+    public function sync(array $colors, array $typography, array $themeStyles = [], array $generalSettings = []): array
     {
         if (!function_exists('get_option') || !function_exists('update_post_meta')) {
-            return ['kitId' => 0, 'colors' => ['created' => [], 'updated' => []], 'typography' => ['created' => [], 'updated' => []]];
+            return [
+                'kitId' => 0,
+                'colors' => ['created' => [], 'updated' => []],
+                'typography' => ['created' => [], 'updated' => []],
+                'themeStyles' => [],
+                'settings' => [],
+            ];
         }
 
         $kitId = (int) get_option('elementor_active_kit', 0);
         if ($kitId <= 0) {
-            return ['kitId' => 0, 'colors' => ['created' => [], 'updated' => []], 'typography' => ['created' => [], 'updated' => []]];
+            return [
+                'kitId' => 0,
+                'colors' => ['created' => [], 'updated' => []],
+                'typography' => ['created' => [], 'updated' => []],
+                'themeStyles' => [],
+                'settings' => [],
+            ];
         }
 
         $settings = get_post_meta($kitId, self::KIT_META_KEY, true);
@@ -34,6 +48,8 @@ final class GlobalStyles
 
         $colorReport = $this->mergeColors($settings, $colors);
         $typoReport = $this->mergeTypography($settings, $typography);
+        $themeStyleReport = $this->mergeThemeStyles($settings, $themeStyles);
+        $settingsReport = $this->mergeGeneralSettings($settings, $generalSettings);
 
         update_post_meta($kitId, self::KIT_META_KEY, $settings);
         $this->clearElementorCache();
@@ -42,6 +58,8 @@ final class GlobalStyles
             'kitId' => $kitId,
             'colors' => $colorReport,
             'typography' => $typoReport,
+            'themeStyles' => $themeStyleReport,
+            'settings' => $settingsReport,
         ];
     }
 
@@ -153,6 +171,36 @@ final class GlobalStyles
         }
 
         $settings['custom_colors'] = array_values($custom);
+
+        // Map system colors (Primary, Secondary, Text, Accent) if recognized
+        $system = is_array($settings['system_colors'] ?? null) ? $settings['system_colors'] : [];
+        $knownSystemIds = ['primary', 'secondary', 'text', 'accent'];
+        foreach ($colors as $c) {
+            $role = strtolower(trim((string) ($c['role'] ?? '')));
+            if (in_array($role, $knownSystemIds, true)) {
+                $val = self::normalizeColorKey((string) ($c['value'] ?? ''));
+                $matchedSys = false;
+                foreach ($system as &$sysItem) {
+                    if (is_array($sysItem) && ($sysItem['_id'] ?? '') === $role) {
+                        $sysItem['color'] = $val;
+                        $matchedSys = true;
+                    }
+                }
+                unset($sysItem);
+                if (!$matchedSys) {
+                    $system[] = [
+                        '_id' => $role,
+                        'title' => ucfirst($role),
+                        'color' => $val,
+                    ];
+                }
+                $updated[] = "System " . ucfirst($role);
+            }
+        }
+        if (!empty($system)) {
+            $settings['system_colors'] = $system;
+        }
+
         return ['created' => $created, 'updated' => $updated, 'total' => count($custom)];
     }
 
@@ -217,6 +265,184 @@ final class GlobalStyles
 
         $settings['custom_typography'] = array_values($custom);
         return ['created' => $created, 'updated' => $updated, 'total' => count($custom)];
+    }
+
+    /**
+     * Synchronizes Theme Styles (Typography H1-H6/Body/Link, Buttons, Form Fields) into Active Kit.
+     *
+     * @param array<string,mixed> $settings
+     * @param array<string,mixed> $themeStyles
+     * @return array<string,mixed>
+     */
+    private function mergeThemeStyles(array &$settings, array $themeStyles): array
+    {
+        $updated = [];
+
+        // 1. Theme Style: Typography (H1-H6, Body, Link)
+        $typo = is_array($themeStyles['typography'] ?? null) ? $themeStyles['typography'] : [];
+        foreach (['body', 'link', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6'] as $tag) {
+            $item = $typo[$tag] ?? null;
+            if (!is_array($item)) {
+                continue;
+            }
+            $prefix = "{$tag}_typography_";
+            $settings[$prefix . 'typography'] = 'custom';
+            if (!empty($item['fontFamily'])) {
+                $settings[$prefix . 'font_family'] = (string) $item['fontFamily'];
+            }
+            if (isset($item['fontSize']) && is_numeric($item['fontSize'])) {
+                $settings[$prefix . 'font_size'] = [
+                    'unit' => 'px',
+                    'size' => (float) $item['fontSize'],
+                    'sizes' => [],
+                ];
+            }
+            if (!empty($item['fontWeight'])) {
+                $settings[$prefix . 'font_weight'] = (string) $item['fontWeight'];
+            }
+            if (isset($item['lineHeight']) && is_numeric($item['lineHeight'])) {
+                $settings[$prefix . 'line_height'] = [
+                    'unit' => (string) ($item['lineHeightUnit'] ?? 'px'),
+                    'size' => (float) $item['lineHeight'],
+                    'sizes' => [],
+                ];
+            }
+            if (!empty($item['color'])) {
+                $colorKey = ($tag === 'body') ? 'body_color' : (($tag === 'link') ? 'link_color' : "{$tag}_color");
+                $settings[$colorKey] = self::normalizeColorKey((string) $item['color']);
+            }
+            $updated[] = strtoupper($tag);
+        }
+
+        // 2. Theme Style: Buttons
+        $btn = is_array($themeStyles['buttons'] ?? null) ? $themeStyles['buttons'] : [];
+        if (!empty($btn)) {
+            $settings['button_typography_typography'] = 'custom';
+            if (!empty($btn['typography']['fontFamily'])) {
+                $settings['button_typography_font_family'] = (string) $btn['typography']['fontFamily'];
+            }
+            if (isset($btn['typography']['fontSize']) && is_numeric($btn['typography']['fontSize'])) {
+                $settings['button_typography_font_size'] = [
+                    'unit' => 'px',
+                    'size' => (float) $btn['typography']['fontSize'],
+                    'sizes' => [],
+                ];
+            }
+            if (!empty($btn['typography']['fontWeight'])) {
+                $settings['button_typography_font_weight'] = (string) $btn['typography']['fontWeight'];
+            }
+            if (!empty($btn['textColor'])) {
+                $settings['button_text_color'] = self::normalizeColorKey((string) $btn['textColor']);
+            }
+            if (!empty($btn['backgroundColor'])) {
+                $settings['button_background_color'] = self::normalizeColorKey((string) $btn['backgroundColor']);
+            }
+            if (isset($btn['borderRadius']) && is_array($btn['borderRadius'])) {
+                $r = $btn['borderRadius'];
+                $settings['button_border_radius'] = [
+                    'unit' => 'px',
+                    'top' => (float) ($r['top'] ?? 0),
+                    'right' => (float) ($r['right'] ?? 0),
+                    'bottom' => (float) ($r['bottom'] ?? 0),
+                    'left' => (float) ($r['left'] ?? 0),
+                    'isLinked' => true,
+                ];
+            }
+            if (isset($btn['padding']) && is_array($btn['padding'])) {
+                $p = $btn['padding'];
+                $settings['button_padding'] = [
+                    'unit' => 'px',
+                    'top' => (float) ($p['top'] ?? 0),
+                    'right' => (float) ($p['right'] ?? 0),
+                    'bottom' => (float) ($p['bottom'] ?? 0),
+                    'left' => (float) ($p['left'] ?? 0),
+                    'isLinked' => false,
+                ];
+            }
+            $updated[] = 'Buttons';
+        }
+
+        // 3. Theme Style: Form Fields
+        $fields = is_array($themeStyles['formFields'] ?? null) ? $themeStyles['formFields'] : [];
+        if (!empty($fields)) {
+            $settings['form_fields_typography_typography'] = 'custom';
+            if (!empty($fields['typography']['fontFamily'])) {
+                $settings['form_fields_typography_font_family'] = (string) $fields['typography']['fontFamily'];
+            }
+            if (isset($fields['typography']['fontSize']) && is_numeric($fields['typography']['fontSize'])) {
+                $settings['form_fields_typography_font_size'] = [
+                    'unit' => 'px',
+                    'size' => (float) $fields['typography']['fontSize'],
+                    'sizes' => [],
+                ];
+            }
+            if (!empty($fields['textColor'])) {
+                $settings['form_fields_text_color'] = self::normalizeColorKey((string) $fields['textColor']);
+            }
+            if (!empty($fields['backgroundColor'])) {
+                $settings['form_fields_background_color'] = self::normalizeColorKey((string) $fields['backgroundColor']);
+            }
+            if (!empty($fields['borderColor'])) {
+                $settings['form_fields_border_color'] = self::normalizeColorKey((string) $fields['borderColor']);
+            }
+            if (isset($fields['borderRadius']) && is_array($fields['borderRadius'])) {
+                $r = $fields['borderRadius'];
+                $settings['form_fields_border_radius'] = [
+                    'unit' => 'px',
+                    'top' => (float) ($r['top'] ?? 0),
+                    'right' => (float) ($r['right'] ?? 0),
+                    'bottom' => (float) ($r['bottom'] ?? 0),
+                    'left' => (float) ($r['left'] ?? 0),
+                    'isLinked' => true,
+                ];
+            }
+            if (isset($fields['padding']) && is_array($fields['padding'])) {
+                $p = $fields['padding'];
+                $settings['form_fields_padding'] = [
+                    'unit' => 'px',
+                    'top' => (float) ($p['top'] ?? 0),
+                    'right' => (float) ($p['right'] ?? 0),
+                    'bottom' => (float) ($p['bottom'] ?? 0),
+                    'left' => (float) ($p['left'] ?? 0),
+                    'isLinked' => false,
+                ];
+            }
+            $updated[] = 'Form Fields';
+        }
+
+        return ['updated' => $updated];
+    }
+
+    /**
+     * Synchronizes General Settings (Layout width, background color) into Active Kit.
+     *
+     * @param array<string,mixed> $settings
+     * @param array<string,mixed> $general
+     * @return array<string,mixed>
+     */
+    private function mergeGeneralSettings(array &$settings, array $general): array
+    {
+        $updated = [];
+        $layout = is_array($general['layout'] ?? null) ? $general['layout'] : [];
+        if (isset($layout['containerWidth']) && is_numeric($layout['containerWidth'])) {
+            $w = (int) $layout['containerWidth'];
+            if ($w >= 600 && $w <= 2560) {
+                $settings['container_width'] = [
+                    'unit' => 'px',
+                    'size' => $w,
+                    'sizes' => [],
+                ];
+                $updated[] = "Container Width ({$w}px)";
+            }
+        }
+
+        $bg = is_array($general['background'] ?? null) ? $general['background'] : [];
+        if (!empty($bg['color'])) {
+            $settings['site_background_color'] = self::normalizeColorKey((string) $bg['color']);
+            $updated[] = 'Site Background Color';
+        }
+
+        return ['updated' => $updated];
     }
 
     private function slugify(string $title): string

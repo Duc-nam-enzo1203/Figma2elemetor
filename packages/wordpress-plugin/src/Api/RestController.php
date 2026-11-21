@@ -127,8 +127,10 @@ final class RestController
         $params = method_exists($request, 'get_json_params') ? (array) $request->get_json_params() : [];
         $colors = is_array($params['colors'] ?? null) ? $params['colors'] : [];
         $typography = is_array($params['typography'] ?? null) ? $params['typography'] : [];
+        $themeStyles = is_array($params['themeStyles'] ?? null) ? $params['themeStyles'] : [];
+        $generalSettings = is_array($params['settings'] ?? null) ? $params['settings'] : [];
 
-        $report = $this->globalStyles->sync($colors, $typography);
+        $report = $this->globalStyles->sync($colors, $typography, $themeStyles, $generalSettings);
         return rest_ensure_response([
             'success' => true,
             'data' => $report,
@@ -176,8 +178,10 @@ final class RestController
             $tokens = $payload['document']['tokens'];
             $colors = is_array($tokens['colors'] ?? null) ? $tokens['colors'] : [];
             $typo = is_array($tokens['typography'] ?? null) ? $tokens['typography'] : [];
-            if ($colors !== [] || $typo !== []) {
-                $this->globalStyles->sync($colors, $typo);
+            $themeStyles = is_array($tokens['themeStyles'] ?? null) ? $tokens['themeStyles'] : [];
+            $generalSettings = is_array($tokens['settings'] ?? null) ? $tokens['settings'] : [];
+            if ($colors !== [] || $typo !== [] || $themeStyles !== [] || $generalSettings !== []) {
+                $this->globalStyles->sync($colors, $typo, $themeStyles, $generalSettings);
             }
         }
 

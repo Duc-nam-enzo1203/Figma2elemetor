@@ -892,5 +892,136 @@ test('Button Icon & Background Style: Button with vector arrow extracts icon and
   assert.equal(btnWidget.settings.icon_indent.size, 8);
 });
 
+test('Design System & Site Settings Extraction: Colors, Typography roles, Theme Styles & Layout', async () => {
+  const { extractLocalDesignSystem, detectColorRole, detectTypographyRole } = await import('../src/extraction/extractor.js');
+
+  // 1. Role detection
+  assert.equal(detectColorRole('Primary Brand Color'), 'primary');
+  assert.equal(detectColorRole('Secondary-600'), 'secondary');
+  assert.equal(detectColorRole('Text/Dark'), 'text');
+  assert.equal(detectColorRole('Accent Coral'), 'accent');
+  assert.equal(detectColorRole('Neutral Gray 100'), 'custom');
+
+  assert.equal(detectTypographyRole('H1 / Hero Heading'), 'h1');
+  assert.equal(detectTypographyRole('Heading 2'), 'h2');
+  assert.equal(detectTypographyRole('Body Regular 16'), 'body');
+  assert.equal(detectTypographyRole('Link / Underline'), 'link');
+  assert.equal(detectTypographyRole('Caption Small'), 'custom');
+
+  // 2. Mock Figma API with Variables, Paint Styles, and Text Styles
+  const mockFigma = {
+    variables: {
+      getLocalVariablesAsync: async (type) => {
+        if (type === 'COLOR') {
+          return [
+            {
+              id: 'var:1',
+              name: 'brand-primary',
+              variableCollectionId: 'col:1',
+              valuesByMode: { 'mode:1': { r: 0.145, g: 0.388, b: 0.921, a: 1 } },
+            },
+            {
+              id: 'var:2',
+              name: 'neutral-text',
+              variableCollectionId: 'col:1',
+              valuesByMode: { 'mode:1': { r: 0.05, g: 0.05, b: 0.06, a: 1 } },
+            },
+          ];
+        }
+        return [];
+      },
+      getLocalVariableCollectionsAsync: async () => [
+        { id: 'col:1', defaultModeId: 'mode:1', modes: [{ modeId: 'mode:1' }] },
+      ],
+    },
+    getLocalPaintStylesAsync: async () => [
+      {
+        id: 'ps:1',
+        name: 'Accent Green',
+        paints: [{ type: 'SOLID', color: { r: 0.06, g: 0.72, b: 0.5 }, opacity: 1, visible: true }],
+      },
+    ],
+    getLocalTextStylesAsync: async () => [
+      {
+        id: 'ts:1',
+        name: 'H1 Heading',
+        fontSize: 48,
+        fontName: { family: 'Plus Jakarta Sans', style: 'Bold' },
+        lineHeight: { unit: 'PERCENT', value: 120 },
+      },
+      {
+        id: 'ts:2',
+        name: 'Body Paragraph',
+        fontSize: 16,
+        fontName: { family: 'Plus Jakarta Sans', style: 'Regular' },
+        lineHeight: { unit: 'PIXELS', value: 24 },
+      },
+    ],
+  };
+
+  // Mock Active Selection containing a Root Frame and a Button Component
+  const mockSelection = [
+    {
+      id: 'frame:root',
+      name: 'Desktop Landing 1440',
+      type: 'FRAME',
+      width: 1440,
+      height: 900,
+      visible: true,
+      fills: [{ type: 'SOLID', color: { r: 0.09, g: 0.09, b: 0.11 }, opacity: 1, visible: true }],
+      children: [
+        {
+          id: 'btn:1',
+          name: 'Primary Button',
+          type: 'FRAME',
+          visible: true,
+          cornerRadius: 8,
+          paddingTop: 12,
+          paddingRight: 24,
+          paddingBottom: 12,
+          paddingLeft: 24,
+          fills: [{ type: 'SOLID', color: { r: 0.145, g: 0.388, b: 0.921 }, opacity: 1, visible: true }],
+          children: [
+            {
+              id: 'btn:txt',
+              type: 'TEXT',
+              characters: 'Get Started',
+              fontSize: 15,
+              fontName: { family: 'Plus Jakarta Sans', style: 'SemiBold' },
+              fills: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, opacity: 1, visible: true }],
+              visible: true,
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  const extracted = await extractLocalDesignSystem(mockFigma, mockSelection);
+
+  // Check Colors
+  assert.equal(extracted.colors.length, 3);
+  assert.equal(extracted.colors[0].role, 'primary');
+  assert.equal(extracted.colors[1].role, 'text');
+  assert.equal(extracted.colors[2].role, 'accent');
+
+  // Check Typography
+  assert.equal(extracted.typography.length, 2);
+  assert.equal(extracted.typography[0].role, 'h1');
+  assert.equal(extracted.typography[0].fontSize, 48);
+  assert.equal(extracted.typography[1].role, 'body');
+
+  // Check Theme Styles (Typography H1 & Body + Button)
+  assert.ok(extracted.themeStyles.typography.h1);
+  assert.equal(extracted.themeStyles.typography.h1.fontSize, 48);
+  assert.ok(extracted.themeStyles.buttons);
+  assert.equal(extracted.themeStyles.buttons.borderRadius.top, 8);
+  assert.equal(extracted.themeStyles.buttons.padding.right, 24);
+
+  // Check General Settings (Layout width & background color)
+  assert.equal(extracted.settings.layout.containerWidth, 1440);
+  assert.ok(extracted.settings.background.color);
+});
+
 
 

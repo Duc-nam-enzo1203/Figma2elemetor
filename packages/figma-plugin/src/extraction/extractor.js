@@ -994,9 +994,47 @@ export async function extractDesignSelection(selection, options = {}) {
   return { document, assetPayloads };
 }
 
-export async function extractLocalDesignSystem(figmaApi) {
+export function detectColorRole(name) {
+  const lower = safeStr(name).toLowerCase();
+  if (/(^|[-_/ ])(primary|brand|main)([-_/ ]|$)/i.test(lower)) return 'primary';
+  if (/(^|[-_/ ])(secondary)([-_/ ]|$)/i.test(lower)) return 'secondary';
+  if (/(^|[-_/ ])(text|body|content|foreground)([-_/ ]|$)/i.test(lower)) return 'text';
+  if (/(^|[-_/ ])(accent|highlight)([-_/ ]|$)/i.test(lower)) return 'accent';
+  return 'custom';
+}
+
+export function detectTypographyRole(name) {
+  const lower = safeStr(name).toLowerCase();
+  if (/^h1\b|heading[\s_/-]?1/i.test(lower)) return 'h1';
+  if (/^h2\b|heading[\s_/-]?2/i.test(lower)) return 'h2';
+  if (/^h3\b|heading[\s_/-]?3/i.test(lower)) return 'h3';
+  if (/^h4\b|heading[\s_/-]?4/i.test(lower)) return 'h4';
+  if (/^h5\b|heading[\s_/-]?5/i.test(lower)) return 'h5';
+  if (/^h6\b|heading[\s_/-]?6/i.test(lower)) return 'h6';
+  if (/body|paragraph|regular|base/i.test(lower)) return 'body';
+  if (/link|anchor/i.test(lower)) return 'link';
+  return 'custom';
+}
+
+function findNodeCandidate(nodes, predicate, depth = 0) {
+  if (!Array.isArray(nodes) || depth > 5) return null;
+  for (const n of nodes) {
+    if (!n || n.visible === false) continue;
+    if (predicate(n)) return n;
+    if (Array.isArray(n.children)) {
+      const found = findNodeCandidate(n.children, predicate, depth + 1);
+      if (found) return found;
+    }
+  }
+  return null;
+}
+
+export async function extractLocalDesignSystem(figmaApi, activeSelection = null) {
   const colors = [];
   const typography = [];
+  const selection = Array.isArray(activeSelection)
+    ? activeSelection
+    : (figmaApi && figmaApi.currentPage && Array.isArray(figmaApi.currentPage.selection) ? figmaApi.currentPage.selection : []);
 
   try {
     if (figmaApi && figmaApi.variables && typeof figmaApi.variables.getLocalVariablesAsync === 'function') {
@@ -1011,7 +1049,13 @@ export async function extractLocalDesignSystem(figmaApi) {
       for (const v of colorVars || []) {
         const val = v.valuesByMode ? v.valuesByMode[defaultModes[v.variableCollectionId]] : null;
         if (val && typeof val === 'object' && val.type !== 'VARIABLE_ALIAS' && typeof val.r === 'number') {
-          colors.push({ name: safeStr(v.name, 'Color'), value: rgbToHex(val, val.a !== undefined ? val.a : 1) });
+          const hex = rgbToHex(val, val.a !== undefined ? val.a : 1);
+          const name = safeStr(v.name, 'Color');
+          colors.push({
+            name,
+            value: hex,
+            role: detectColorRole(name),
+          });
         }
       }
     }
@@ -1022,7 +1066,14 @@ export async function extractLocalDesignSystem(figmaApi) {
       const paintStyles = await figmaApi.getLocalPaintStylesAsync();
       for (const ps of paintStyles || []) {
         const hex = extractSolidColor(ps.paints);
-        if (hex) colors.push({ name: safeStr(ps.name, 'Style'), value: hex });
+        if (hex) {
+          const name = safeStr(ps.name, 'Style');
+          colors.push({
+            name,
+            value: hex,
+            role: detectColorRole(name),
+          });
+        }
       }
     }
   } catch (e) { }
@@ -1032,8 +1083,10 @@ export async function extractLocalDesignSystem(figmaApi) {
       const textStyles = await figmaApi.getLocalTextStylesAsync();
       for (const ts of textStyles || []) {
         const fn = ts.fontName && typeof ts.fontName === 'object' ? ts.fontName : null;
+        const name = safeStr(ts.name, 'Text Style');
         const entry = {
-          name: safeStr(ts.name, 'Text Style'),
+          name,
+          role: detectTypographyRole(name),
           fontSize: Math.round(safeNum(ts.fontSize, 16)),
           fontFamily: fn ? safeStr(fn.family, 'Inter') : 'Inter',
           fontWeight: fn ? fontWeightOf(fn.style) : '400',
@@ -1052,7 +1105,140 @@ export async function extractLocalDesignSystem(figmaApi) {
     }
   } catch (e) { }
 
-  return { colors, typography };
+  // Extract Theme Styles (Typography H1-H6, Buttons, Form Fields)
+  const themeStyles = {
+    typography: {},
+    buttons: null,
+    formFields: null,
+  };
+
+  for (const t of typography) {
+    if (t.role && t.role !== 'custom' && !themeStyles.typography[t.role]) {
+      themeStyles.typography[t.role] = {
+        fontFamily: t.fontFamily,
+        fontSize: t.fontSize,
+        fontWeight: t.fontWeight,
+        lineHeight: t.lineHeight,
+        lineHeightUnit: t.lineHeightUnit,
+        letterSpacing: t.letterSpacing,
+      };
+    }
+  }
+
+  // Find button candidate in active selection
+  const btnNode = findNodeCandidate(selection, (n) => {
+    const name = safeStr(n.name).toLowerCase();
+    const isTaggedBtn = typeof n.getPluginData === 'function' && n.getPluginData('f2e-widget') === 'button';
+    const isNamedBtn = name.includes('button') || name.includes('btn') || name.includes('cta');
+    return (isTaggedBtn || isNamedBtn) && (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE');
+  });
+
+  if (btnNode) {
+    const bg = extractSolidColor(btnNode.fills) || '#2563EB';
+    const textChild = findNodeCandidate(btnNode.children, (c) => c.type === 'TEXT');
+    const textColor = textChild ? (extractSolidColor(textChild.fills) || '#FFFFFF') : '#FFFFFF';
+    const textFn = textChild && textChild.fontName ? textChild.fontName : null;
+
+    const r = typeof btnNode.cornerRadius === 'number'
+      ? { top: btnNode.cornerRadius, right: btnNode.cornerRadius, bottom: btnNode.cornerRadius, left: btnNode.cornerRadius }
+      : {
+        top: safeNum(btnNode.topLeftRadius, 6),
+        right: safeNum(btnNode.topRightRadius, 6),
+        bottom: safeNum(btnNode.bottomRightRadius, 6),
+        left: safeNum(btnNode.bottomLeftRadius, 6),
+      };
+
+    const pad = {
+      top: safeNum(btnNode.paddingTop, 12),
+      right: safeNum(btnNode.paddingRight, 20),
+      bottom: safeNum(btnNode.paddingBottom, 12),
+      left: safeNum(btnNode.paddingLeft, 20),
+    };
+
+    themeStyles.buttons = {
+      backgroundColor: bg,
+      textColor,
+      typography: {
+        fontFamily: textFn ? safeStr(textFn.family, 'Inter') : 'Inter',
+        fontSize: textChild && typeof textChild.fontSize === 'number' ? Math.round(textChild.fontSize) : 15,
+        fontWeight: textFn ? fontWeightOf(textFn.style) : '500',
+      },
+      borderRadius: r,
+      padding: pad,
+    };
+  }
+
+  // Find input / form field candidate in active selection
+  const inputNode = findNodeCandidate(selection, (n) => {
+    const name = safeStr(n.name).toLowerCase();
+    const isTaggedForm = typeof n.getPluginData === 'function' && n.getPluginData('f2e-widget') === 'form';
+    const isNamedInput = name.includes('input') || name.includes('field') || name.includes('text-field');
+    return (isTaggedForm || isNamedInput) && (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE');
+  });
+
+  if (inputNode) {
+    const bg = extractSolidColor(inputNode.fills) || '#FFFFFF';
+    const border = extractSolidColor(inputNode.strokes) || '#E2E8F0';
+    const textChild = findNodeCandidate(inputNode.children, (c) => c.type === 'TEXT');
+    const textColor = textChild ? (extractSolidColor(textChild.fills) || '#1E293B') : '#1E293B';
+    const textFn = textChild && textChild.fontName ? textChild.fontName : null;
+
+    const r = typeof inputNode.cornerRadius === 'number'
+      ? { top: inputNode.cornerRadius, right: inputNode.cornerRadius, bottom: inputNode.cornerRadius, left: inputNode.cornerRadius }
+      : {
+        top: safeNum(inputNode.topLeftRadius, 6),
+        right: safeNum(inputNode.topRightRadius, 6),
+        bottom: safeNum(inputNode.bottomRightRadius, 6),
+        left: safeNum(inputNode.bottomLeftRadius, 6),
+      };
+
+    const pad = {
+      top: safeNum(inputNode.paddingTop, 10),
+      right: safeNum(inputNode.paddingRight, 14),
+      bottom: safeNum(inputNode.paddingBottom, 10),
+      left: safeNum(inputNode.paddingLeft, 14),
+    };
+
+    themeStyles.formFields = {
+      backgroundColor: bg,
+      borderColor: border,
+      textColor,
+      typography: {
+        fontFamily: textFn ? safeStr(textFn.family, 'Inter') : 'Inter',
+        fontSize: textChild && typeof textChild.fontSize === 'number' ? Math.round(textChild.fontSize) : 14,
+        fontWeight: textFn ? fontWeightOf(textFn.style) : '400',
+      },
+      borderRadius: r,
+      padding: pad,
+    };
+  }
+
+  // Extract General Settings (Layout width, background color)
+  const settings = {
+    layout: {},
+    background: {},
+  };
+
+  const rootNode = selection[0] || null;
+  if (rootNode && typeof rootNode.width === 'number') {
+    const rawW = Math.round(rootNode.width);
+    let containerWidth = 1200;
+    if (rawW >= 960 && rawW <= 1600) {
+      containerWidth = rawW;
+    } else if (rawW > 1600) {
+      containerWidth = 1440;
+    }
+    settings.layout.containerWidth = containerWidth;
+  }
+
+  if (rootNode && Array.isArray(rootNode.fills)) {
+    const bg = extractSolidColor(rootNode.fills);
+    if (bg) {
+      settings.background.color = bg;
+    }
+  }
+
+  return { colors, typography, themeStyles, settings };
 }
 
 export function findFirstVisualDescendant(node, depth = 0) {
