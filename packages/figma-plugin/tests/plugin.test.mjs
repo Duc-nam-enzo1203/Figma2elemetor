@@ -1291,5 +1291,143 @@ test('Dev Mode CSS Authoritative Extraction: Unwraps var(--token, fallback), str
   assert.deepEqual(colEntry.style.borderWidth, { top: 0, right: 1, bottom: 0, left: 0, isLinked: false });
 });
 
+test('Accordion (Classic & Nested): Pinned "accordion" extracts all 7 child Feature items with titles, body descriptions, leading SVG icons, and Dev Mode CSS', async () => {
+  const featureTitles = [
+    'Bản đồ thời gian thực',
+    'Lịch sử hành trình',
+    'Thống kê từng chuyến',
+    'Vùng an toàn',
+    'Cảnh báo tự đặt ngưỡng',
+    'Phân quyền theo vai trò',
+    'Báo cáo & nhật ký',
+  ];
+
+  const makeFeatureRow = (idx, title, isFirst) => ({
+    id: `47:593${idx + 5}`,
+    name: 'Feature row',
+    type: 'FRAME',
+    visible: true,
+    layoutMode: 'VERTICAL',
+    itemSpacing: 12,
+    paddingTop: 20,
+    paddingBottom: 20,
+    width: 587,
+    height: isFirst ? 120 : 64,
+    getCSSAsync: async () => ({
+      display: 'flex',
+      'flex-direction': 'column',
+      'padding-top': '20px',
+      'padding-bottom': '20px',
+      'border-bottom': '1px solid #E2E8F0',
+    }),
+    children: [
+      {
+        id: `47:5940_${idx}`,
+        name: 'Row head',
+        type: 'FRAME',
+        visible: true,
+        layoutMode: 'HORIZONTAL',
+        itemSpacing: 16,
+        children: [
+          {
+            id: `47:5941_${idx}`,
+            name: 'Icon tile',
+            type: 'FRAME',
+            visible: true,
+            width: 40,
+            height: 40,
+            exportAsync: async () => new TextEncoder().encode(`<svg width="40" height="40" viewBox="0 0 40 40"><rect width="40" height="40" rx="10" fill="${isFirst ? '#16A34A' : '#F1F5F9'}"/><path d="M10 10H30"/></svg>`),
+            children: [{ id: `47:5942_${idx}`, type: 'VECTOR', visible: true }],
+          },
+          {
+            id: `47:5943_${idx}`,
+            name: title,
+            type: 'TEXT',
+            visible: true,
+            characters: title,
+            fontSize: 20,
+            fontName: { family: 'Inter', style: 'SemiBold' },
+            fills: [{ type: 'SOLID', visible: true, color: isFirst ? { r: 0.086, g: 0.639, b: 0.29 } : { r: 0, g: 0, b: 0 } }],
+            getCSSAsync: async () => ({
+              'font-family': 'Inter',
+              'font-size': '20px',
+              'font-weight': '600',
+              color: isFirst ? '#16A34A' : '#000000',
+            }),
+          },
+          {
+            id: `47:5944_${idx}`,
+            name: 'Icon/plus',
+            type: 'FRAME',
+            visible: true,
+            width: 24,
+            height: 24,
+            exportAsync: async () => new TextEncoder().encode('<svg width="24" height="24"><path d="M5 12H19"/></svg>'),
+            children: [{ id: `47:5945_${idx}`, type: 'VECTOR', visible: true }],
+          },
+        ],
+      },
+      ...(isFirst
+        ? [
+            {
+              id: '47:5946_0',
+              name: 'Body',
+              type: 'FRAME',
+              visible: true,
+              layoutMode: 'HORIZONTAL',
+              paddingLeft: 56,
+              children: [
+                {
+                  id: '47:5947_0',
+                  name: 'Toàn bộ xe hiện trên một bản đồ',
+                  type: 'TEXT',
+                  visible: true,
+                  characters: 'Toàn bộ xe hiện trên một bản đồ, kèm đếm nhanh tổng số xe, đang di chuyển, đã dừng, chưa gắn thiết bị và số cảnh báo đang mở.',
+                  fontSize: 16,
+                  fontName: { family: 'Inter', style: 'Regular' },
+                },
+              ],
+            },
+          ]
+        : []),
+    ],
+  });
+
+  const featureListFrame = {
+    id: '47:5934',
+    name: 'Feature list',
+    type: 'FRAME',
+    visible: true,
+    layoutMode: 'VERTICAL',
+    width: 587,
+    height: 651,
+    getPluginData: (key) => (key === 'f2e-widget' ? 'accordion' : ''),
+    children: featureTitles.map((t, i) => makeFeatureRow(i, t, i === 0)),
+  };
+
+  const { document } = await extractDesignSelection([featureListFrame], { fileKey: 'acc-test' });
+  const rootId = document.roots[0];
+  const accNode = document.nodes[rootId];
+
+  assert.equal(accNode.widget, 'accordion');
+  assert.equal(accNode.children.length, 7);
+  assert.equal(accNode.content.accordionItems.length, 7);
+  assert.equal(accNode.content.accordionItems[0].title, 'Bản đồ thời gian thực');
+  assert.ok(accNode.content.accordionItems[0].body.includes('Toàn bộ xe hiện trên một bản đồ'));
+
+  const clipboardJson = compileElementorClipboard(document, 'https://localhost');
+  assert.equal(clipboardJson.elements.length, 1);
+  const el = clipboardJson.elements[0];
+  assert.equal(el.widgetType, 'nested-accordion');
+  assert.equal(el.settings.items.length, 7);
+  assert.equal(el.settings.items[0].item_title, 'Bản đồ thời gian thực');
+  assert.equal(el.settings.items[6].item_title, 'Báo cáo & nhật ký');
+  assert.equal(el.elements.length, 7);
+  assert.equal(el.settings.active_title_color, '#16A34A');
+  assert.equal(el.settings.normal_title_color, '#000000');
+  assert.equal(el.settings.accordion_border_normal_color, '#E2E8F0');
+  assert.ok(el.settings.custom_css.includes('.e-n-accordion-item:nth-child(1)'));
+});
+
 
 

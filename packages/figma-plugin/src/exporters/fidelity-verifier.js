@@ -230,6 +230,44 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
       }
     }
 
+    // ── 3B. Auto-Heal Empty `nested-accordion` / `accordion` from IR ──
+    if (el.elType === 'widget' && (el.widgetType === 'nested-accordion' || el.widgetType === 'accordion')) {
+      const curItems = Array.isArray(settings.items) ? settings.items : [];
+      const extItems = (irNode && irNode.content && Array.isArray(irNode.content.accordionItems)) ? irNode.content.accordionItems : [];
+      if (curItems.length === 0 && extItems.length > 0) {
+        settings.items = extItems.map((it, idx) => ({
+          _id: shortId(`${el.id}-acc-${idx}`),
+          item_title: it.title || `Item #${idx + 1}`,
+        }));
+        el.elements = extItems.map((it, idx) => ({
+          id: shortId(`${el.id}-panel-${idx}`),
+          elType: 'container',
+          isInner: true,
+          isLocked: true,
+          settings: {
+            _title: `item #${idx + 1}`,
+            content_width: 'full',
+            margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+            padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+          },
+          elements: [
+            {
+              id: shortId(`${el.id}-body-${idx}`),
+              elType: 'widget',
+              widgetType: 'text-editor',
+              isInner: false,
+              settings: {
+                editor: `<p style="margin:0;">${it.body || it.title || ''}</p>`,
+                align: 'left',
+              },
+              elements: [],
+            },
+          ],
+        }));
+        recordFix(nodeId, title, `Khôi phục ${extItems.length} mục Accordion từ cây thiết kế Figma`);
+      }
+    }
+
     // Recursively heal children first
     if (Array.isArray(el.elements) && el.elements.length > 0) {
       for (let i = 0; i < el.elements.length; i += 1) {

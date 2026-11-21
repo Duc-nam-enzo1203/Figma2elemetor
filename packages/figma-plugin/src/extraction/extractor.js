@@ -1037,6 +1037,63 @@ export async function extractDesignSelection(selection, options = {}) {
       }
     }
 
+    if (['accordion', 'nested-accordion', 'toggle', 'tabs', 'nested-tabs'].includes(choice.widget)) {
+      const accordionItems = [];
+      for (const child of rawKids) {
+        const textNodes = collectTextDescendants(child);
+        if (textNodes.length === 0) continue;
+        const titleNode = textNodes[0];
+        const bodyNodes = textNodes.slice(1);
+
+        const titleText = safeStr(titleNode.characters || titleNode.name).trim();
+        const titleTypography = extractTypography(titleNode);
+        if (typeof titleNode.getCSSAsync === 'function') {
+          try {
+            const tCss = await titleNode.getCSSAsync();
+            if (tCss) applyDevModeCSSToNode({ text: titleTypography }, tCss);
+          } catch (e) { }
+        }
+
+        let bodyText = '';
+        let bodyTypography = null;
+        if (bodyNodes.length > 0) {
+          bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
+          bodyTypography = extractTypography(bodyNodes[0]);
+          if (typeof bodyNodes[0].getCSSAsync === 'function') {
+            try {
+              const bCss = await bodyNodes[0].getCSSAsync();
+              if (bCss) applyDevModeCSSToNode({ text: bodyTypography }, bCss);
+            } catch (e) { }
+          }
+        }
+
+        const itemEntry = {
+          sourceNodeId: child.id,
+          layout: extractLayout(child, node),
+          style: extractStyle(child),
+        };
+        if (typeof child.getCSSAsync === 'function') {
+          try {
+            const cCss = await child.getCSSAsync();
+            if (cCss) applyDevModeCSSToNode(itemEntry, cCss);
+          } catch (e) { }
+        }
+
+        accordionItems.push({
+          id: child.id,
+          title: titleText || safeStr(child.name, `Item ${accordionItems.length + 1}`),
+          body: bodyText,
+          titleTypography,
+          bodyTypography,
+          padding: itemEntry.layout.padding,
+          borderWidth: itemEntry.style.borderWidth,
+          borderColor: itemEntry.style.borderColor,
+          background: itemEntry.style.background,
+        });
+      }
+      entry.content.accordionItems = accordionItems;
+    }
+
     if (choice.widget === 'form' || choice.widget === 'login' || choice.widget === 'search-form') {
       const formFields = [];
       let submitLabel = 'Send Message';

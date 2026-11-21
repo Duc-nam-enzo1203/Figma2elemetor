@@ -114,7 +114,10 @@ export const CONTAINER_WIDGETS = new Set([
   'inner-section',
   'unwrap',
   'nested-tabs',
+  'tabs',
   'nested-accordion',
+  'accordion',
+  'toggle',
   'nested-carousel',
   'off-canvas',
 ]);

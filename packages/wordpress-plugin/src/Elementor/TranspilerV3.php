@@ -818,19 +818,136 @@ final class TranspilerV3
     {
         $items = [];
         $panels = [];
-        foreach ((array) ($node['children'] ?? []) as $cid) {
-            $child = $nodes[(string) $cid] ?? null;
-            if (!is_array($child)) {
-                continue;
+        $extractedItems = is_array($node['content']['accordionItems'] ?? null) ? $node['content']['accordionItems'] : [];
+        $childIds = is_array($node['children'] ?? null) ? $node['children'] : [];
+        $count = max(count($childIds), count($extractedItems));
+
+        $firstTitleTypo = null;
+        $activeTitleColor = null;
+        $normalTitleColor = null;
+        $firstBodyTypo = null;
+        $firstBodyText = '';
+        $rowPadding = null;
+        $rowBorderWidth = null;
+        $rowBorderColor = null;
+
+        for ($i = 0; $i < $count; $i++) {
+            $cid = $childIds[$i] ?? null;
+            $child = ($cid !== null && isset($nodes[(string) $cid]) && is_array($nodes[(string) $cid])) ? $nodes[(string) $cid] : null;
+            $ext = isset($extractedItems[$i]) && is_array($extractedItems[$i]) ? $extractedItems[$i] : null;
+            $texts = $child ? $this->collectSubtreeTexts($child, $nodes) : [];
+
+            $titleTypo = is_array($ext['titleTypography'] ?? null) ? $ext['titleTypography'] : (is_array($texts[0]['text'] ?? null) ? $texts[0]['text'] : null);
+            $bodyTypo = is_array($ext['bodyTypography'] ?? null) ? $ext['bodyTypography'] : (is_array($texts[1]['text'] ?? null) ? $texts[1]['text'] : null);
+
+            $title = (string) ($ext['title'] ?? $texts[0]['text']['characters'] ?? $child['content']['name'] ?? ('Item #' . ($i + 1)));
+            $bodyText = (string) ($ext['body'] ?? '');
+            if ($bodyText === '' && count($texts) > 1) {
+                $bodyParts = [];
+                for ($tIdx = 1; $tIdx < count($texts); $tIdx++) {
+                    $bt = trim((string) ($texts[$tIdx]['text']['characters'] ?? ''));
+                    if ($bt !== '') $bodyParts[] = $bt;
+                }
+                $bodyText = implode("\n", $bodyParts);
             }
-            $texts = $this->collectSubtreeTexts($child, $nodes);
-            $title = (string) ($texts[0]['text']['characters'] ?? $child['content']['name'] ?? 'Accordion Item');
+
+            if ($titleTypo) {
+                if (!$firstTitleTypo) $firstTitleTypo = $titleTypo;
+                if ($i === 0 && !empty($titleTypo['color']) && !$activeTitleColor) {
+                    $activeTitleColor = (string) $titleTypo['color'];
+                } elseif ($i > 0 && !empty($titleTypo['color']) && !$normalTitleColor) {
+                    $normalTitleColor = (string) $titleTypo['color'];
+                }
+            }
+            if ($bodyTypo && !$firstBodyTypo) $firstBodyTypo = $bodyTypo;
+            if ($bodyText !== '' && $firstBodyText === '') $firstBodyText = $bodyText;
+
+            $pad = is_array($ext['padding'] ?? null) ? $ext['padding'] : (is_array($child['layout']['padding'] ?? null) ? $child['layout']['padding'] : null);
+            if ($pad && !$rowPadding && (!empty($pad['top']) || !empty($pad['bottom']))) {
+                $rowPadding = $pad;
+            }
+            $bw = is_array($ext['borderWidth'] ?? null) ? $ext['borderWidth'] : (is_array($child['style']['borderWidth'] ?? null) ? $child['style']['borderWidth'] : null);
+            $bc = (string) ($ext['borderColor'] ?? $child['style']['borderColor'] ?? '');
+            if ($bw && $bc !== '' && !$rowBorderWidth) {
+                $rowBorderWidth = $bw;
+                $rowBorderColor = $bc;
+            }
+
             $items[] = ['_id' => $this->nextId(), 'item_title' => $title];
-            $panel = $this->buildContainer($child, $nodes, false);
-            $panel['isInner'] = true;
+            $effectiveBody = $bodyText !== '' ? $bodyText : ($firstBodyText !== '' ? $firstBodyText : $title);
+            $bTypo = $bodyTypo ?? $firstBodyTypo ?? ['fontFamily' => 'Inter', 'fontWeight' => '400', 'fontSize' => 16, 'lineHeight' => 24, 'color' => 'rgba(0, 0, 0, 0.7)'];
+
+            $textWidget = $this->wrapElement('widget', 'text-editor', [
+                'editor' => '<p style="margin:0;">' . $effectiveBody . '</p>',
+                'align' => 'left',
+                'text_color' => (string) ($bTypo['color'] ?? 'rgba(0, 0, 0, 0.7)'),
+                'typography_typography' => 'custom',
+                'typography_font_family' => (string) ($bTypo['fontFamily'] ?? 'Inter'),
+                'typography_font_weight' => (string) ($bTypo['fontWeight'] ?? '400'),
+                'typography_font_size' => ['unit' => 'px', 'size' => (int) ($bTypo['fontSize'] ?? 16), 'sizes' => []],
+                'typography_line_height' => ['unit' => 'px', 'size' => (int) ($bTypo['lineHeight'] ?? 24), 'sizes' => []],
+                '_title' => $title,
+            ], [], []);
+
+            $innerWrap = $this->wrapElement('container', null, [
+                'container_type' => 'flex',
+                'flex_direction' => 'column',
+                'margin' => ['unit' => 'px', 'top' => '0', 'right' => '0', 'bottom' => '0', 'left' => '0', 'isLinked' => false],
+                'padding' => ['unit' => 'px', 'top' => '0', 'right' => '0', 'bottom' => (string) ($rowPadding['bottom'] ?? 20), 'left' => '48', 'isLinked' => false],
+            ], [], [$textWidget], true);
+
+            $panel = $this->wrapElement('container', null, [
+                '_title' => 'item #' . ($i + 1),
+                'content_width' => 'full',
+                'margin' => ['unit' => 'px', 'top' => '0', 'right' => '0', 'bottom' => '0', 'left' => '0', 'isLinked' => false],
+                'padding' => ['unit' => 'px', 'top' => '0', 'right' => '0', 'bottom' => '0', 'left' => '0', 'isLinked' => false],
+            ], [], [$innerWrap], true);
+            $panel['isLocked'] = true;
             $panels[] = $panel;
         }
-        return $this->wrapElement('widget', 'nested-accordion', ['items' => $items], [], $panels);
+
+        $settings = [
+            'items' => $items,
+            'accordion_item_title_position_horizontal' => 'stretch',
+            'accordion_item_title_icon_position' => 'end',
+            'faq_schema' => '',
+            'content_border_border' => 'none',
+            'accordion_padding' => [
+                'unit' => 'px',
+                'top' => (string) ($rowPadding['top'] ?? 20),
+                'right' => (string) ($rowPadding['right'] ?? 0),
+                'bottom' => (string) ($rowPadding['bottom'] ?? 20),
+                'left' => (string) ($rowPadding['left'] ?? 0),
+                'isLinked' => false,
+            ],
+        ];
+
+        if ($rowBorderWidth && $rowBorderColor) {
+            $settings['accordion_border_normal_border'] = 'solid';
+            $settings['accordion_border_normal_width'] = [
+                'unit' => 'px',
+                'top' => (string) ($rowBorderWidth['top'] ?? 0),
+                'right' => (string) ($rowBorderWidth['right'] ?? 0),
+                'bottom' => (string) ($rowBorderWidth['bottom'] ?? 1),
+                'left' => (string) ($rowBorderWidth['left'] ?? 0),
+                'isLinked' => false,
+            ];
+            $settings['accordion_border_normal_color'] = $rowBorderColor;
+        }
+        if ($firstTitleTypo) {
+            $settings['title_typography_typography'] = 'custom';
+            $settings['title_typography_font_family'] = (string) ($firstTitleTypo['fontFamily'] ?? 'Inter');
+            $settings['title_typography_font_weight'] = (string) ($firstTitleTypo['fontWeight'] ?? '600');
+            $settings['title_typography_font_size'] = ['unit' => 'px', 'size' => (int) ($firstTitleTypo['fontSize'] ?? 20), 'sizes' => []];
+        }
+        if ($normalTitleColor || $activeTitleColor) {
+            $settings['normal_title_color'] = $normalTitleColor ?: ($activeTitleColor ?: '#000000');
+            $settings['active_title_color'] = $activeTitleColor ?: ($normalTitleColor ?: '#16A34A');
+            $settings['normal_icon_color'] = $normalTitleColor ?: '#475569';
+            $settings['active_icon_color'] = $activeTitleColor ?: '#16A34A';
+        }
+
+        return $this->wrapElement('widget', 'nested-accordion', $settings, [], $panels);
     }
 
     /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */

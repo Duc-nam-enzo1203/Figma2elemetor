@@ -261,7 +261,10 @@
   'inner-section',
   'unwrap',
   'nested-tabs',
+  'tabs',
   'nested-accordion',
+  'accordion',
+  'toggle',
   'nested-carousel',
   'off-canvas',
 ]);function isAtomicLeafWidget(widget) {
@@ -1977,6 +1980,63 @@ const WEIGHT_MAP = {
       }
     }
 
+    if (['accordion', 'nested-accordion', 'toggle', 'tabs', 'nested-tabs'].includes(choice.widget)) {
+      const accordionItems = [];
+      for (const child of rawKids) {
+        const textNodes = collectTextDescendants(child);
+        if (textNodes.length === 0) continue;
+        const titleNode = textNodes[0];
+        const bodyNodes = textNodes.slice(1);
+
+        const titleText = safeStr(titleNode.characters || titleNode.name).trim();
+        const titleTypography = extractTypography(titleNode);
+        if (typeof titleNode.getCSSAsync === 'function') {
+          try {
+            const tCss = await titleNode.getCSSAsync();
+            if (tCss) applyDevModeCSSToNode({ text: titleTypography }, tCss);
+          } catch (e) { }
+        }
+
+        let bodyText = '';
+        let bodyTypography = null;
+        if (bodyNodes.length > 0) {
+          bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
+          bodyTypography = extractTypography(bodyNodes[0]);
+          if (typeof bodyNodes[0].getCSSAsync === 'function') {
+            try {
+              const bCss = await bodyNodes[0].getCSSAsync();
+              if (bCss) applyDevModeCSSToNode({ text: bodyTypography }, bCss);
+            } catch (e) { }
+          }
+        }
+
+        const itemEntry = {
+          sourceNodeId: child.id,
+          layout: extractLayout(child, node),
+          style: extractStyle(child),
+        };
+        if (typeof child.getCSSAsync === 'function') {
+          try {
+            const cCss = await child.getCSSAsync();
+            if (cCss) applyDevModeCSSToNode(itemEntry, cCss);
+          } catch (e) { }
+        }
+
+        accordionItems.push({
+          id: child.id,
+          title: titleText || safeStr(child.name, `Item ${accordionItems.length + 1}`),
+          body: bodyText,
+          titleTypography,
+          bodyTypography,
+          padding: itemEntry.layout.padding,
+          borderWidth: itemEntry.style.borderWidth,
+          borderColor: itemEntry.style.borderColor,
+          background: itemEntry.style.background,
+        });
+      }
+      entry.content.accordionItems = accordionItems;
+    }
+
     if (choice.widget === 'form' || choice.widget === 'login' || choice.widget === 'search-form') {
       const formFields = [];
       let submitLabel = 'Send Message';
@@ -2624,6 +2684,44 @@ function verifyAndHealElementorJson(elements, doc = null, options = {}) {
         delete settings.width_tablet;
         delete settings.width_mobile;
         recordFix(nodeId, title, `Gỡ bỏ giới hạn chiều rộng cứng (${wSize}px) trên khung bọc chữ HUG để chống rớt dòng chữ`);
+      }
+    }
+
+    // ── 3B. Auto-Heal Empty `nested-accordion` / `accordion` from IR ──
+    if (el.elType === 'widget' && (el.widgetType === 'nested-accordion' || el.widgetType === 'accordion')) {
+      const curItems = Array.isArray(settings.items) ? settings.items : [];
+      const extItems = (irNode && irNode.content && Array.isArray(irNode.content.accordionItems)) ? irNode.content.accordionItems : [];
+      if (curItems.length === 0 && extItems.length > 0) {
+        settings.items = extItems.map((it, idx) => ({
+          _id: shortId(`${el.id}-acc-${idx}`),
+          item_title: it.title || `Item #${idx + 1}`,
+        }));
+        el.elements = extItems.map((it, idx) => ({
+          id: shortId(`${el.id}-panel-${idx}`),
+          elType: 'container',
+          isInner: true,
+          isLocked: true,
+          settings: {
+            _title: `item #${idx + 1}`,
+            content_width: 'full',
+            margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+            padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+          },
+          elements: [
+            {
+              id: shortId(`${el.id}-body-${idx}`),
+              elType: 'widget',
+              widgetType: 'text-editor',
+              isInner: false,
+              settings: {
+                editor: `<p style="margin:0;">${it.body || it.title || ''}</p>`,
+                align: 'left',
+              },
+              elements: [],
+            },
+          ],
+        }));
+        recordFix(nodeId, title, `Khôi phục ${extItems.length} mục Accordion từ cây thiết kế Figma`);
       }
     }
 
@@ -4316,25 +4414,236 @@ function buildAlert(node, nodes, allocId) {
 function buildNestedAccordion(node, nodes, allocId, buildElement) {
   const items = [];
   const panels = [];
-  for (const cid of node.children || []) {
-    const child = nodes[cid];
-    if (!child) continue;
-    const texts = collectSubtreeTexts(child, nodes);
-    const title = (texts[0] && texts[0].text && texts[0].text.characters) || (child.content && child.content.name) || 'Accordion Item';
-    items.push({ _id: shortId(cid), item_title: title });
-    const panel = buildElement(cid, false, node);
-    if (panel) {
-      panel.elType = 'container';
-      panel.isInner = true;
-      panels.push(panel);
+  const extractedItems = (node.content && Array.isArray(node.content.accordionItems)) ? node.content.accordionItems : [];
+  const childIds = Array.isArray(node.children) ? node.children : [];
+
+  let firstTitleTypo = null;
+  let activeTitleColor = null;
+  let normalTitleColor = null;
+  let firstBodyTypo = null;
+  let firstBodyText = '';
+  let rowPadding = null;
+  let rowBorderWidth = null;
+  let rowBorderColor = null;
+  const leadingIcons = [];
+
+  const findLeadingIconSvg = (irChild) => {
+    if (!irChild) return null;
+    const queue = [...(irChild.children || [])];
+    while (queue.length > 0) {
+      const cid = queue.shift();
+      const cn = nodes[cid];
+      if (!cn) continue;
+      if (cn.svg && cn.svg.markup) {
+        const w = Number(cn.layout && cn.layout.width) || 40;
+        const h = Number(cn.layout && cn.layout.height) || 40;
+        const nm = String((cn.content && cn.content.name) || '').toLowerCase();
+        // Skip small right-hand expand/collapse plus/minus icon (<= 28px or named plus/minus/arrow/chevron)
+        if ((w <= 26 && h <= 26 && (nm.includes('plus') || nm.includes('minus') || nm.includes('chevron') || nm.includes('arrow'))) || nm === 'icon/plus' || nm === 'icon/minus') {
+          continue;
+        }
+        return { markup: cn.svg.markup, width: w, height: h };
+      }
+      if (Array.isArray(cn.children)) queue.push(...cn.children);
+    }
+    return null;
+  };
+
+  const count = Math.max(childIds.length, extractedItems.length);
+  for (let i = 0; i < count; i += 1) {
+    const cid = childIds[i];
+    const child = cid ? nodes[cid] : null;
+    const ext = extractedItems[i] || null;
+    const childTexts = child ? collectSubtreeTexts(child, nodes) : [];
+
+    const titleNodeTypo = (ext && ext.titleTypography) || (childTexts[0] && childTexts[0].text) || null;
+    const bodyNodeTypo = (ext && ext.bodyTypography) || (childTexts[1] && childTexts[1].text) || null;
+
+    const title = (ext && ext.title)
+      || (childTexts[0] && childTexts[0].text && childTexts[0].text.characters)
+      || (child && child.content && child.content.name)
+      || `Item #${i + 1}`;
+
+    const bodyText = (ext && ext.body)
+      || (childTexts.length > 1
+        ? childTexts.slice(1).map((t) => (t.text && t.text.characters) || '').filter(Boolean).join('\n')
+        : '');
+
+    if (titleNodeTypo) {
+      if (!firstTitleTypo) firstTitleTypo = titleNodeTypo;
+      if (i === 0 && titleNodeTypo.color && !activeTitleColor) {
+        activeTitleColor = titleNodeTypo.color;
+      } else if (i > 0 && titleNodeTypo.color && !normalTitleColor) {
+        normalTitleColor = titleNodeTypo.color;
+      }
+    }
+    if (bodyNodeTypo && !firstBodyTypo) firstBodyTypo = bodyNodeTypo;
+    if (bodyText && !firstBodyText) firstBodyText = bodyText;
+
+    const pad = (ext && ext.padding) || (child && child.layout && child.layout.padding);
+    if (pad && !rowPadding && (pad.top || pad.bottom || pad.left || pad.right)) {
+      rowPadding = pad;
+    }
+    const bw = (ext && ext.borderWidth) || (child && child.style && child.style.borderWidth);
+    const bc = (ext && ext.borderColor) || (child && child.style && child.style.borderColor);
+    if (bw && bc && !rowBorderWidth) {
+      rowBorderWidth = bw;
+      rowBorderColor = bc;
+    }
+
+    const iconInfo = findLeadingIconSvg(child);
+    leadingIcons.push(iconInfo);
+
+    const itemId = shortId(cid || `${node.id}-item-${i}`);
+    items.push({ _id: itemId, item_title: title });
+
+    const effectiveBody = bodyText || firstBodyText || title;
+    const bTypo = bodyNodeTypo || firstBodyTypo || {
+      fontFamily: (firstTitleTypo && firstTitleTypo.fontFamily) || 'Inter',
+      fontWeight: '400',
+      fontSize: 16,
+      lineHeight: 24,
+      lineHeightUnit: 'px',
+      color: 'rgba(0, 0, 0, 0.7)',
+    };
+    const leftIndent = iconInfo ? (iconInfo.width + 16) : (leadingIcons[0] ? (leadingIcons[0].width + 16) : 0);
+
+    const textEditorSettings = {
+      editor: `<p style="margin:0;">${effectiveBody}</p>`,
+      align: 'left',
+      text_color: bTypo.color || 'rgba(0, 0, 0, 0.7)',
+      typography_typography: 'custom',
+      typography_font_family: bTypo.fontFamily || 'Inter',
+      typography_font_weight: String(bTypo.fontWeight || '400'),
+      typography_font_size: { unit: 'px', size: bTypo.fontSize || 16, sizes: [] },
+      typography_font_size_tablet: { unit: 'px', size: bTypo.fontSize || 16, sizes: [] },
+      typography_font_size_mobile: { unit: 'px', size: Math.max(14, (bTypo.fontSize || 16) - 1), sizes: [] },
+      typography_line_height: { unit: bTypo.lineHeightUnit || 'px', size: bTypo.lineHeight || 24, sizes: [] },
+      _title: title,
+    };
+
+    const innerBodyContainer = {
+      id: allocId(`${cid || node.id}-body-wrap-${i}`),
+      elType: 'container',
+      isInner: true,
+      settings: {
+        container_type: 'flex',
+        flex_direction: 'column',
+        margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+        padding: {
+          unit: 'px',
+          top: '0',
+          right: '0',
+          bottom: String((rowPadding && rowPadding.bottom) || 20),
+          left: String(leftIndent),
+          isLinked: false,
+        },
+      },
+      elements: [
+        {
+          id: allocId(`${cid || node.id}-body-txt-${i}`),
+          elType: 'widget',
+          widgetType: 'text-editor',
+          isInner: false,
+          settings: textEditorSettings,
+          elements: [],
+        },
+      ],
+    };
+
+    panels.push({
+      id: allocId(`${cid || node.id}-panel-${i}`),
+      elType: 'container',
+      isInner: true,
+      isLocked: true,
+      settings: {
+        _title: `item #${i + 1}`,
+        content_width: 'full',
+        margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+        padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+      },
+      elements: [innerBodyContainer],
+    });
+  }
+
+  const settings = {
+    items,
+    accordion_item_title_position_horizontal: 'stretch',
+    accordion_item_title_icon_position: 'end',
+    faq_schema: '',
+    content_border_border: 'none',
+    _margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+    _padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+  };
+
+  if (rowPadding) {
+    settings.accordion_padding = {
+      unit: 'px',
+      top: String(rowPadding.top || 20),
+      right: String(rowPadding.right || 0),
+      bottom: String(rowPadding.bottom || 20),
+      left: String(rowPadding.left || 0),
+      isLinked: false,
+    };
+  } else {
+    settings.accordion_padding = { unit: 'px', top: '20', right: '0', bottom: '20', left: '0', isLinked: false };
+  }
+
+  if (rowBorderWidth && rowBorderColor) {
+    settings.accordion_border_normal_border = 'solid';
+    settings.accordion_border_normal_width = {
+      unit: 'px',
+      top: String(rowBorderWidth.top || 0),
+      right: String(rowBorderWidth.right || 0),
+      bottom: String(rowBorderWidth.bottom || 1),
+      left: String(rowBorderWidth.left || 0),
+      isLinked: false,
+    };
+    settings.accordion_border_normal_color = rowBorderColor;
+  }
+
+  if (firstTitleTypo) {
+    settings.title_typography_typography = 'custom';
+    settings.title_typography_font_family = firstTitleTypo.fontFamily || 'Inter';
+    settings.title_typography_font_weight = String(firstTitleTypo.fontWeight || '600');
+    settings.title_typography_font_size = { unit: 'px', size: firstTitleTypo.fontSize || 20, sizes: [] };
+    settings.title_typography_font_size_mobile = { unit: 'px', size: Math.max(14, Math.round((firstTitleTypo.fontSize || 20) * 0.75)), sizes: [] };
+    if (firstTitleTypo.lineHeight) {
+      settings.title_typography_line_height = { unit: firstTitleTypo.lineHeightUnit || 'px', size: firstTitleTypo.lineHeight, sizes: [] };
     }
   }
+
+  if (normalTitleColor || activeTitleColor) {
+    settings.normal_title_color = normalTitleColor || activeTitleColor || '#000000';
+    settings.active_title_color = activeTitleColor || normalTitleColor || '#16A34A';
+    settings.normal_icon_color = normalTitleColor || '#475569';
+    settings.active_icon_color = activeTitleColor || '#16A34A';
+  }
+
+  if (leadingIcons.some(Boolean)) {
+    const iconW = (leadingIcons.find(Boolean) && leadingIcons.find(Boolean).width) || 40;
+    const iconH = (leadingIcons.find(Boolean) && leadingIcons.find(Boolean).height) || 40;
+    const padLeft = iconW + 16;
+    const cssRules = [
+      `selector .e-n-accordion-item-title-text { position: relative; padding-left: ${padLeft}px; display: inline-flex; align-items: center; min-height: ${iconH}px; }`,
+      `selector .e-n-accordion-item-title-text:before { content: ''; position: absolute; width: ${iconW}px; height: ${iconH}px; left: 0; top: 50%; transform: translateY(-50%); background-repeat: no-repeat; background-position: center; background-size: contain; }`,
+    ];
+    leadingIcons.forEach((ic, idx) => {
+      if (ic && ic.markup) {
+        const encoded = encodeURIComponent(ic.markup.trim().replace(/\s+/g, ' '));
+        cssRules.push(`selector .e-n-accordion-item:nth-child(${idx + 1}) .e-n-accordion-item-title-text:before { background-image: url("data:image/svg+xml;utf8,${encoded}"); }`);
+      }
+    });
+    cssRules.push('selector [aria-expanded="true"] { border: none !important; }');
+    settings.custom_css = cssRules.join('\n');
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'nested-accordion',
     isInner: false,
-    settings: { items },
+    settings,
     elements: panels,
   };
 }
@@ -4342,16 +4651,27 @@ function buildNestedAccordion(node, nodes, allocId, buildElement) {
 function buildNestedTabs(node, nodes, allocId, buildElement) {
   const tabs = [];
   const panels = [];
-  for (const cid of node.children || []) {
-    const child = nodes[cid];
-    if (!child) continue;
-    const title = (child.content && child.content.name) || 'Tab';
-    tabs.push({ _id: shortId(cid), tab_title: title });
-    const panel = buildElement(cid, false, node);
-    if (panel) {
-      panel.elType = 'container';
-      panel.isInner = true;
-      panels.push(panel);
+  const extractedItems = (node.content && Array.isArray(node.content.accordionItems)) ? node.content.accordionItems : [];
+  const childIds = Array.isArray(node.children) ? node.children : [];
+  const count = Math.max(childIds.length, extractedItems.length);
+
+  for (let i = 0; i < count; i += 1) {
+    const cid = childIds[i];
+    const child = cid ? nodes[cid] : null;
+    const ext = extractedItems[i] || null;
+    const childTexts = child ? collectSubtreeTexts(child, nodes) : [];
+    const title = (ext && ext.title)
+      || (childTexts[0] && childTexts[0].text && childTexts[0].text.characters)
+      || (child && child.content && child.content.name)
+      || `Tab ${i + 1}`;
+    tabs.push({ _id: shortId(cid || `${node.id}-tab-${i}`), tab_title: title });
+    if (cid && child) {
+      const panel = buildElement(cid, false, node);
+      if (panel) {
+        panel.elType = 'container';
+        panel.isInner = true;
+        panels.push(panel);
+      }
     }
   }
   return {
