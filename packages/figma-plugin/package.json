@@ -1,0 +1,11 @@
+{
+  "name": "f2e-figma-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "Figma Desktop Plugin for converting designs to Elementor v3/v4 (Free & Pro) with zero API limits.",
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "test": "node --test tests/*.test.mjs"
+  }
+}

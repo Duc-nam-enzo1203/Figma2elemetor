@@ -1,0 +1,15 @@
+# Dependencies
+node_modules/
+vendor/
+
+# Local references
+_references/
+
+# OS metadata
+.DS_Store
+Thumbs.db
+
+# IDE
+.idea/
+.vscode/
+*.swp

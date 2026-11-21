@@ -1,0 +1,2308 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>F2E Bridge — Figma to Elementor</title>
+  <style>
+    :root {
+      --bg: #18181b;
+      --bg-subtle: #121214;
+      --panel: #202024;
+      --panel-hover: #27272a;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-focus: #3b82f6;
+      --text: #f4f4f5;
+      --text-secondary: #a1a1aa;
+      --muted: #71717a;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --brand: #92003b;
+      --brand-hover: #a50044;
+      --success: #10b981;
+      --danger: #ef4444;
+      --radius: 6px;
+      --radius-sm: 4px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 11.5px;
+      line-height: 1.45;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    header {
+      padding: 8px 12px;
+      background: var(--bg-subtle);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .brand-logo {
+      width: 18px;
+      height: 18px;
+      border-radius: var(--radius-sm);
+      background: var(--brand);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .brand-logo svg {
+      width: 11px;
+      height: 11px;
+      fill: #fff;
+    }
+
+    .badge-group {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-secondary);
+      font-weight: 500;
+      border: 1px solid var(--border);
+    }
+
+    .badge-accent {
+      background: rgba(146, 0, 59, 0.2);
+      color: #f472b6;
+      border-color: rgba(146, 0, 59, 0.4);
+    }
+
+    /* Stepper Navigation (Impeccable & unslop design) */
+    .stepper-nav {
+      display: flex;
+      align-items: center;
+      background: var(--bg-subtle);
+      border-bottom: 1px solid var(--border);
+      padding: 5px 8px;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .step-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      color: var(--muted);
+      padding: 6px 4px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+
+    .step-btn:hover {
+      background: var(--panel);
+      color: var(--text-secondary);
+    }
+
+    .step-btn.active {
+      background: var(--panel);
+      border-color: var(--border);
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .step-num {
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9.5px;
+      font-weight: 600;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+    }
+
+    .step-btn.active .step-num {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .step-btn.completed .step-num {
+      background: #059669;
+      color: #fff;
+    }
+
+    .step-divider {
+      color: var(--muted);
+      opacity: 0.35;
+      font-size: 10px;
+      user-select: none;
+      display: flex;
+      align-items: center;
+    }
+
+    .selection-bar {
+      padding: 6px 12px;
+      background: rgba(32, 32, 36, 0.6);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .selection-bar strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    /* Step Carousel Track (Smooth slide transition) */
+    .step-viewport {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+      background: var(--bg);
+    }
+
+    .step-track {
+      display: flex;
+      width: 400%;
+      height: 100%;
+      transform: translateX(0%);
+      transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
+      will-change: transform;
+    }
+
+    .step-pane {
+      width: 25%;
+      height: 100%;
+      overflow-y: auto;
+      padding: 12px 14px;
+      box-sizing: border-box;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 11px 12px;
+      margin-bottom: 10px;
+    }
+
+    .card-title {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0 0 7px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title .title-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .field {
+      margin-bottom: 9px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 6px 9px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 11px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.12s ease;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: var(--border-focus);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 11px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      font-family: inherit;
+      user-select: none;
+    }
+
+    .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .btn-brand {
+      background: var(--brand);
+      color: #fff;
+    }
+
+    .btn-brand:hover:not(:disabled) {
+      background: var(--brand-hover);
+    }
+
+    .btn-secondary {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--panel-hover);
+      border-color: rgba(255, 255, 255, 0.16);
+    }
+
+    .btn-sm {
+      padding: 3px 7px;
+      font-size: 10.5px;
+    }
+
+    .btn-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+    }
+
+    .btn-icon svg {
+      width: 13px;
+      height: 13px;
+      fill: currentColor;
+    }
+
+    .step-nav-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Outline list */
+    .outline-list {
+      max-height: 380px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-subtle);
+    }
+
+    .outline-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      gap: 6px;
+    }
+
+    .outline-item:last-child {
+      border-bottom: none;
+    }
+
+    .outline-item:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .layer-info {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .layer-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 11px;
+      color: var(--text);
+    }
+
+    .tag-pill {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .tag-pill.override {
+      background: rgba(214, 51, 132, 0.18);
+      color: #f472b6;
+    }
+
+    .tag-pill.name,
+    .tag-pill.name-tag {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+    }
+
+    .widget-trigger-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 4px 7px;
+      font-size: 11px;
+      cursor: pointer;
+      width: 160px;
+      flex-shrink: 0;
+      text-align: left;
+      transition: all 0.12s ease;
+      font-family: inherit;
+    }
+
+    .widget-trigger-btn:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+      background: var(--panel-hover);
+    }
+
+    .widget-trigger-btn.is-unwrap {
+      background: rgba(245, 158, 11, 0.14);
+      border-color: rgba(245, 158, 11, 0.5);
+      color: #fbbf24;
+    }
+
+    .widget-trigger-btn.is-unwrap .w-icon {
+      color: #fbbf24;
+    }
+
+    .widget-trigger-btn.is-override {
+      border-color: rgba(214, 51, 132, 0.5);
+      background: rgba(214, 51, 132, 0.12);
+    }
+
+    .widget-trigger-btn .w-icon {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .widget-trigger-btn .w-icon svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    .widget-trigger-btn .w-label {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Modal Picker */
+    .picker-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(2px);
+      z-index: 999;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+    }
+
+    .picker-backdrop.open {
+      display: flex;
+    }
+
+    .picker-modal {
+      background: #1c1c20;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      width: 100%;
+      max-width: 440px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+    }
+
+    .picker-header {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .picker-body {
+      padding: 10px 12px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .picker-cat-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 10px 0 6px 0;
+    }
+
+    .picker-cat-title:first-child {
+      margin-top: 0;
+    }
+
+    .picker-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+
+    .picker-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 4px;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.12s ease;
+    }
+
+    .picker-card:hover {
+      border-color: rgba(255, 255, 255, 0.24);
+      background: var(--panel-hover);
+    }
+
+    .picker-card.active {
+      border-color: rgba(214, 51, 132, 0.6);
+      background: rgba(214, 51, 132, 0.14);
+    }
+
+    .picker-card .p-icon {
+      width: 20px;
+      height: 20px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .picker-card:hover .p-icon {
+      color: var(--text);
+    }
+
+    .picker-card.active .p-icon {
+      color: #f472b6;
+    }
+
+    .picker-card .p-icon svg {
+      width: 20px;
+      height: 20px;
+      fill: currentColor;
+    }
+
+    .picker-card .p-title {
+      font-size: 10px;
+      color: var(--text);
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
+    .picker-card .p-pro {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      font-size: 8px;
+      padding: 1px 3px;
+      border-radius: 2px;
+      background: rgba(214, 51, 132, 0.25);
+      color: #f472b6;
+      font-weight: 600;
+    }
+
+    .vp-slot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-bottom: 6px;
+    }
+
+    .vp-slot-info {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .status-bar {
+      padding: 7px 12px;
+      background: var(--bg-subtle);
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .status-bar.error {
+      color: #f87171;
+    }
+
+    .status-bar.error .status-dot {
+      background: #ef4444;
+    }
+
+    .status-bar.done {
+      color: #34d399;
+    }
+
+    .status-bar.done .status-dot {
+      background: #10b981;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text);
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin: 4px 0 8px 0;
+      line-height: 1.4;
+    }
+
+    /* AI Progress Popup Modal */
+    .ai-progress-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .ai-progress-backdrop.open {
+      display: flex;
+    }
+
+    .ai-progress-modal {
+      background: #1e1e22;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 410px;
+      padding: 18px 20px;
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      animation: aiModalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes aiModalFadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.96) translateY(6px);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    .ai-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .ai-modal-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .ai-modal-badge {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(147, 51, 234, 0.2);
+      color: #c084fc;
+      border: 1px solid rgba(147, 51, 234, 0.35);
+    }
+
+    .ai-progress-track {
+      width: 100%;
+      height: 6px;
+      background: #2a2a30;
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .ai-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #3b82f6, #9333ea, #10b981);
+      border-radius: 999px;
+      transition: width 0.35s ease;
+    }
+
+    .ai-progress-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: -4px;
+    }
+
+    .ai-progress-percent {
+      font-weight: 600;
+      color: #e2e8f0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .ai-steps-list {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      background: #141416;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .ai-step-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11.5px;
+      color: var(--muted);
+      transition: color 0.2s ease;
+    }
+
+    .ai-step-item.active {
+      color: #e2e8f0;
+      font-weight: 500;
+    }
+
+    .ai-step-item.done {
+      color: #10b981;
+    }
+
+    .ai-step-item.error {
+      color: #ef4444;
+    }
+
+    .ai-step-icon {
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .ai-spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: aiSpin 0.8s linear infinite;
+    }
+
+    @keyframes aiSpin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .ai-modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="brand">
+      <span class="brand-logo">
+        <svg viewBox="0 0 1000 1000">
+          <path
+            d="M292 208H375V792H292V208ZM458 208H708V292H458V208ZM458 458H708V542H458V458ZM458 708H708V792H458V708Z" />
+        </svg>
+      </span>
+      <span>F2E Bridge</span>
+    </div>
+    <div class="badge-group">
+      <span class="badge">Elementor v3 / v4</span>
+      <span class="badge badge-accent">86 Widgets</span>
+    </div>
+  </header>
+
+  <nav class="stepper-nav">
+    <button class="step-btn active" data-step="step-1">
+      <span class="step-num">1</span>
+      <span class="step-text">Bố cục</span>
+    </button>
+    <div class="step-divider">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6" />
+      </svg>
+    </div>
+    <button class="step-btn" data-step="step-2">
+      <span class="step-num">2</span>
+      <span class="step-text">Widget</span>
+    </button>
+    <div class="step-divider">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6" />
+      </svg>
+    </div>
+    <button class="step-btn" data-step="step-3">
+      <span class="step-num">3</span>
+      <span class="step-text">Design System</span>
+    </button>
+    <div class="step-divider">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6" />
+      </svg>
+    </div>
+    <button class="step-btn" data-step="step-4">
+      <span class="step-num">4</span>
+      <span class="step-text">Xuất WP</span>
+    </button>
+  </nav>
+
+  <div class="selection-bar">
+    <span>Đang chọn: <strong id="sel-summary">Chưa chọn Frame nào</strong></span>
+    <div style="display:flex;gap:4px;">
+      <button class="btn btn-secondary btn-sm" id="btn-reset-tags">Đặt lại thẻ</button>
+      <button class="btn btn-secondary btn-sm" id="btn-refresh">Làm mới</button>
+    </div>
+  </div>
+
+  <main class="step-viewport">
+    <div class="step-track" id="step-track">
+      <!-- BƯỚC 1: TỐI ƯU BỐ CỤC & RESPONSIVE -->
+      <section id="step-1" class="step-pane">
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-eicon="flexbox"></span>
+              <span>Tối ưu bố cục Auto-Layout & Vector</span>
+            </span>
+          </div>
+          <p class="hint">
+            Chuyển đổi cấu trúc Figma sang Flexbox Container chuẩn Elementor. Tự động gom các đường vector rời rạc thành
+            Icon và gán padding, gap chuẩn xác.
+          </p>
+          <button class="btn btn-primary" id="btn-fix-layout" style="width:100%;">
+            <span class="btn-icon" data-eicon="flexbox"></span>
+            <span>Chuẩn hoá Auto-Layout trên Canvas</span>
+          </button>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="desktop"></span>
+              <span>Cấu hình Responsive (Desktop / Tablet / Mobile)</span>
+            </span>
+            <button class="btn btn-secondary btn-sm" id="btn-clear-resp">Xoá ghép</button>
+          </div>
+          <p class="hint">
+            Hệ thống tự động tính toán co giãn & gập cột từ 1 Frame gốc. Nếu bạn có 3 Frame riêng cho từng điểm ngắt,
+            chọn Frame và bấm Gán:
+          </p>
+          <div class="vp-slot">
+            <div class="vp-slot-info">
+              <span class="btn-icon" data-ui-icon="desktop"></span>
+              <div>
+                <strong style="color:var(--text);">Desktop:</strong>
+                <span id="vp-desktop-name" style="color:var(--muted);margin-left:4px;">Theo Frame đang chọn</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-vp="desktop">Gán Desktop</button>
+          </div>
+          <div class="vp-slot">
+            <div class="vp-slot-info">
+              <span class="btn-icon" data-ui-icon="tablet"></span>
+              <div>
+                <strong style="color:var(--text);">Tablet (1024px):</strong>
+                <span id="vp-tablet-name" style="color:var(--muted);margin-left:4px;">Tự động co giãn (Auto)</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-vp="tablet">Gán Tablet</button>
+          </div>
+          <div class="vp-slot">
+            <div class="vp-slot-info">
+              <span class="btn-icon" data-ui-icon="mobile"></span>
+              <div>
+                <strong style="color:var(--text);">Mobile (767px):</strong>
+                <span id="vp-mobile-name" style="color:var(--muted);margin-left:4px;">Tự động gập cột (Auto)</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-vp="mobile">Gán Mobile</button>
+          </div>
+        </div>
+
+        <!-- Navigation footer to Step 2 -->
+        <div class="step-nav-footer">
+          <span style="font-size:11px;color:var(--muted);">Bước 1 / 4</span>
+          <button class="btn btn-primary" id="btn-go-step-2">
+            <span>Tiếp tục: Nhận diện Widget</span>
+            <span class="btn-icon" data-ui-icon="arrow-right"></span>
+          </button>
+        </div>
+      </section>
+
+      <!-- BƯỚC 2: AI QUÉT & GẮN THẺ WIDGET -->
+      <section id="step-2" class="step-pane">
+        <!-- AI SMART SCAN CARD -->
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-eicon="ai"></span>
+              <span>Nhận diện Widget bằng Vision AI</span>
+              <span id="ai-key-badge" class="badge" style="font-size:9.5px;">Chưa cấu hình Key</span>
+            </span>
+            <button class="btn btn-secondary btn-sm" id="btn-toggle-ai-cfg">
+              <span class="btn-icon" data-ui-icon="settings"></span>
+              <span>Cấu hình Key</span>
+            </button>
+          </div>
+
+          <!-- Collapsible AI Config Box -->
+          <div id="ai-cfg-box"
+            style="display: none; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px;">
+            <div class="field">
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                <label style="margin:0;">Gemini API Key</label>
+                <a href="https://aistudio.google.com/app/apikey" target="_blank"
+                  style="color:#60a5fa;text-decoration:none;font-size:10px;">Lấy Key miễn phí ↗</a>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <input type="password" id="inp-gemini-key" placeholder="AIzaSy..." style="flex:1;" />
+                <button class="btn btn-secondary btn-sm" id="btn-toggle-key-vis" title="Hiện/ẩn Key">
+                  <span class="btn-icon" data-ui-icon="eye"></span>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Model AI</label>
+              <select id="sel-gemini-model">
+                <option value="gemini-3.8-flash" selected>Gemini 3.8 Flash (Tối ưu độ trễ & thị giác UI)</option>
+                <option value="gemini-4-neon">Gemini 4 Neon (Mô hình suy luận thế hệ mới)</option>
+                <option value="gemini-3.8-pro">Gemini 3.8 Pro (Mô hình tham chiếu mở rộng)</option>
+                <option value="custom">Tùy chỉnh model ID...</option>
+              </select>
+              <div id="wrap-custom-model" style="display:none;margin-top:5px;">
+                <input type="text" id="inp-custom-model"
+                  placeholder="Nhập model ID (ví dụ: gemini-3.8-flash-preview)" />
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btn-save-ai-cfg" style="width:100%;margin-top:2px;">
+              Lưu cấu hình API
+            </button>
+          </div>
+
+          <p class="hint">
+            Hệ thống chụp ảnh canvas và phân tích cây layer để nhận diện chính xác 86 Widget Elementor (Icon Box, Nav
+            Menu, Logo, Icon List, Stat Card, Watermark...).
+          </p>
+
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-primary" id="btn-ai-smart-scan" style="flex:1;">
+              <span class="btn-icon" data-eicon="ai"></span>
+              <span id="ai-scan-btn-text">Phân tích & gán nhãn Widget</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-reset-tags-quick" title="Đặt lại toàn bộ về Auto">
+              <span class="btn-icon" data-ui-icon="refresh"></span>
+              <span>Đặt lại</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-eicon="library-grid"></span>
+              <span>Cây cấu trúc Layer & Danh mục Widget</span>
+            </span>
+          </div>
+          <p class="hint">
+            Bấm vào nút widget bên phải mỗi layer để duyệt nhanh và chọn từ 86 widget Elementor chính thức:
+          </p>
+
+          <!-- Container Optimization & Auto-Unwrap setting -->
+          <div
+            style="margin-bottom:12px;padding:10px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:8px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label
+                style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;">
+                <input type="checkbox" id="chk-auto-unwrap" checked style="accent-color:#3b82f6;" />
+                <span>Tối ưu Container trung gian (Auto-Unwrap)</span>
+              </label>
+              <span class="pill pill-amber" style="font-size:10px;padding:2px 6px;">Chuẩn Dev</span>
+            </div>
+            <p style="font-size:11px;color:var(--muted);margin:4px 0 0 0;line-height:1.4;">
+              Loại bỏ các Frame Container bọc ngoài trung gian thừa (ví dụ <code>Section → Container → Nội dung</code>).
+              Bạn cũng có thể bấm vào nút widget để chọn <strong>"Bỏ qua Container (Unwrap - Giữ con)"</strong> cho từng
+              layer.
+            </p>
+          </div>
+          <div id="outline-container" class="outline-list">
+            <div style="padding: 16px; text-align: center; color: var(--muted);">
+              Chọn một Frame trên Figma để xem cây Layer và gắn thẻ Widget.
+            </div>
+          </div>
+        </div>
+
+        <!-- Navigation footer to Step 3 -->
+        <div class="step-nav-footer">
+          <button class="btn btn-secondary" id="btn-back-step-1">
+            <span class="btn-icon" data-ui-icon="arrow-left"></span>
+            <span>Quay lại Bước 1</span>
+          </button>
+          <button class="btn btn-primary" id="btn-go-step-3">
+            <span>Tiếp tục: Design System</span>
+            <span class="btn-icon" data-ui-icon="arrow-right"></span>
+          </button>
+        </div>
+      </section>
+
+      <!-- BƯỚC 3: THIẾT LẬP DESIGN SYSTEM & TOKENS -->
+      <section id="step-3" class="step-pane">
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="settings"></span>
+              <span>Bảng màu & Hiệu ứng viền Gradient</span>
+            </span>
+            <span class="badge"
+              style="background:rgba(59,130,246,0.15);color:#60a5fa;border-color:rgba(59,130,246,0.3);">Chuẩn Figma
+              2026</span>
+          </div>
+          <p class="hint">
+            Xử lý tự động các thuộc tính thẩm mỹ nâng cao không hỗ trợ nguyên bản trên Elementor:
+          </p>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-linear-border" checked style="accent-color:#3b82f6;" />
+              <span>Tự động sinh Custom CSS cho Viền dải màu (Linear Border)</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Elementor không có control viền gradient trực tiếp. Plugin tự động sinh CSS
+              <code>background-clip: padding-box, border-box</code> giữ nguyên góc bo tròn (<code>border-radius</code>),
+              kèm fallback màu đơn sắc cho bản Free.
+            </p>
+          </div>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-sync-colors-opt" checked style="accent-color:#3b82f6;" />
+              <span>Trích xuất Color Variables từ Figma</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Tự động nhận diện màu chủ đạo, màu phụ, màu trung tính và màu nền từ Local Variables của file Figma để
+              đồng bộ vào Elementor Global Colors.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-eicon="editor-paragraph"></span>
+              <span>Hệ thống Kiểu chữ & Typography</span>
+            </span>
+          </div>
+          <p class="hint">
+            Bảo toàn độ nét và tỷ lệ hiển thị chữ tương đương 100% bản thiết kế:
+          </p>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-text-pixel-perfect" checked style="accent-color:#3b82f6;" />
+              <span>Ưu tiên Pixel-Perfect Typography (Tránh bị Theme ghi đè)</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Giữ nguyên font-size, font-weight, line-height và màu kèm opacity (ví dụ số thống kê lớn 40px Bold,
+              opacity 30%) thay vì bị theme kit mặc định của Elementor ghi đè.
+            </p>
+          </div>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-calc-lineheight" checked style="accent-color:#3b82f6;" />
+              <span>Tự động tính Line-Height khi Figma để 'Auto'</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Tự động tính tỷ lệ line-height chuẩn (~1.2 - 1.4) theo kích cỡ chữ khi Figma đặt chế độ Auto, đảm bảo chữ
+              không bị dính vào nhau trên Elementor.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="code"></span>
+              <span>Figma Dev Mode Engine (node.getCSSAsync)</span>
+            </span>
+            <span class="badge"
+              style="background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3);">Đang kích
+              hoạt</span>
+          </div>
+          <p class="hint">
+            Trích xuất trực tiếp 100% thuộc tính CSS từ Dev Mode (Inspect) của Figma sang Elementor JSON:
+          </p>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-dev-mode-css" checked style="accent-color:#10b981;" />
+              <span>Đồng bộ Full CSS từ Figma Dev Mode</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Tự động lấy chính xác <code>width</code>, <code>height</code>, <code>padding</code>, <code>gap</code>,
+              <code>border-image-source</code>, <code>color</code>, <code>font-size</code>, <code>line-height</code> từ
+              API Dev Mode của Figma, loại bỏ hoàn toàn tình trạng thiếu thông số style.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="refresh"></span>
+              <span>Đồng bộ Design System vào WordPress</span>
+            </span>
+          </div>
+          <p class="hint">
+            Đẩy trực tiếp các biến màu và Text Styles từ Figma vào Site Settings Kit của website WordPress:
+          </p>
+          <button class="btn btn-secondary" id="btn-sync-tokens-step3" style="width:100%;">
+            <span class="btn-icon" data-ui-icon="upload"></span>
+            <span>Đồng bộ Global Colors & Fonts vào WP</span>
+          </button>
+        </div>
+
+        <!-- Navigation footer to Step 4 -->
+        <div class="step-nav-footer">
+          <button class="btn btn-secondary" id="btn-back-step-2">
+            <span class="btn-icon" data-ui-icon="arrow-left"></span>
+            <span>Quay lại Bước 2</span>
+          </button>
+          <button class="btn btn-primary" id="btn-go-step-4">
+            <span>Tiếp tục: Xuất WordPress</span>
+            <span class="btn-icon" data-ui-icon="arrow-right"></span>
+          </button>
+        </div>
+      </section>
+
+      <!-- BƯỚC 4: XUẤT SANG ELEMENTOR & WORDPRESS -->
+      <section id="step-4" class="step-pane">
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="upload"></span>
+              <span>Đẩy trực tiếp lên WordPress (Live Push & Re-sync)</span>
+            </span>
+            <span class="badge">Khuyên dùng</span>
+          </div>
+
+          <div class="field">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <label style="margin:0;">Website WordPress kết nối</label>
+              <button class="btn btn-secondary btn-sm" id="btn-toggle-add-site">+ Thêm Web</button>
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <select id="site-select" style="flex: 1;">
+                <option value="">-- Chưa có website nào --</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" id="btn-delete-site" title="Xóa site">
+                <span class="btn-icon" data-ui-icon="trash"></span>
+              </button>
+            </div>
+          </div>
+
+          <div id="add-site-box"
+            style="display: none; border-top: 1px solid var(--border); padding-top: 9px; margin-top: 8px;">
+            <div class="field">
+              <label>WordPress Site URL (HTTPS hoặc http://localhost:PORT)</label>
+              <input type="text" id="inp-site-url" placeholder="http://localhost:10040" />
+            </div>
+            <div class="field">
+              <label>Connection Token (Lấy trong WP Admin → F2E Bridge)</label>
+              <input type="password" id="inp-site-token" placeholder="f2e_live_..." />
+            </div>
+            <button class="btn btn-primary" id="btn-verify-site" style="width:100%;">
+              Kiểm tra & lưu kết nối
+            </button>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label>Đích lưu trên WordPress</label>
+              <select id="push-target-type">
+                <option value="page">Trang (WP Page)</option>
+                <option value="elementor_library">Elementor Template / Theme Builder</option>
+              </select>
+            </div>
+            <div class="field" id="wrap-template-type" style="display: none;">
+              <label>Loại Template (Free + Pro)</label>
+              <select id="push-template-type">
+                <option value="page">Page Template</option>
+                <option value="section">Section / Container</option>
+                <option value="header">Header (Elementor Pro)</option>
+                <option value="footer">Footer (Elementor Pro)</option>
+                <option value="single-post">Single Post/Page (Pro)</option>
+                <option value="loop-item">Loop Item (Elementor Pro)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Chọn Trang/Template có sẵn (Để Re-sync) hoặc Tạo mới</label>
+            <select id="push-post-id">
+              <option value="0">+ Tạo Trang / Template Mới</option>
+            </select>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label>Tiêu đề (Để trống = Theo tên Frame)</label>
+              <input type="text" id="push-title" placeholder="Tự động theo tên Frame" />
+            </div>
+            <div class="field">
+              <label>Chế độ cập nhật</label>
+              <select id="push-mode">
+                <option value="resync" selected>Đồng bộ gia tăng (Re-sync)</option>
+                <option value="append">Chèn nối tiếp xuống cuối</option>
+                <option value="replace">Ghi đè toàn bộ trang</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label>Chuẩn Elementor</label>
+              <select id="push-el-version">
+                <option value="v3" selected>Elementor v3 (Flexbox & Grid)</option>
+                <option value="v4">Elementor v4 (Atomic Widgets)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Trạng thái bài đăng</label>
+              <select id="push-status">
+                <option value="draft" selected>Bản nháp (Draft)</option>
+                <option value="publish">Xuất bản ngay (Publish)</option>
+              </select>
+            </div>
+          </div>
+
+          <label class="checkbox-row">
+            <input type="checkbox" id="chk-sync-globals" checked />
+            <span style="color:var(--text-secondary);">Tự động đồng bộ màu sắc & kiểu chữ vào Elementor Global
+              Colors/Fonts</span>
+          </label>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <button class="btn btn-brand" id="btn-live-push" style="width:100%;">
+              <span class="btn-icon" data-ui-icon="upload"></span>
+              <span>Đẩy giao diện lên WordPress</span>
+            </button>
+            <button class="btn btn-secondary" id="btn-sync-tokens-only" style="width:100%;">
+              Chỉ đồng bộ Global Colors & Fonts
+            </button>
+          </div>
+
+          <div id="push-result-links"
+            style="display: none; margin-top: 10px; padding: 8px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px;">
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="copy"></span>
+              <span>Sao chép vào Clipboard (Ctrl + V)</span>
+            </span>
+            <span class="badge">Ngoại tuyến</span>
+          </div>
+          <p class="hint">
+            Bấm nút dưới → Chuyển sang trình soạn thảo Elementor → Bấm <strong>Ctrl + V</strong> để dán trực tiếp.
+          </p>
+          <div class="row">
+            <div class="field">
+              <label>Định dạng ảnh</label>
+              <select id="exp-img-format">
+                <option value="PNG">PNG (Trong suốt)</option>
+                <option value="JPG">JPG (Dung lượng nhẹ)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Độ phân giải</label>
+              <select id="exp-img-scale">
+                <option value="2" selected>2x (Chuẩn Retina)</option>
+                <option value="1">1x (Tiêu chuẩn)</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="btn-copy-clipboard" style="width:100%;margin-bottom:8px;">
+            <span class="btn-icon" data-ui-icon="copy"></span>
+            <span>Sao chép Elementor JSON (Ctrl + V)</span>
+          </button>
+
+          <div style="border-top:1px solid var(--border);padding-top:8px;">
+            <label
+              style="font-size:11px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px;">Tải
+              file dự phòng (.json / .f2e.json):</label>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <button class="btn btn-secondary btn-sm" id="btn-dl-bundle" style="width:100%;">
+                <span class="btn-icon" data-ui-icon="download"></span>
+                <span>Tải gói Bundle đầy đủ (.f2e.json)</span>
+              </button>
+              <div class="row">
+                <button class="btn btn-secondary btn-sm" id="btn-dl-v3">
+                  Tải Elementor v3 (.json)
+                </button>
+                <button class="btn btn-secondary btn-sm" id="btn-dl-v4">
+                  Tải Elementor v4 (.json)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Navigation footer back to Step 3 -->
+        <div class="step-nav-footer">
+          <button class="btn btn-secondary" id="btn-back-step-3">
+            <span class="btn-icon" data-ui-icon="arrow-left"></span>
+            <span>Quay lại Bước 3</span>
+          </button>
+          <span style="font-size:11px;color:var(--success);font-weight:500;">Sẵn sàng xuất ✓</span>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Visual Elementor Widget Picker Modal -->
+  <div class="picker-backdrop" id="picker-backdrop">
+    <div class="picker-modal">
+      <div class="picker-header">
+        <div style="min-width:0;flex:1;">
+          <strong id="picker-layer-title"
+            style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;">Chọn
+            Widget Elementor</strong>
+        </div>
+        <input type="text" id="picker-search" placeholder="Tìm kiếm trong 86 Widgets..."
+          style="width:200px;padding:5px 8px;font-size:11px;" />
+        <button class="btn btn-secondary btn-sm" id="picker-close">
+          <span class="btn-icon" data-ui-icon="close"></span>
+        </button>
+      </div>
+      <div class="picker-body" id="picker-body"></div>
+    </div>
+  </div>
+
+  <!-- AI Vision Scan Progress Popup Modal -->
+  <div class="ai-progress-backdrop" id="ai-progress-backdrop">
+    <div class="ai-progress-modal" id="ai-progress-modal">
+      <div class="ai-modal-header">
+        <div class="ai-modal-title">
+          <span style="display:inline-flex;color:#9333ea;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+            </svg>
+          </span>
+          <span>Gemini Vision AI Scanner</span>
+          <span class="ai-modal-badge" id="ai-modal-model-badge">Gemini 3.8 Flash</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-close-ai-modal" style="display:none;padding:2px 6px;">
+          <span class="btn-icon" data-ui-icon="close"></span>
+        </button>
+      </div>
+
+      <div class="ai-progress-track">
+        <div class="ai-progress-fill" id="ai-progress-fill"></div>
+      </div>
+
+      <div class="ai-progress-meta">
+        <span id="ai-progress-status-text">Đang chuẩn bị quét...</span>
+        <span class="ai-progress-percent" id="ai-progress-percent">0%</span>
+      </div>
+
+      <div class="ai-steps-list">
+        <div class="ai-step-item" id="ai-step-1">
+          <span class="ai-step-icon">
+            <div class="ai-spinner"></div>
+          </span>
+          <span class="ai-step-label">1. Chụp ảnh Canvas & trích xuất cây Layer</span>
+        </div>
+        <div class="ai-step-item" id="ai-step-2">
+          <span class="ai-step-icon"><span style="color:var(--muted);font-size:10px;">○</span></span>
+          <span class="ai-step-label">2. Gửi dữ liệu & hình ảnh lên Gemini Vision</span>
+        </div>
+        <div class="ai-step-item" id="ai-step-3">
+          <span class="ai-step-icon"><span style="color:var(--muted);font-size:10px;">○</span></span>
+          <span class="ai-step-label">3. AI phân tích thị giác & đối chiếu 86 widget</span>
+        </div>
+        <div class="ai-step-item" id="ai-step-4">
+          <span class="ai-step-icon"><span style="color:var(--muted);font-size:10px;">○</span></span>
+          <span class="ai-step-label">4. Tự động gán nhãn vào Figma & tối ưu DOM</span>
+        </div>
+      </div>
+
+      <div class="ai-modal-footer" id="ai-modal-footer" style="display:none;">
+        <button class="btn btn-primary btn-sm" id="btn-ai-modal-done" style="width:100%;">
+          Đóng và xem kết quả
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="status-bar" id="status-bar">
+    <div class="status-indicator">
+      <span class="status-dot"></span>
+      <span id="status-text">Sẵn sàng. Chọn một Frame trên Figma để bắt đầu.</span>
+    </div>
+  </footer>
+
+  <script>window.ELEMENTOR_EICONS = {"container":{"path":"M917 187C940 187 958 206 958 229V771C958 794 940 812 917 812H83C60 812 42 794 42 771V229C42 206 60 187 83 187H917ZM917 229H83V771H917V229ZM167 646V687H250V729H125V646H167ZM458 687V729H333V687H458ZM667 687V729H542V687H667ZM875 646V729H750V687H833V646H875ZM875 437V562H833V437H875ZM167 437V562H125V437H167ZM875 271V354H833V312H750V271H875ZM250 271V312H167V354H125V271H250ZM458 271V312H333V271H458ZM667 271V312H542V271H667Z","width":1000,"height":1000},"container-grid":{"path":"M925 196.4H110.7C92.9 196.4 75 210.7 75 232.1V767.9C75 785.7 92.9 803.6 110.7 803.6H925C942.9 803.6 960.7 785.7 960.7 767.9V232.1C960.7 214.3 942.9 196.4 925 196.4ZM917.9 478.6H539.3V239.3H917.9V478.6ZM496.4 239.3V478.6H117.9V239.3H496.4ZM117.9 521.4H496.4V760.7H117.9V521.4ZM539.3 760.7V521.4H917.9V760.7H539.3Z","width":1036,"height":1036},"flexbox":{"path":"M283 234C270 234 257.5 239.2 248.3 248.4 239.1 257.6 234 270 234 283.1V717C234 730 239.1 742.5 248.3 751.7 257.5 760.9 270 766 283 766H716.9C729.9 766 742.4 760.9 751.6 751.7 760.8 742.5 766 730 766 717V283.1C766 270.1 760.8 257.6 751.6 248.4 742.4 239.2 730 234 716.9 234H283ZM215.5 215.5C233.4 197.6 257.7 187.5 283.1 187.5H717C742.3 187.5 766.6 197.6 784.5 215.5 802.5 233.4 812.5 257.7 812.5 283.1V717C812.5 742.3 802.5 766.6 784.5 784.5 766.6 802.5 742.3 812.5 717 812.5H283.1C257.8 812.5 233.4 802.5 215.5 784.5 197.6 766.6 187.5 742.3 187.5 717V283.1C187.5 257.8 197.6 233.4 215.5 215.5ZM355.4 332.1C368.2 332.1 378.6 342.5 378.6 355.4V355.8C378.6 368.6 368.2 379 355.4 379S332.1 368.6 332.1 355.8V355.4C332.1 342.5 342.5 332.1 355.4 332.1ZM500 332.1C512.8 332.1 523.3 342.5 523.3 355.4V355.8C523.3 368.6 512.8 379 500 379S476.8 368.6 476.8 355.8V355.4C476.8 342.5 487.2 332.1 500 332.1ZM644.6 332.1C657.5 332.1 667.9 342.5 667.9 355.4V355.8C667.9 368.6 657.5 379 644.6 379S621.4 368.6 621.4 355.8V355.4C621.4 342.5 631.8 332.1 644.6 332.1ZM355.4 476.8C368.2 476.8 378.6 487.2 378.6 500V500.4C378.6 513.2 368.2 523.6 355.4 523.6S332.1 513.2 332.1 500.4V500C332.1 487.2 342.5 476.8 355.4 476.8ZM644.6 476.8C657.5 476.8 667.9 487.2 667.9 500V500.4C667.9 513.2 657.5 523.6 644.6 523.6S621.4 513.2 621.4 500.4V500C621.4 487.2 631.8 476.8 644.6 476.8ZM355.4 621.4C368.2 621.4 378.6 631.8 378.6 644.6V645C378.6 657.8 368.2 668.3 355.4 668.3S332.1 657.8 332.1 645V644.6C332.1 631.8 342.5 621.4 355.4 621.4ZM500 621.4C512.8 621.4 523.3 631.8 523.3 644.6V645C523.3 657.8 512.8 668.3 500 668.3S476.8 657.8 476.8 645V644.6C476.8 631.8 487.2 621.4 500 621.4ZM644.6 621.4C657.5 621.4 667.9 631.8 667.9 644.6V645C667.9 657.8 657.5 668.3 644.6 668.3S621.4 657.8 621.4 645V644.6C621.4 631.8 631.8 621.4 644.6 621.4Z","width":1000,"height":1000},"library-grid":{"path":"M255.3 235.8C251.8 235.8 248.4 237.2 245.9 239.7 243.5 242.2 242 245.5 242 249V391.8C242 395.3 243.4 398.6 245.9 401.1 248.4 403.6 251.8 405 255.3 405H398C401.5 405 404.8 403.6 407.3 401.1 409.8 398.7 411.2 395.3 411.2 391.8V249C411.2 245.5 409.8 242.2 407.3 239.7 404.9 237.3 401.5 235.8 398 235.8H255.3ZM214.1 207.9C225 197 239.8 190.8 255.3 190.8H398C413.4 190.8 428.3 197 439.1 207.9S456.2 233.6 456.2 249V391.8C456.2 407.2 450 422 439.1 432.9S413.4 449.9 398 449.9H255.3C239.8 449.9 225 443.8 214.1 432.9 203.2 422 197.1 407.2 197.1 391.8V249C197.1 233.6 203.2 218.8 214.1 207.9ZM612.1 235.8C608.6 235.8 605.3 237.2 602.8 239.7 600.3 242.2 598.9 245.5 598.9 249V391.8C598.9 395.3 600.3 398.6 602.8 401.1 605.2 403.6 608.6 405 612.1 405H754.8C758.3 405 761.7 403.6 764.2 401.1 766.6 398.7 768 395.3 768 391.8V249C768 245.5 766.7 242.2 764.2 239.7 761.7 237.3 758.3 235.8 754.8 235.8H612.1ZM571 207.9C581.9 197 596.7 190.8 612.1 190.8H754.8C770.3 190.8 785.1 197 796 207.9 806.9 218.8 813 233.6 813 249V391.8C813 407.2 806.9 422 796 432.9S770.3 449.9 754.8 449.9H612.1C596.7 449.9 581.8 443.8 571 432.9 560 422 553.9 407.2 553.9 391.8V249C553.9 233.6 560 218.8 571 207.9ZM255.3 592.7C251.8 592.7 248.4 594.1 245.9 596.6 243.5 599 242 602.4 242 605.9V748.7C242 752.2 243.4 755.5 245.9 758 248.4 760.5 251.8 761.9 255.3 761.9H398C401.5 761.9 404.8 760.5 407.3 758 409.8 755.5 411.2 752.2 411.2 748.7V605.9C411.2 602.4 409.8 599.1 407.3 596.6 404.9 594.1 401.5 592.7 398 592.7H255.3ZM214.1 564.8C225 553.8 239.8 547.7 255.3 547.7H398C413.4 547.7 428.3 553.8 439.1 564.8 450 575.7 456.2 590.5 456.2 605.9V748.6C456.2 764 450 778.9 439.1 789.8S413.4 806.8 398 806.8H255.3C239.8 806.8 225 800.7 214.1 789.8 203.2 778.8 197.1 764 197.1 748.6V605.9C197.1 590.5 203.2 575.6 214.1 564.8ZM612.1 592.7C608.6 592.7 605.3 594.1 602.8 596.6 600.3 599 598.9 602.4 598.9 605.9V748.7C598.9 752.2 600.3 755.5 602.8 758 605.2 760.5 608.6 761.9 612.1 761.9H754.8C758.3 761.9 761.7 760.5 764.2 758 766.6 755.5 768 752.2 768 748.7V605.9C768 602.4 766.7 599.1 764.2 596.6 761.7 594.1 758.3 592.7 754.8 592.7H612.1ZM571 564.8C581.9 553.8 596.7 547.7 612.1 547.7H754.8C770.3 547.7 785.1 553.8 796 564.8 806.9 575.7 813 590.5 813 605.9V748.6C813 764 806.9 778.9 796 789.8S770.3 806.8 754.8 806.8H612.1C596.7 806.8 581.8 800.7 571 789.8 560 778.8 553.9 764 553.9 748.6V605.9C553.9 590.5 560 575.6 571 564.8Z","width":1000,"height":1000},"columns":{"path":"M438 167H21C9 167 0 176 0 187S9 208 21 208H438C449 208 458 199 458 187S449 167 438 167ZM438 292H21C9 292 0 301 0 312S9 333 21 333H438C449 333 458 324 458 312S449 292 438 292ZM438 417H21C9 417 0 426 0 437S9 458 21 458H438C449 458 458 449 458 437S449 417 438 417ZM438 542H21C9 542 0 551 0 562S9 583 21 583H438C449 583 458 574 458 562S449 542 438 542ZM438 667H21C9 667 0 676 0 687S9 708 21 708H438C449 708 458 699 458 687S449 667 438 667ZM313 792H21C9 792 0 801 0 812S9 833 21 833H313C324 833 333 824 333 812S324 792 313 792ZM563 208H979C991 208 1000 199 1000 187S991 167 979 167H563C551 167 542 176 542 187S551 208 563 208ZM979 292H563C551 292 542 301 542 312S551 333 563 333H979C991 333 1000 324 1000 312S991 292 979 292ZM979 417H563C551 417 542 426 542 437S551 458 563 458H979C991 458 1000 449 1000 437S991 417 979 417ZM979 542H563C551 542 542 551 542 562S551 583 563 583H979C991 583 1000 574 1000 562S991 542 979 542ZM979 667H563C551 667 542 676 542 687S551 708 563 708H979C991 708 1000 699 1000 687S991 667 979 667ZM854 792H563C551 792 542 801 542 812S551 833 563 833H854C866 833 875 824 875 812S866 792 854 792Z","width":1000,"height":1000},"t-letter":{"path":"M647 958C647 958 646 958 646 958H354C343 958 333 949 333 938S343 917 354 917C389 917 417 889 417 854V208H146C111 208 83 236 83 271 83 282 74 292 63 292S42 282 42 271V62C42 51 51 42 63 42H938C949 42 958 51 958 62V271C958 282 949 292 938 292S917 282 917 271C917 236 889 208 854 208H583V854C583 889 611 917 646 917 646 917 646 917 646 917H647C658 917 668 926 668 938S658 958 647 958ZM438 917H563C550 899 542 878 542 854V187C542 176 551 167 563 167H854C878 167 899 174 917 187V83H83V187C101 174 122 167 146 167H438C449 167 458 176 458 187V854C458 878 451 899 438 917Z","width":1000,"height":1000},"text":{"path":"M979 208H21C9 208 0 199 0 187S9 167 21 167H979C991 167 1000 176 1000 187S991 208 979 208ZM688 333H21C9 333 0 324 0 312S9 292 21 292H688C699 292 708 301 708 312S699 333 688 333ZM979 458H21C9 458 0 449 0 437S9 417 21 417H979C991 417 1000 426 1000 437S991 458 979 458ZM688 583H21C9 583 0 574 0 562S9 542 21 542H688C699 542 708 551 708 562S699 583 688 583ZM979 708H21C9 708 0 699 0 687S9 667 21 667H979C991 667 1000 676 1000 687S991 708 979 708ZM688 833H21C9 833 0 824 0 812S9 792 21 792H688C699 792 708 801 708 812S699 833 688 833Z","width":1000,"height":1000},"button":{"path":"M451 380C445 375 436 373 429 377 421 380 417 388 417 396V771C417 779 422 787 430 790 437 793 446 791 452 786L515 723 586 864C588 869 593 873 598 874 600 875 602 875 604 875 608 875 612 874 615 872L708 818C713 815 716 810 718 805 719 799 718 794 715 789L641 667H729C738 667 746 661 749 653 752 645 749 636 743 630L451 380ZM604 625C597 625 590 629 586 636 582 642 582 650 586 657L669 792 613 825 540 678C537 672 531 668 524 667 523 667 522 667 521 667 515 667 510 669 506 673L458 720V441L673 625C673 625 604 625 604 625ZM896 125H104C47 125 0 172 0 229V479C0 537 47 583 104 583H354C366 583 375 574 375 562S366 542 354 542H104C70 542 42 514 42 479V229C42 195 70 167 104 167H896C930 167 958 195 958 229V479C958 514 930 542 896 542H750C739 542 729 551 729 562S739 583 750 583H896C953 583 1000 537 1000 479V229C1000 172 953 125 896 125Z","width":1000,"height":1000},"image":{"path":"M42 767L254 467C263 458 275 454 288 462L425 558 617 325C625 312 646 312 654 325L958 779V171H42V767ZM938 833L629 375 446 600C438 608 425 612 417 604L283 508 54 833H938ZM21 879C8 879-4 871-4 858V150C-4 133 8 125 21 125H979C992 125 1000 133 1000 146V854C1000 867 992 875 979 875H21ZM267 308C267 283 246 258 221 258S171 279 171 308 192 358 217 358 267 333 267 308ZM313 308C313 358 271 404 221 404S125 358 125 308 167 212 217 212 313 254 313 308Z","width":1000,"height":1000},"favorite":{"path":"M500 1000C224 1000 0 776 0 500S224 0 500 0 1000 224 1000 500 776 1000 500 1000ZM500 42C247 42 42 247 42 500S247 958 500 958 958 753 958 500 753 42 500 42ZM688 792C684 792 680 790 676 788L500 671 324 788C317 793 307 793 300 788 293 783 290 774 292 765L351 550 175 412C168 407 165 397 168 389 171 381 179 375 188 375H403L481 180C487 164 513 164 519 180L597 375H813C821 375 829 381 832 389 835 397 832 407 825 412L649 550 708 765C710 774 707 783 700 788 696 790 692 792 688 792ZM500 625C504 625 508 626 512 628L653 723 605 547C603 539 606 530 612 525L752 417H583C575 417 567 411 564 404L500 244 436 403C433 411 425 417 417 417H248L388 525C394 530 397 539 395 547L347 723 488 628C492 626 496 625 500 625Z","width":1000,"height":1000},"divider":{"path":"M42 396H958C970 396 979 386 979 375S970 354 958 354H42C30 354 21 363 21 375S30 396 42 396ZM375 229H625C633 229 640 224 644 217S646 202 642 196L517 29C509 18 491 18 483 29L358 196C354 202 353 210 356 217 360 224 367 229 375 229ZM500 76L583 187H417L500 76ZM625 771H375C367 771 360 775 356 782 353 789 354 798 358 804L483 971C487 976 494 979 500 979S513 976 517 971L642 804C646 798 647 789 644 782 640 775 633 771 625 771ZM500 923L417 812H583L500 923ZM958 604H42C30 604 21 613 21 625S30 646 42 646H958C970 646 979 636 979 625S970 604 958 604Z","width":1000,"height":1000},"spacer":{"path":"M42 187H958C970 187 979 178 979 167S970 146 958 146H42C30 146 21 155 21 167S30 187 42 187ZM625 437C633 437 640 433 644 426S646 410 642 404L517 237C509 227 491 227 483 237L358 404C354 410 353 419 356 426 360 433 367 437 375 437H479V562H375C367 562 360 567 356 574 353 581 354 589 358 596L483 762C487 768 494 771 500 771S513 768 517 762L642 596C646 589 647 581 644 574 640 567 633 562 625 562H521V437H625ZM500 715L417 604H583L500 715ZM500 285L583 396H417L500 285ZM958 812H42C30 812 21 822 21 833S30 854 42 854H958C970 854 979 845 979 833S970 812 958 812Z","width":1000,"height":1000},"icon-box":{"path":"M854 958C867 958 875 967 875 979 875 988 867 996 858 1000L854 1000H146C133 1000 125 992 125 979 125 971 133 963 142 958L146 958H854ZM854 854C867 854 875 863 875 875S867 896 854 896H146C133 896 125 888 125 875S133 854 146 854H854ZM688 708C700 708 708 717 708 729S700 750 688 750H313C300 750 292 742 292 729S300 708 313 708H688ZM500 0C671 0 813 142 813 312 813 483 671 625 500 625 329 625 188 483 188 312 188 142 329 0 500 0ZM500 42C350 42 229 162 229 312 229 462 350 583 500 583 650 583 771 462 771 312 771 162 650 42 500 42ZM500 125C508 125 517 129 517 137L563 225 663 237C671 237 675 246 679 250 683 258 679 267 675 271L604 342 621 442C621 450 621 458 613 462 604 467 596 467 592 462L500 421 413 467C404 471 396 471 392 467 383 462 383 454 383 446L400 346 325 275C321 271 321 262 321 254 325 246 329 242 338 242L438 229 483 142C483 129 492 125 500 125ZM500 192L471 254C467 258 463 262 454 267L388 275 438 321C442 325 446 333 442 337L429 404 492 371C496 367 504 367 513 371L575 404 563 337C563 329 563 325 567 321L617 275 550 267C542 267 538 262 533 254L500 192Z","width":1000,"height":1000},"image-box":{"path":"M875 21C875 9 866 0 854 0H146C134 0 125 9 125 21V479C125 482 126 484 127 487 127 488 127 488 127 488 128 490 129 492 131 494 135 498 141 500 146 500L146 500H854C859 500 863 498 866 496 866 496 867 496 867 495 867 495 868 495 868 495 869 494 870 492 871 491 872 490 872 489 873 488 873 487 874 486 874 484 874 483 875 482 875 480 875 480 875 480 875 479V21ZM833 42V419L641 175C638 170 632 167 626 167 619 166 614 169 610 174L455 346 345 276C336 271 326 272 319 279L167 429V42H833ZM811 458H197L336 320 447 391C456 396 467 395 474 387L624 220 811 458ZM771 583H229C218 583 208 593 208 604S218 625 229 625H771C782 625 792 616 792 604S782 583 771 583ZM771 708H229C218 708 208 718 208 729S218 750 229 750H771C782 750 792 741 792 729S782 708 771 708ZM771 833H229C218 833 208 843 208 854S218 875 229 875H771C782 875 792 866 792 854S782 833 771 833ZM771 958H229C218 958 208 968 208 979S218 1000 229 1000H771C782 1000 792 991 792 979S782 958 771 958ZM333 250C379 250 417 213 417 167S379 83 333 83 250 121 250 167 287 250 333 250ZM333 125C356 125 375 144 375 167S356 208 333 208 292 190 292 167 310 125 333 125Z","width":1000,"height":1000},"bullet-list":{"path":"M979 187H271C259 187 250 178 250 167S259 146 271 146H979C991 146 1000 155 1000 167S991 187 979 187ZM979 521H271C259 521 250 511 250 500S259 479 271 479H979C991 479 1000 488 1000 500S991 521 979 521ZM979 854H271C259 854 250 845 250 833S259 812 271 812H979C991 812 1000 822 1000 833S991 854 979 854ZM104 604C47 604 0 557 0 500S47 396 104 396 208 443 208 500 162 604 104 604ZM104 437C70 437 42 465 42 500S70 562 104 562 167 534 167 500 139 437 104 437ZM104 938C47 938 0 891 0 833S47 729 104 729 208 776 208 833 162 938 104 938ZM104 771C70 771 42 799 42 833S70 896 104 896 167 868 167 833 139 771 104 771ZM104 271C47 271 0 224 0 167S47 62 104 62 208 109 208 167 162 271 104 271ZM104 104C70 104 42 132 42 167S70 229 104 229 167 201 167 167 139 104 104 104Z","width":1000,"height":1000},"accordion":{"path":"M938 250H63C28 250 0 278 0 312V687C0 722 28 750 63 750H938C972 750 1000 722 1000 687V312C1000 278 972 250 938 250ZM958 687C958 699 949 708 938 708H63C51 708 42 699 42 687V312C42 301 51 292 63 292H938C949 292 958 301 958 312V687ZM104 167H896C907 167 917 157 917 146S907 125 896 125H104C93 125 83 134 83 146S93 167 104 167ZM104 42H896C907 42 917 32 917 21S907 0 896 0H104C93 0 83 9 83 21S93 42 104 42ZM896 958H104C93 958 83 968 83 979S93 1000 104 1000H896C907 1000 917 991 917 979S907 958 896 958ZM896 833H104C93 833 83 843 83 854S93 875 104 875H896C907 875 917 866 917 854S907 833 896 833Z","width":1000,"height":1000},"toggle":{"path":"M229 21H63C28 21 0 49 0 83V250C0 284 28 312 63 312H229C264 312 292 284 292 250V83C292 49 264 21 229 21ZM250 250C250 261 241 271 229 271H63C51 271 42 261 42 250V83C42 72 51 62 63 62H229C241 62 250 72 250 83V250ZM188 146H167V125C167 113 157 104 146 104S125 113 125 125V146H104C93 146 83 155 83 167S93 187 104 187H125V208C125 220 134 229 146 229S167 220 167 208V187H188C199 187 208 178 208 167S199 146 188 146ZM229 354H63C28 354 0 382 0 417V583C0 618 28 646 63 646H229C264 646 292 618 292 583V417C292 382 264 354 229 354ZM250 583C250 595 241 604 229 604H63C51 604 42 595 42 583V417C42 405 51 396 63 396H229C241 396 250 405 250 417V583ZM188 479H167V458C167 447 157 437 146 437S125 447 125 458V479H104C93 479 83 488 83 500S93 521 104 521H125V542C125 553 134 562 146 562S167 553 167 542V521H188C199 521 208 511 208 500S199 479 188 479ZM229 687H63C28 687 0 715 0 750V917C0 951 28 979 63 979H229C264 979 292 951 292 917V750C292 715 264 687 229 687ZM250 917C250 928 241 938 229 938H63C51 938 42 928 42 917V750C42 738 51 729 63 729H229C241 729 250 738 250 750V917ZM188 812H167V792C167 780 157 771 146 771S125 780 125 792V812H104C93 812 83 822 83 833S93 854 104 854H125V875C125 887 134 896 146 896S167 887 167 875V854H188C199 854 208 845 208 833S199 812 188 812ZM396 187H979C991 187 1000 178 1000 167S991 146 979 146H396C384 146 375 155 375 167S384 187 396 187ZM979 479H396C384 479 375 488 375 500S384 521 396 521H979C991 521 1000 511 1000 500S991 479 979 479ZM979 812H396C384 812 375 822 375 833S384 854 396 854H979C991 854 1000 845 1000 833S991 812 979 812Z","width":1000,"height":1000},"tabs":{"path":"M988 276L946 165C937 141 914 125 888 125H697C676 125 657 135 646 151 634 135 616 125 595 125H405C384 125 366 135 354 151 343 135 324 125 303 125H112C86 125 63 141 54 165L9 285C3 301 0 317 0 334V812C0 847 28 875 63 875H938C972 875 1000 847 1000 812V312C1000 299 995 286 988 276ZM697 167H888C897 167 904 172 908 180L934 250H682L668 208 677 181C680 172 688 167 697 167ZM405 167H595C604 167 612 172 615 181L638 250H390L376 208 385 181C388 172 396 167 405 167ZM958 812C958 824 949 833 938 833H63C51 833 42 824 42 812V334C42 322 44 311 48 300L93 180C96 172 103 167 112 167H303C312 167 320 172 323 181L355 277C358 286 366 292 375 292H938C943 292 948 294 951 297L952 300C953 302 955 304 957 306 958 308 958 310 958 312V812Z","width":1000,"height":1000},"slider-push":{"path":"M792 229H208C197 229 188 238 188 250V667C188 678 197 687 208 687H792C803 687 813 678 813 667V250C813 238 803 229 792 229ZM771 646H229V271H771V646ZM125 229H42C30 229 21 238 21 250S30 271 42 271H104V646H42C30 646 21 655 21 667 21 678 30 687 42 687H125C137 687 146 678 146 667V250C146 238 137 229 125 229ZM958 646H896V271H958C970 271 979 261 979 250S970 229 958 229H875C864 229 854 238 854 250V667C854 678 864 687 875 687H958C970 687 979 678 979 667S970 646 958 646Z","width":1000,"height":1000},"gallery-grid":{"path":"M292 187H42C30 187 21 197 21 208V458C21 470 30 479 42 479H292C303 479 313 470 313 458V208C313 197 303 187 292 187ZM271 437H63V229H271V437ZM625 187H375C364 187 354 197 354 208V458C354 470 364 479 375 479H625C637 479 646 470 646 458V208C646 197 637 187 625 187ZM604 437H396V229H604V437ZM958 187H708C697 187 688 197 688 208V458C688 470 697 479 708 479H958C970 479 979 470 979 458V208C979 197 970 187 958 187ZM938 437H729V229H938V437ZM292 521H42C30 521 21 530 21 542V792C21 803 30 812 42 812H292C303 812 313 803 313 792V542C313 530 303 521 292 521ZM271 771H63V562H271V771ZM625 521H375C364 521 354 530 354 542V792C354 803 364 812 375 812H625C637 812 646 803 646 792V542C646 530 637 521 625 521ZM604 771H396V562H604V771ZM958 521H708C697 521 688 530 688 542V792C688 803 697 812 708 812H958C970 812 979 803 979 792V542C979 530 970 521 958 521ZM938 771H729V562H938V771Z","width":1000,"height":1000},"testimonial":{"path":"M155 1000A13 13 0 0 1 145 997 17 17 0 0 1 138 976L231 724H148A149 149 0 0 1 0 576V148A149 149 0 0 1 148 0H855A149 149 0 0 1 1003 148V579A149 149 0 0 1 855 728H507L166 1000H155ZM148 34A115 115 0 0 0 35 148V579A115 115 0 0 0 148 693H259A18 18 0 0 1 272 700 26 26 0 0 1 276 717L193 935 490 697A13 13 0 0 1 500 693H855A115 115 0 0 0 969 579V145A115 115 0 0 0 855 31L148 34H148Z","width":1003,"height":1003},"rating":{"path":"M325 404L408 392 483 242C492 225 513 225 521 242L596 392 675 404 746 279C754 262 775 267 783 279L833 404 963 429C979 433 983 454 971 467L875 554 892 687C892 704 875 717 858 708L746 642 675 675C675 675 671 675 671 675L683 742C688 758 667 771 654 762L500 679 350 758C333 767 317 754 321 737L333 671C329 671 329 671 325 671L254 637 142 704C125 712 108 700 108 683L125 554 25 467C13 454 17 433 33 429L163 404 217 283C225 267 246 267 254 283L325 404ZM279 412L238 337 196 429C192 437 188 442 179 442L83 462 158 529C163 533 167 542 167 546L154 646 242 596C246 592 254 592 263 596L342 633 350 575 229 458C217 446 225 425 242 421L279 412ZM717 408L758 412C775 417 783 437 771 450L650 567 658 625 733 592C738 587 746 587 754 592L842 642 833 546C833 537 833 533 842 529L917 462 817 442C808 442 804 437 800 429L758 337 717 408ZM367 700L488 637C492 633 500 633 508 637L629 700 604 562C604 554 604 550 608 546L708 450 571 429C563 429 558 425 554 417L492 292 429 417C425 421 421 425 413 429L275 450 375 546C379 550 383 558 379 562L367 700Z","width":1000,"height":1000},"social-icons":{"path":"M926 54L821 45C774 41 726 41 679 45L574 54C532 58 500 92 500 134V324C500 366 532 401 574 404L679 414C703 416 726 417 750 417S797 416 821 414L926 404C968 401 1000 366 1000 324V134C1000 92 968 58 926 54ZM958 324C958 344 943 361 923 363L817 372C773 376 727 376 683 372L577 363C557 361 542 344 542 324V134C542 114 557 97 577 95L683 86C705 84 728 83 750 83S795 84 817 86L923 95C943 97 958 114 958 134V324ZM699 128C693 124 684 124 678 127 671 131 667 138 667 146V312C667 320 671 327 678 331 681 332 684 333 688 333 692 333 696 332 699 330L824 246C830 243 833 236 833 229S830 216 824 212L699 128ZM708 274V185L775 229 708 274ZM444 582C445 580 446 577 446 574 449 566 445 557 438 552 431 547 422 547 415 551 410 554 392 562 378 566 340 536 295 534 250 559 216 579 205 614 204 642 135 632 92 595 67 564 62 559 56 556 49 557 42 557 36 561 33 567 18 591 14 618 21 645 22 650 23 654 25 658 25 659 24 659 24 659 17 663 12 670 12 678 12 710 26 735 44 752 44 752 43 753 43 753 38 759 36 768 40 776 51 800 69 818 92 830 70 837 46 840 23 837 13 836 4 842 1 852-2 861 2 872 11 876 59 903 109 917 157 916 207 916 255 902 298 873 373 823 420 735 416 655 428 646 444 631 455 614 460 606 459 595 453 588 450 585 447 583 444 582ZM275 839C243 860 183 887 105 869 126 862 145 851 161 838 167 832 169 823 166 815S156 802 147 801C130 801 115 796 103 788 109 786 114 783 119 779 126 774 128 765 126 757S116 743 108 742C101 742 78 732 64 711 69 711 75 711 80 710 88 708 95 702 96 693 98 684 94 676 86 672 79 667 66 654 61 635 60 629 59 623 59 617 95 650 148 682 225 686 231 687 238 683 242 678 246 673 248 666 246 660 243 649 244 611 271 596 304 577 332 580 358 604 361 607 365 608 369 609 368 612 368 615 369 618 370 624 374 629 378 632 375 636 373 642 374 647 382 716 341 794 275 839ZM396 42H63C28 42 0 70 0 104V437C0 472 28 500 63 500H396C430 500 458 472 458 437V104C458 70 430 42 396 42ZM417 437C417 449 407 458 396 458H250V292H292C303 292 313 282 313 271S303 250 292 250H250C250 227 269 208 292 208H313C324 208 333 199 333 187S324 167 313 167H292C246 167 208 204 208 250H188C176 250 167 259 167 271S176 292 188 292H208V458H63C51 458 42 449 42 437V104C42 93 51 83 63 83H396C407 83 417 93 417 104V437ZM854 458H646C565 458 500 524 500 604V812C500 893 565 958 646 958H854C935 958 1000 893 1000 812V604C1000 524 935 458 854 458ZM958 812C958 870 912 917 854 917H646C588 917 542 870 542 812V604C542 547 588 500 646 500H854C912 500 958 547 958 604V812ZM750 583C681 583 625 639 625 708S681 833 750 833 875 777 875 708 819 583 750 583ZM750 792C704 792 667 754 667 708S704 625 750 625 833 662 833 708 796 792 750 792Z","width":1000,"height":1000},"counter":{"path":"M994 266L869 141 869 141C867 140 865 138 862 137 861 136 859 136 858 136 856 136 855 135 854 135 853 135 851 136 850 136 849 137 847 137 846 137 844 138 841 140 839 142L715 266C706 275 706 288 715 296S736 304 744 296L833 207V844C833 855 843 865 854 865S875 855 875 844V207L964 296C969 300 974 302 979 302S990 300 994 296C1002 288 1002 275 994 266ZM110 345C102 342 92 345 87 353L4 478C-3 488 0 500 9 507 19 513 32 511 38 501L83 433V698C83 709 93 719 104 719S125 709 125 698V365C125 355 119 347 110 345ZM313 344C255 344 208 390 208 448 208 459 218 469 229 469S250 459 250 448C250 413 278 385 313 385S375 413 375 448V460C375 474 370 488 361 499L213 685C208 691 207 700 210 707 214 714 221 719 229 719H396C407 719 417 709 417 698S407 677 396 677H273L394 525C409 507 417 484 417 460V448C417 390 370 344 313 344ZM708 448C708 390 662 344 604 344S500 390 500 448C500 459 509 469 521 469S542 459 542 448C542 413 570 385 604 385S667 413 667 448 639 510 604 510C593 510 583 520 583 531S593 552 604 552C639 552 667 580 667 615S639 677 604 677 542 649 542 615C542 603 532 594 521 594S500 603 500 615C500 672 547 719 604 719S708 672 708 615C708 580 692 550 667 531 692 512 708 482 708 448Z","width":1000,"height":1000},"skill-bar":{"path":"M938 21H63C28 21 0 49 0 83V167C0 201 28 229 63 229H812C812 229 812 229 813 229S813 229 813 229H938C972 229 1000 201 1000 167V83C1000 49 972 21 938 21ZM792 187H696L792 92V187ZM637 187H571L696 62H762L637 187ZM446 187L571 62H637L512 187H446ZM321 187L446 62H512L387 187H321ZM196 187L321 62H387L262 187H196ZM71 187L196 62H262L137 187H71ZM63 62H137L42 158V83C42 72 51 62 63 62ZM958 167C958 178 949 187 938 187H833V62H938C949 62 958 72 958 83V167ZM938 271H63C28 271 0 299 0 333V417C0 451 28 479 63 479H562C562 479 562 479 563 479S563 479 563 479H938C972 479 1000 451 1000 417V333C1000 299 972 271 938 271ZM542 437H446L542 342V437ZM387 437H321L446 312H512L387 437ZM196 437L321 312H387L262 437H196ZM71 437L196 312H262L137 437H71ZM63 312H137L42 408V333C42 322 51 312 63 312ZM958 417C958 428 949 437 938 437H583V312H938C949 312 958 322 958 333V417ZM938 771H63C28 771 0 799 0 833V917C0 951 28 979 63 979H312C312 979 312 979 313 979S313 979 313 979H938C972 979 1000 951 1000 917V833C1000 799 972 771 938 771ZM292 938H196L292 842V938ZM137 938H71L196 812H262L137 938ZM63 812H137L42 908V833C42 822 51 812 63 812ZM958 917C958 928 949 938 938 938H333V812H938C949 812 958 822 958 833V917ZM938 521H63C28 521 0 549 0 583V667C0 701 28 729 63 729H687C687 729 687 729 688 729S688 729 688 729H938C972 729 1000 701 1000 667V583C1000 549 972 521 938 521ZM667 687H571L667 592V687ZM512 687H446L571 562H637L512 687ZM321 687L446 562H512L387 687H321ZM196 687L321 562H387L262 687H196ZM71 687L196 562H262L137 687H71ZM63 562H137L42 658V583C42 572 51 562 63 562ZM958 667C958 678 949 687 938 687H708V562H938C949 562 958 572 958 583V667Z","width":1000,"height":1000},"alert":{"path":"M500 21C236 21 21 236 21 500S236 979 500 979 979 764 979 500 764 21 500 21ZM500 938C259 938 63 741 63 500S259 62 500 62 938 259 938 500 741 938 500 938ZM500 396C466 396 438 424 438 458V708C438 743 466 771 500 771S563 743 563 708V458C563 424 535 396 500 396ZM521 708C521 720 512 729 500 729S479 720 479 708V458C479 447 489 437 500 437S521 447 521 458V708ZM500 229C466 229 438 257 438 292S466 354 500 354 563 326 563 292 535 229 500 229ZM500 312C489 312 479 303 479 292S489 271 500 271 521 280 521 292 512 312 500 312Z","width":1000,"height":1000},"youtube":{"path":"M500 869C451 869 402 867 354 863L133 843C57 837 0 774 0 698V302C0 226 57 163 133 157L354 138C451 129 549 129 646 138L867 157C943 163 1000 226 1000 302V698C1000 774 943 837 867 843L646 863C598 867 549 869 500 869ZM500 173C452 173 405 175 357 179L137 198C83 203 42 248 42 302V698C42 752 83 797 137 802L357 821C452 829 548 829 643 821L863 802 863 802C917 797 958 752 958 698V302C958 248 917 203 863 198L643 179C595 175 548 173 500 173ZM396 708C392 708 389 708 386 706 379 702 375 695 375 688V313C375 305 379 298 386 294 393 291 401 291 407 295L699 483C705 486 708 493 708 500S705 514 699 518L407 705C404 707 400 708 396 708ZM417 351V649L649 500 417 351Z","width":1000,"height":1000},"google-maps":{"path":"M750 750C740 750 732 743 730 733 697 571 639 481 593 409 581 391 570 374 560 357 542 331 530 300 525 267 522 253 521 241 521 229 521 103 624 0 750 0S979 103 979 229C979 241 978 253 975 267 970 300 958 331 939 358 931 374 919 391 908 409 861 481 803 571 770 733 769 743 760 750 750 750ZM750 42C647 42 563 126 563 229 563 238 564 248 566 259 570 288 580 313 595 335 605 352 616 369 628 387 667 448 715 523 750 642 785 523 833 449 873 387 884 369 895 352 904 336 920 313 930 288 934 260 937 248 938 238 938 229 938 126 853 42 750 42ZM750 333C693 333 646 287 646 229S693 125 750 125 854 172 854 229 807 333 750 333ZM750 167C716 167 688 195 688 229S716 292 750 292 813 264 813 229 785 167 750 167ZM833 1000H125C68 1000 21 953 21 896V229C21 172 68 125 125 125H542C553 125 563 134 563 146S553 167 542 167H125C91 167 63 195 63 229V896C63 930 91 958 125 958H833C868 958 896 930 896 896V375C896 363 905 354 917 354S938 363 938 375V896C938 953 891 1000 833 1000ZM83 958C78 958 73 956 69 952 61 944 61 931 69 923L589 402C598 394 611 394 619 402S627 423 619 431L98 952C94 956 89 958 83 958ZM875 958C870 958 864 956 860 952L464 556C456 548 456 535 464 527S486 519 494 527L890 923C898 931 898 944 890 952 886 956 880 958 875 958ZM208 375C162 375 125 338 125 292S162 208 208 208 292 246 292 292 254 375 208 375ZM208 250C185 250 167 269 167 292S185 333 208 333 250 315 250 292 231 250 208 250ZM292 250H208C197 250 188 241 188 229S197 208 208 208H292C303 208 313 218 313 229S303 250 292 250ZM208 542C137 542 104 493 104 458 104 419 141 393 214 380 211 372 208 364 208 354 208 343 218 333 229 333S250 343 250 354C250 364 259 373 273 386 291 403 313 425 313 458 313 532 262 542 208 542ZM245 417C172 427 146 445 146 458 146 467 157 500 208 500 268 500 271 486 271 458 271 444 261 433 245 417Z","width":1000,"height":1000},"code":{"path":"M313 979C310 979 307 979 305 978 294 973 289 961 293 951L668 34C673 23 685 18 695 22 706 27 711 39 707 50L332 966C329 974 321 979 313 979ZM729 812C724 812 720 811 716 807 707 800 706 787 713 778L952 500 713 222C706 213 707 200 716 192 724 185 738 186 745 195L995 486C1002 494 1002 506 995 513L745 805C741 810 735 812 729 812ZM271 812C265 812 259 810 255 805L5 513C-2 506-2 494 5 486L255 195C263 186 276 185 284 192 293 200 294 213 287 222L48 500 287 778C294 787 293 800 284 807 281 811 276 812 271 812Z","width":1000,"height":1000},"shortcode":{"path":"M917 204V787C917 800 908 808 896 808H813C800 808 792 800 792 787 792 775 800 767 813 767H875V225H813C800 225 792 217 792 204 792 192 800 183 813 183H896C908 183 917 192 917 204ZM188 225C200 225 208 221 208 204 208 192 200 183 188 183H104C92 183 83 192 83 204V787C83 800 92 808 104 808H188C200 808 208 800 208 787 208 775 200 767 188 767H125V225H188ZM313 608C288 608 271 625 271 650S288 692 313 692 354 675 354 650 338 608 313 608ZM500 608C475 608 458 625 458 650S475 692 500 692C525 692 542 675 542 650S525 608 500 608ZM688 608C663 608 646 625 646 650S663 692 688 692 729 675 729 650 713 608 688 608Z","width":1000,"height":1000},"anchor":{"path":"M500 1004C490 1004 481 996 480 987 472 980 442 971 419 963 340 939 223 902 174 796H146C143 796 140 795 137 794 127 789 42 744 42 525 42 516 47 509 55 505 62 502 71 504 77 510 179 611 281 673 282 674 291 679 294 691 290 701L276 729C341 791 384 796 396 796 412 796 417 772 417 771L417 379H354C334 405 303 421 271 421 213 421 167 374 167 316S213 212 271 212C303 212 334 228 354 254H417V222C390 198 375 165 375 129 375 60 431 4 500 4S625 60 625 129C625 165 610 198 583 222V254H646C666 228 697 212 729 212 787 212 833 259 833 316S787 421 729 421C697 421 666 405 646 379H583V775C583 775 583 775 583 775 584 775 589 796 604 796 616 796 659 791 725 729L711 701C706 691 709 679 718 674 720 673 822 611 923 510 929 504 938 502 946 505 953 509 958 516 958 525 958 744 873 789 863 794 860 795 857 796 854 796H826C777 902 660 939 582 963 558 971 528 980 521 987 519 996 510 1004 500 1004ZM152 754H188C196 754 204 759 207 767 245 865 357 900 431 924 460 933 484 940 500 950 516 940 540 933 569 924 643 900 755 865 793 767 796 759 804 754 813 754H848C860 745 905 704 915 575 847 637 785 680 756 699L769 724C773 732 771 741 765 748 707 805 650 837 604 837 563 837 545 799 542 778L542 358C542 347 551 337 563 337H657C665 337 672 341 675 348 687 367 707 379 729 379 764 379 792 351 792 316S764 254 729 254C707 254 687 266 675 285 672 292 665 296 657 296H563C551 296 542 286 542 275V212C542 205 545 199 550 195 571 179 583 155 583 129 583 83 546 46 500 46S417 83 417 129C417 155 429 179 450 195 455 199 458 205 458 212V275C458 286 449 296 438 296H343C335 296 328 292 325 285 313 266 293 254 271 254 236 254 208 282 208 316S236 379 271 379C293 379 313 367 325 348 328 341 335 337 343 337H438C449 337 458 347 458 358V775C455 799 437 837 396 837 350 837 293 805 235 748 229 741 227 732 231 724L244 699C215 680 153 637 85 575 95 704 139 745 152 754Z","width":1000,"height":1000},"sidebar":{"path":"M979 0H21C9 0 0 9 0 21V979C0 991 9 1000 21 1000H979C991 1000 1000 991 1000 979V21C1000 9 991 0 979 0ZM958 42V208H42V42H958ZM42 250H583V958H42V250ZM625 958V250H958V958H625ZM854 833H729C718 833 708 843 708 854S718 875 729 875H854C866 875 875 866 875 854S866 833 854 833ZM854 708H729C718 708 708 718 708 729S718 750 729 750H854C866 750 875 741 875 729S866 708 854 708ZM854 583H729C718 583 708 593 708 604S718 625 729 625H854C866 625 875 616 875 604S866 583 854 583ZM854 458H729C718 458 708 468 708 479S718 500 729 500H854C866 500 875 491 875 479S866 458 854 458ZM854 333H729C718 333 708 343 708 354S718 375 729 375H854C866 375 875 366 875 354S866 333 854 333Z","width":1000,"height":1000},"post-excerpt":{"path":"M380 7C384 2 390 0 396 0H813C847 0 875 28 875 62V938C875 972 847 1000 813 1000H188C153 1000 125 972 125 938V271C125 265 128 259 132 255L380 7ZM375 71L196 250H354C366 250 375 241 375 229V71ZM813 42H417V229C417 264 389 292 354 292H167V938C167 949 176 958 188 958H813C824 958 833 949 833 938V62C833 51 824 42 813 42ZM354 854C354 877 335 896 313 896S271 877 271 854 290 812 313 812 354 831 354 854ZM479 854C479 877 460 896 438 896S396 877 396 854 415 812 438 812 479 831 479 854ZM604 854C604 877 585 896 563 896S521 877 521 854 540 812 563 812 604 831 604 854ZM292 604C280 604 271 595 271 583S280 562 292 562H750C762 562 771 572 771 583S762 604 750 604H292ZM292 479C280 479 271 470 271 458S280 437 292 437H625C637 437 646 447 646 458S637 479 625 479H292ZM292 729C280 729 271 720 271 708S280 687 292 687H667C678 687 688 697 688 708S678 729 667 729H292Z","width":1000,"height":1000},"headphones":{"path":"M1036 661V518C1036 243 804 0 536 0S36 243 36 518V661A175 175 0 0 0 0 768 247 247 0 0 0 232 1000 55 55 0 0 0 286 946V625A55 55 0 0 0 232 571 256 256 0 0 0 71 625V518A503 503 0 0 1 250 143V232A20 20 0 0 0 261 250 16 16 0 0 0 279 246 334 334 0 0 1 532 146 329 329 0 0 1 786 246 19 19 0 0 0 800 254H807A20 20 0 0 0 818 236V143A491 491 0 0 1 996 518V625A256 256 0 0 0 836 571 55 55 0 0 0 782 625V946A55 55 0 0 0 836 1000 247 247 0 0 0 1068 768 154 154 0 0 0 1036 661ZM250 946A18 18 0 0 1 214 946V625A18 18 0 0 1 250 625V946ZM179 611V954A210 210 0 0 1 36 768C36 682 104 629 179 611ZM786 125V193A390 390 0 0 0 536 111 390 390 0 0 0 286 193V118A454 454 0 0 1 536 36 445 445 0 0 1 786 118V125ZM821 625A18 18 0 0 1 857 625V946A18 18 0 0 1 821 946V625ZM893 954V611C971 629 1036 679 1036 768A214 214 0 0 1 893 954Z","width":1069,"height":1069},"wordart":{"path":"M208 547L217 552 805 889C846 913 871 910 884 903 897 896 904 881 903 864 902 852 911 842 923 841 935 840 945 849 946 861 948 891 935 924 905 940 874 957 832 953 784 926L196 589C155 565 130 568 117 575 104 582 97 597 98 614 99 626 90 636 78 637 66 638 56 629 55 617 53 587 66 554 96 537 123 523 159 524 200 543L208 547ZM863 54L904 77C915 84 920 96 918 109L811 714C808 726 807 736 806 745 806 753 807 759 809 764 810 765 810 767 812 769 816 775 823 782 834 789 842 795 845 806 840 815 835 824 823 827 814 822L613 706C604 700 601 689 606 680 611 670 623 667 632 672L653 685C661 690 668 691 673 690 678 688 683 685 686 679 690 673 692 667 693 660L726 480C727 476 725 472 722 470L540 365C536 363 533 363 530 366L388 487C381 494 377 499 375 502 372 507 371 512 373 515 374 520 378 525 387 530L406 542C415 547 418 559 413 568 408 577 396 580 387 575L254 498C245 492 242 481 247 472 252 462 264 460 273 464 283 469 290 472 297 473L300 473 300 473C307 474 313 473 318 471L323 469C331 465 340 459 352 450L359 444 828 56C838 48 852 47 863 54ZM844 102L829 115C828 115 828 115 829 116 834 119 837 125 835 130L769 500 768 500 737 672C735 682 730 692 725 702 723 706 720 710 716 714L760 740C761 729 763 717 765 705L870 117C870 114 868 110 865 108L853 101C851 99 847 100 844 102ZM787 148L580 325C575 329 576 336 581 339L725 422C731 425 738 422 738 416L787 148Z","width":1000,"height":1000},"form-horizontal":{"path":"M21 42H979C991 42 1000 32 1000 21S991 0 979 0H21C9 0 0 9 0 21S9 42 21 42ZM979 125H21C9 125 0 134 0 146S9 167 21 167H979C991 167 1000 157 1000 146S991 125 979 125ZM979 250H21C9 250 0 259 0 271V771C0 782 9 792 21 792H979C991 792 1000 782 1000 771V271C1000 259 991 250 979 250ZM42 292H958V637L846 750H42V292ZM905 750L958 696V750H905ZM292 833H83C37 833 0 871 0 917S37 1000 83 1000H292C338 1000 375 963 375 917S338 833 292 833ZM292 958H83C60 958 42 940 42 917S60 875 83 875H292C315 875 333 894 333 917S315 958 292 958Z","width":1000,"height":1000},"nav-menu":{"path":"M958 167H667 333 42C30 167 21 176 21 187V312C21 324 30 333 42 333H313V812C313 824 322 833 333 833H750C762 833 771 824 771 812V333H958C970 333 979 324 979 312V187C979 176 970 167 958 167ZM646 292H354V208H646V292ZM63 208H313V292H63V208ZM729 792H354V333H667 729V792ZM938 292H750 688V208H938V292ZM417 417C405 417 396 426 396 437S405 458 417 458H667C678 458 688 449 688 437S678 417 667 417H417ZM667 542H417C405 542 396 551 396 562S405 583 417 583H667C678 583 688 574 688 562S678 542 667 542ZM667 667H417C405 667 396 676 396 687S405 708 417 708H667C678 708 688 699 688 687S678 667 667 667Z","width":1000,"height":1000},"mega-menu":{"path":"M917 410.6C927.5 410.6 935.8 418.5 937.5 428.5L937.9 432.3V774.4C937.9 785.2 930.4 794 920.8 795.6L917 796H75.4C65 796 56.6 788.1 55 778.1L54.5 774.4V432.3C54.5 421.5 62 412.7 71.6 411L75.4 410.6H917ZM896.2 454H96.2V752.7H896.2V454ZM437.9 502.3C448.3 502.3 456.6 510.2 458.3 520.2L458.7 524V682.7C458.7 693.5 451.2 702.3 441.6 704L437.9 704.4H179.5C169.1 704.4 160.8 696.5 159.1 686.5L158.7 682.7V524C158.7 513.1 166.2 504.4 175.8 502.7L179.5 502.3H437.9ZM417 545.6H200.4V661H417V545.6ZM562.9 168.8C573.3 168.8 581.6 176.7 583.3 186.7L583.7 190.5V320.1C583.7 330.9 576.2 339.7 566.6 341.3L562.9 341.7H75.4C65 341.7 56.6 333.8 55 323.8L54.5 320.1V190.5C54.5 179.7 62 170.9 71.6 169.2L75.4 168.8H562.9ZM542 212.2H96.2V298.4H542V212.2ZM773.3 547.1C785 547.1 794.2 556.2 794.2 567.9 794.2 578.3 786.7 586.7 777.1 588.3L773.3 588.8H523.3C511.7 588.8 502.5 579.6 502.5 567.9 502.5 557.5 510 549.2 519.6 547.5L523.3 547.1H773.3ZM673.3 617.9C685 617.9 694.2 627.1 694.2 638.8 694.2 649.2 686.7 657.5 677.1 659.2L673.3 659.6H523.3C511.7 659.6 502.5 650.4 502.5 638.8 502.5 628.3 510 620 519.6 618.3L523.3 617.9H673.3ZM340 317.8C340 329.5 330.8 338.7 319.1 338.7 308.7 338.7 300.4 331.2 298.7 321.6L298.3 317.8V192.8C298.3 181.2 307.5 172 319.1 172 329.5 172 337.9 179.5 339.5 189.1L340 192.8V317.8Z","width":1000,"height":1000},"image-rollover":{"path":"M125 229C125 287 172 333 229 333S333 287 333 229 287 125 229 125 125 172 125 229ZM292 229C292 264 264 292 229 292S167 264 167 229 195 167 229 167 292 195 292 229ZM979 0H21C9 0 0 9 0 21V729C0 741 9 750 21 750H479C491 750 500 741 500 729S491 708 479 708H42V693L191 431 318 576C322 581 329 584 335 583 342 583 348 579 351 573L455 407C461 397 458 384 449 378 439 372 426 375 420 385L331 528 203 382C199 377 192 374 185 375 179 376 173 380 169 385L42 609V42H958V604C958 616 968 625 979 625S1000 616 1000 604V21C1000 9 991 0 979 0ZM577 298C571 292 562 290 555 293 547 296 542 304 542 312V890C542 897 546 905 553 908 561 912 569 911 575 906L681 823 773 989C777 996 784 1000 792 1000 795 1000 798 999 801 998L926 935C931 933 935 928 937 923 938 917 938 912 935 907L848 750H979C988 750 995 745 998 737 1002 729 1000 720 994 714L577 298ZM813 708C805 708 798 712 795 719 791 725 791 733 794 739L888 908 800 952 706 782C703 776 698 772 692 771 690 771 689 771 688 771 683 771 678 772 675 775L583 847V363L929 708H813Z","width":1000,"height":1000},"price-table":{"path":"M958 187H771V125C771 113 762 104 750 104H250C239 104 229 113 229 125V187H42C30 187 21 197 21 208V792C21 803 30 812 42 812H229V875C229 887 239 896 250 896H750C762 896 771 887 771 875V812H958C970 812 979 803 979 792V208C979 197 970 187 958 187ZM938 229V312H771V229H938ZM271 146H729V271H271V146ZM229 229V312H63V229H229ZM63 771V354H229V771H63ZM729 854H271V312H729V854ZM771 771V354H938V771H771ZM521 567V482C544 487 561 502 563 519 564 530 574 538 585 538 597 537 605 526 604 515 601 476 566 446 521 439V417C521 405 512 396 500 396S479 405 479 417V439C432 447 396 481 396 521 396 560 423 586 479 600V685C456 679 439 665 437 648 437 637 425 628 415 629 404 630 395 640 396 652 399 690 434 720 479 727V750C479 761 489 771 500 771S521 761 521 750V727C568 720 604 686 604 646 604 607 577 580 521 567ZM438 521C438 503 455 488 479 482V557C451 549 438 537 438 521ZM521 685V610C549 618 563 629 563 646 563 663 545 679 521 685Z","width":1000,"height":1000},"price-list":{"path":"M646 875H125V292H354C366 292 375 282 375 271V42H792V604C792 616 801 625 813 625S833 616 833 604V21C833 9 824 0 813 0H354C351 0 349 1 346 2 345 2 345 3 344 3 342 4 341 5 339 6L89 256C89 257 88 258 87 259 86 261 86 261 85 263 84 265 83 268 83 271V896C83 907 93 917 104 917H646C657 917 667 907 667 896S657 875 646 875ZM155 250L333 71V250H155ZM917 885C917 838 866 822 833 816V752C857 757 874 769 875 780 876 791 887 799 898 799 909 797 918 787 917 776 913 742 879 716 833 710V687C833 676 824 667 813 667S792 676 792 687V710C744 716 708 745 708 781 708 829 759 844 792 851V914C768 910 751 898 750 887 749 875 738 867 727 868 716 869 707 879 709 891 712 924 746 951 792 957V979C792 991 801 1000 813 1000S833 991 833 979V957C882 950 917 921 917 885ZM750 781C750 770 767 757 792 752V808C758 800 750 789 750 781ZM833 915V858C867 866 875 877 875 885 875 897 858 910 833 915ZM271 375C236 375 208 403 208 437S236 500 271 500 333 472 333 437 305 375 271 375ZM271 458C259 458 250 449 250 437S259 417 271 417 292 426 292 437 282 458 271 458ZM271 542C236 542 208 570 208 604S236 667 271 667 333 639 333 604 305 542 271 542ZM271 625C259 625 250 616 250 604S259 583 271 583 292 593 292 604 282 625 271 625ZM271 708C236 708 208 736 208 771S236 833 271 833 333 805 333 771 305 708 271 708ZM271 792C259 792 250 782 250 771S259 750 271 750 292 759 292 771 282 792 271 792ZM438 417C426 417 417 426 417 437S426 458 438 458H688C699 458 708 449 708 437S699 417 688 417H438ZM688 583H438C426 583 417 593 417 604S426 625 438 625H688C699 625 708 616 708 604S699 583 688 583ZM646 750H438C426 750 417 759 417 771S426 792 438 792H646C657 792 667 782 667 771S657 750 646 750Z","width":1000,"height":1000},"flip-box":{"path":"M813 62H188C176 62 167 72 167 83V917C167 928 176 938 188 938H813C824 938 833 928 833 917V83C833 72 824 62 813 62ZM792 896H208V104H792V896ZM999 632C995 621 984 615 973 619L938 630C980 544 982 436 906 359 898 351 884 351 876 359 868 367 868 380 876 388 940 453 936 547 897 620L881 573C877 562 866 556 855 560 844 564 838 575 842 586L871 675C871 675 872 676 872 676 873 678 873 679 874 680 875 681 876 682 877 683 877 684 878 684 878 685 878 685 879 685 879 685 880 686 881 686 882 687 884 688 888 689 891 689 893 689 895 689 897 688L986 658C997 655 1003 643 999 632ZM129 367C129 366 128 366 128 365 128 364 127 363 126 361 125 360 124 360 124 359 123 358 123 357 122 357 121 356 121 356 120 356 119 356 119 355 119 355 118 355 117 355 117 354 115 354 114 353 112 353 111 353 110 353 109 353 107 353 106 353 105 353 104 354 103 354 103 354L14 383C3 387-3 399 1 410 5 420 17 426 28 423L62 411C20 497 18 606 95 683 99 687 104 689 109 689 115 689 120 687 124 683 132 675 132 662 124 653 60 589 65 495 103 422L119 468C122 477 130 483 139 483 141 483 143 482 145 482 156 478 162 466 159 455L129 367ZM313 354H688C699 354 708 345 708 333S699 312 688 312H313C301 312 292 322 292 333S301 354 313 354ZM313 479H688C699 479 708 470 708 458S699 437 688 437H313C301 437 292 447 292 458S301 479 313 479ZM313 604H688C699 604 708 595 708 583S699 562 688 562H313C301 562 292 572 292 583S301 604 313 604ZM313 729H479C491 729 500 720 500 708S491 687 479 687H313C301 687 292 697 292 708S301 729 313 729Z","width":1000,"height":1000},"slides":{"path":"M792 229H208C197 229 188 238 188 250V667C188 678 197 687 208 687H792C803 687 813 678 813 667V250C813 238 803 229 792 229ZM771 646H229V271H771V646ZM140 360C132 352 118 352 110 360L27 444C19 452 19 465 27 473L110 556C114 560 120 562 125 562S136 560 140 556C148 548 148 535 140 527L71 458 140 390C148 382 148 368 140 360ZM973 444L890 360C882 352 868 352 860 360S852 382 860 390L929 458 860 527C852 535 852 548 860 556 864 560 870 562 875 562S886 560 890 556L973 473C981 465 981 452 973 444Z","width":1000,"height":1000},"loop-builder":{"path":"M604.2 20.8C614.6 20.8 622.9 28.3 624.6 37.9L625 41.7V416.7C625 427.1 617.5 435.4 607.9 437.1L604.2 437.5H62.5C52.1 437.5 43.8 430 42.1 420.4L41.7 416.7V41.7C41.7 31.3 49.2 22.9 58.8 21.3L62.5 20.8H604.2ZM583.3 62.5H83.3V395.8H583.3V62.5ZM604.2 604.2C615.8 604.2 625 613.3 625 625 625 635.4 617.5 643.8 607.9 645.4L604.2 645.8H62.5C50.8 645.8 41.7 636.7 41.7 625 41.7 614.6 49.2 606.3 58.8 604.6L62.5 604.2H604.2ZM604.2 500C615.8 500 625 509.2 625 520.8 625 531.3 617.5 539.6 607.9 541.3L604.2 541.7H62.5C50.8 541.7 41.7 532.5 41.7 520.8 41.7 510.4 49.2 502.1 58.8 500.4L62.5 500H604.2ZM967.1 237.1L967.9 233.8 968.3 230 968.3 226.3 967.1 221.7 965.8 219.2 963.7 215.8 880.4 111.7C873.3 102.5 860 101.3 851.2 108.3 843.3 114.6 841.2 125.8 845.8 134.6L847.9 137.9 904.6 208.3H718.8C707.1 208.3 697.9 217.5 697.9 229.2 697.9 239.6 705.4 247.9 715 249.6L718.8 250H904.6L848.3 320.4C841.3 329.6 842.5 342.5 851.7 349.6 859.6 355.8 870.8 355.4 878.3 349.2L880.8 346.3 964.2 242.1 965.8 240 967.1 237.1ZM325.4 987.9L328.8 988.8 332.5 989.2 336.3 989.2 340.8 987.9 343.3 986.7 346.7 984.6 450.8 901.2C460 894.2 461.3 880.8 454.2 872.1 447.9 864.2 436.7 862.1 427.9 866.7L424.6 868.7 354.2 925.4V739.6C354.2 727.9 345 718.8 333.3 718.8 322.9 718.8 314.6 726.3 312.9 735.8L312.5 739.6V925.4L242.1 869.2C232.9 862.1 220 863.3 212.9 872.5 206.7 880.4 207.1 891.7 213.3 899.2L216.3 901.7 320.4 985 322.5 986.7 325.4 987.9Z","width":1000,"height":1000},"carousel-loop":{"path":"M399.6 817.5C399.6 842.5 379.6 862.5 354.6 862.5S309.6 842.5 309.6 817.5 329.6 772.5 354.6 772.5 399.6 792.5 399.6 817.5ZM498.8 772.5C473.8 772.5 453.8 792.5 453.8 817.5S473.8 862.5 498.8 862.5 543.8 842.5 543.8 817.5 523.8 772.5 498.8 772.5ZM642.9 772.5C617.9 772.5 597.9 792.5 597.9 817.5S617.9 862.5 642.9 862.5 687.9 842.5 687.9 817.5 667.9 772.5 642.9 772.5ZM983.3 219.6V573.3C983.3 584.2 975.4 592.9 965.4 594.6H961.7C961.7 595 861.3 595 861.3 595V636.7C861.3 647.5 853.3 656.3 843.3 657.9H839.6C839.6 658.3 158.3 658.3 158.3 658.3 147.5 658.3 138.7 650.4 137.1 640.4V636.7C136.7 636.7 136.7 595 136.7 595H35.8C25 595 16.3 587.1 14.6 577.1V573.3C14.2 573.3 14.2 219.6 14.2 219.6 14.2 208.7 22.1 200 32.1 198.3H35.8C35.8 197.9 136.3 197.9 136.3 197.9V156.2C136.3 145.4 144.2 136.7 154.2 135H157.9C157.9 134.6 839.2 134.6 839.2 134.6 850 134.6 858.8 142.5 860.4 152.5V156.2C860.8 156.2 860.8 197.9 860.8 197.9H961.3C972.1 197.9 980.8 205.8 982.5 215.8V219.6ZM136.3 551.7V241.3H57.9V551.3H136.7ZM817.5 573.3V178.3H180V615H817.5V573.3ZM939.6 241.7H860.8V551.7H939.6V241.3Z","width":1000,"height":1000},"post-list":{"path":"M271 21H21C9 21 0 30 0 42V292C0 303 9 312 21 312H271C282 312 292 303 292 292V42C292 30 282 21 271 21ZM250 271H42V62H250V271ZM396 187H979C991 187 1000 178 1000 167S991 146 979 146H396C384 146 375 155 375 167S384 187 396 187ZM396 104H646C657 104 667 95 667 83S657 62 646 62H396C384 62 375 72 375 83S384 104 396 104ZM979 229H396C384 229 375 238 375 250S384 271 396 271H979C991 271 1000 261 1000 250S991 229 979 229ZM271 354H21C9 354 0 363 0 375V625C0 636 9 646 21 646H271C282 646 292 636 292 625V375C292 363 282 354 271 354ZM250 604H42V396H250V604ZM979 479H396C384 479 375 488 375 500S384 521 396 521H979C991 521 1000 511 1000 500S991 479 979 479ZM396 437H646C657 437 667 428 667 417S657 396 646 396H396C384 396 375 405 375 417S384 437 396 437ZM979 562H396C384 562 375 572 375 583S384 604 396 604H979C991 604 1000 595 1000 583S991 562 979 562ZM271 687H21C9 687 0 697 0 708V958C0 970 9 979 21 979H271C282 979 292 970 292 958V708C292 697 282 687 271 687ZM250 938H42V729H250V938ZM979 812H396C384 812 375 822 375 833S384 854 396 854H979C991 854 1000 845 1000 833S991 812 979 812ZM396 771H646C657 771 667 761 667 750S657 729 646 729H396C384 729 375 738 375 750S384 771 396 771ZM979 896H396C384 896 375 905 375 917S384 938 396 938H979C991 938 1000 928 1000 917S991 896 979 896Z","width":1000,"height":1000},"gallery-justified":{"path":"M21 333H229C241 333 250 324 250 312V104C250 93 241 83 229 83H21C9 83 0 93 0 104V312C0 324 9 333 21 333ZM42 125H208V292H42V125ZM313 333H688C699 333 708 324 708 312V104C708 93 699 83 688 83H313C301 83 292 93 292 104V312C292 324 301 333 313 333ZM333 125H667V292H333V125ZM979 83H771C759 83 750 93 750 104V312C750 324 759 333 771 333H979C991 333 1000 324 1000 312V104C1000 93 991 83 979 83ZM958 292H792V125H958V292ZM688 375H479C468 375 458 384 458 396V604C458 616 468 625 479 625H688C699 625 708 616 708 604V396C708 384 699 375 688 375ZM667 583H500V417H667V583ZM21 625H396C407 625 417 616 417 604V396C417 384 407 375 396 375H21C9 375 0 384 0 396V604C0 616 9 625 21 625ZM42 417H375V583H42V417ZM979 375H771C759 375 750 384 750 396V604C750 616 759 625 771 625H979C991 625 1000 616 1000 604V396C1000 384 991 375 979 375ZM958 583H792V417H958V583ZM188 667H21C9 667 0 676 0 687V896C0 907 9 917 21 917H188C199 917 208 907 208 896V687C208 676 199 667 188 667ZM167 875H42V708H167V875ZM604 667H271C259 667 250 676 250 687V896C250 907 259 917 271 917H604C616 917 625 907 625 896V687C625 676 616 667 604 667ZM583 875H292V708H583V875ZM979 667H688C676 667 667 676 667 687V896C667 907 676 917 688 917H979C991 917 1000 907 1000 896V687C1000 676 991 667 979 667ZM958 875H708V708H958V875Z","width":1000,"height":1000},"animated-headline":{"path":"M246 237C238 221 208 221 204 237L67 604C63 617 67 629 79 633 92 637 104 633 108 621L154 500C154 500 154 500 154 500H292C292 500 292 500 292 500L338 621C342 629 350 637 358 637 363 637 363 637 367 637 379 633 383 621 379 608L246 237ZM171 450L225 308 279 450H171ZM817 358C854 358 883 387 883 425 883 437 892 446 904 446 917 446 925 437 925 425 925 362 875 312 813 312 750 312 700 362 700 425V517C700 579 750 629 813 629 875 629 925 579 925 517 925 504 917 496 904 496 892 496 883 504 883 517 883 554 854 583 817 583S750 554 750 517V425C746 392 779 358 817 358ZM542 312C517 312 492 321 475 337V246C475 233 467 225 454 225 442 225 433 233 433 246V429 450 496 517 608C433 621 442 629 454 629 467 629 475 621 475 608V608C496 621 517 633 542 633 604 633 654 583 654 521V429C658 362 604 312 542 312ZM613 517C613 554 583 583 546 583S479 554 479 517V496 450 429C479 392 508 362 546 362S613 392 613 429V517ZM63 767C429 712 696 696 871 721 925 729 946 746 913 767","width":1000,"height":1000},"blockquote":{"path":"M396 167H104C70 167 42 195 42 229V521C42 555 70 583 104 583H208V652C208 692 186 727 151 745L53 794C45 798 40 808 42 817 44 827 53 833 63 833H204C303 833 390 770 421 677 446 603 458 527 458 449V229C458 195 430 167 396 167ZM417 449C417 522 405 594 382 663 356 740 285 792 204 792H151L169 782C219 757 250 707 250 652V562C250 551 241 542 229 542H104C93 542 83 532 83 521V229C83 218 93 208 104 208H396C407 208 417 218 417 229 417 229 417 449 417 449ZM896 167H604C570 167 542 195 542 229V521C542 555 570 583 604 583H708V652C708 692 686 727 651 745L553 794C545 798 540 808 542 817 544 827 553 833 563 833H704C803 833 890 770 921 677 946 603 958 527 958 449V229C958 195 930 167 896 167ZM917 449C917 522 905 594 882 663 856 740 785 792 704 792H651L669 782C719 757 750 707 750 652V562C750 551 741 542 729 542H604C593 542 583 532 583 521V229C583 218 593 208 604 208H896C907 208 917 218 917 229V449Z","width":1000,"height":1000},"countdown":{"path":"M779 226L829 158C836 149 834 136 825 129 816 122 803 124 796 133L746 201C692 164 630 140 563 130V42H583C595 42 604 32 604 21S595 0 583 0H542 458 417C405 0 396 9 396 21S405 42 417 42H438V130C371 140 308 164 255 200L204 133C197 124 184 122 175 129S164 149 171 158L221 226C124 306 63 427 63 562 63 804 259 1000 500 1000S938 804 938 562C938 427 876 306 779 226ZM479 42H521V126C514 126 507 125 500 125S486 126 479 126V42ZM500 958C282 958 104 781 104 562S282 167 500 167 896 344 896 562 718 958 500 958ZM500 208C489 208 479 218 479 229V562C479 574 489 583 500 583H833C845 583 854 574 854 562 854 367 695 208 500 208ZM521 542V251C677 261 802 386 812 542H521Z","width":1000,"height":1000},"share":{"path":"M833 667C776 667 725 696 695 741L323 555C329 538 333 519 333 500S329 462 323 445L695 259C725 304 776 333 833 333 925 333 1000 259 1000 167S925 0 833 0 667 75 667 167C667 186 671 204 677 222L305 407C275 363 224 333 167 333 75 333 0 408 0 500S75 667 167 667C224 667 275 637 305 592L677 778C671 796 667 814 667 833 667 925 741 1000 833 1000S1000 925 1000 833 925 667 833 667ZM833 42C902 42 958 98 958 167S902 292 833 292C785 292 743 263 722 223 722 222 722 222 722 222 722 222 722 222 722 222 714 205 708 187 708 167 708 98 764 42 833 42ZM167 625C98 625 42 569 42 500S98 375 167 375C215 375 257 403 278 444 278 444 278 444 278 444 278 444 278 444 278 444 287 461 292 480 292 500 292 520 287 538 278 555 278 555 278 555 278 556 278 556 278 556 278 556 257 597 215 625 167 625ZM833 958C764 958 708 902 708 833 708 813 714 795 722 778 722 778 722 778 722 778 722 778 722 778 722 777 743 737 785 708 833 708 902 708 958 764 958 833S902 958 833 958Z","width":1000,"height":1000},"table-of-contents":{"path":"M854 0C888 0 917 29 917 62V938C917 971 888 1000 854 1000H146C113 1000 83 971 83 938V62C83 29 113 0 146 0H854ZM875 208H125V938C125 946 133 954 142 958L146 958H854C863 958 871 950 875 942L875 938V208ZM271 792C283 792 292 800 292 812V854C292 867 283 875 271 875H229C217 875 208 867 208 854V812C208 800 217 792 229 792H271ZM771 812C783 812 792 821 792 833S783 854 771 854H354C342 854 333 846 333 833S342 812 354 812H771ZM271 625C279 625 288 633 292 642L292 646V687C292 696 283 704 275 708L271 708H229C221 708 213 700 208 692L208 687V646C208 637 217 629 225 625L229 625H271ZM771 646C783 646 792 654 792 667 792 675 783 683 775 687L771 687H354C342 687 333 679 333 667 333 658 342 650 350 646L354 646H771ZM271 458C283 458 292 467 292 479V521C292 533 283 542 271 542H229C217 542 208 533 208 521V479C208 467 217 458 229 458H271ZM771 479C783 479 792 487 792 500S783 521 771 521H354C342 521 333 512 333 500S342 479 354 479H771ZM271 292C279 292 288 300 292 308L292 312V354C292 362 283 371 275 375L271 375H229C221 375 213 367 208 358L208 354V312C208 304 217 296 225 292L229 292H271ZM771 312C783 312 792 321 792 333 792 342 783 350 775 354L771 354H354C342 354 333 346 333 333 333 325 342 317 350 312L354 312H771ZM854 42H146C138 42 129 50 125 58L125 62V167H875V62C875 54 867 46 854 42L854 42Z","width":1000,"height":1000},"lock-user":{"path":"M459 83C463 83 467 82 471 79 517 46 567 42 610 42 668 42 710 60 733 95 760 137 748 159 735 173L715 194C711 197 709 202 708 207L703 312C703 317 705 323 709 327S718 333 724 333C730 333 735 336 739 341 743 345 745 351 744 357L734 440C733 450 724 458 711 458 701 458 692 466 691 476 687 499 670 530 669 531 664 541 667 553 677 559 687 565 700 561 706 551 706 550 720 524 728 498 753 492 772 471 775 445L786 362C788 344 782 327 771 313 764 305 755 299 746 296L750 217 765 202C789 177 808 134 767 72 736 24 683 0 610 0 581 0 514 0 452 42 274 45 250 128 250 208 250 227 255 269 258 295 247 298 237 304 230 313 218 326 212 344 214 362L225 445C228 472 249 494 275 499 284 556 311 612 352 654L337 712 177 752C73 778 0 872 0 979 0 985 2 990 6 994 10 998 15 1000 21 1000L563 999C574 999 583 990 583 978 583 967 574 958 563 958 563 958 563 958 563 958L43 958C51 879 109 812 188 792L359 749C367 748 373 742 374 734L395 653C397 645 394 637 389 632 347 593 319 535 314 478 314 467 304 458 294 458H287C276 458 267 451 266 440L256 357C255 351 257 345 261 340 265 336 270 333 276 333H281C287 333 292 331 296 326 300 322 302 316 301 310 299 289 292 229 292 208 292 143 305 85 459 83ZM979 707H958V687C958 606 893 541 813 541S667 606 667 687V707H646C634 707 625 717 625 728V978C625 990 634 999 646 999H979C991 999 1000 990 1000 978V728C1000 717 991 707 979 707ZM708 687C708 629 755 582 813 582S917 629 917 687V707H708V687ZM958 958H667V749H958V958ZM792 868V895C792 907 801 916 813 916S833 907 833 895V868C846 861 854 848 854 832 854 809 836 791 813 791S771 809 771 832C771 848 779 861 792 868Z","width":1000,"height":1000},"site-search":{"path":"M958 250H42V892C42 929 70 958 104 958H896C930 958 958 929 958 892V250ZM958 208V150C958 113 930 83 896 83H104C70 83 42 113 42 150V208H958ZM1000 892C1000 951 954 1000 896 1000H104C46 1000 0 951 0 892V150C0 90 46 42 104 42H896C954 42 1000 90 1000 150V892ZM125 146C125 157 116 167 104 167S83 157 83 146 93 125 104 125 125 134 125 146ZM208 146C208 157 199 167 188 167S167 157 167 146 176 125 188 125 208 134 208 146ZM292 146C292 157 283 167 271 167 259 167 250 157 250 146S259 125 271 125C283 125 292 134 292 146ZM433 637C433 638 432 639 431 640L285 785C277 794 264 794 256 785S248 764 256 756L402 610C403 609 403 609 404 608 385 584 375 553 375 520 375 440 440 375 520 375S666 440 666 520 601 666 520 666C488 667 458 656 433 637ZM625 521C625 463 578 417 521 417S417 463 417 521 463 625 521 625 625 578 625 521Z","width":1000,"height":1000},"lottie":{"path":"M200 83C213 83 223 94 223 107S213 130 200 130 177 120 177 107 187 83 200 83ZM247 147C254 136 268 133 279 140 315 164 343 195 365 226 373 237 370 251 360 259S335 264 327 253C308 226 283 199 253 180 243 172 240 158 247 147ZM384 293C395 287 409 291 415 303 439 347 458 396 467 449 467 452 468 457 468 461L469 470 533 470C544 470 554 478 555 489L556 493C556 505 548 514 536 516L533 516 471 516 471 530 471 545 470 564C469 580 468 594 467 604 455 707 417 794 350 850 287 905 178 923 101 854 63 819 38 766 43 695 48 625 78 577 128 538 187 491 280 471 397 470L422 470 422 467 420 456C413 410 395 365 374 325 368 314 373 300 384 293ZM425 516L413 516C298 516 208 533 157 574 116 607 93 642 89 698 85 754 104 793 133 819 189 870 273 855 320 815 377 766 410 691 421 598L422 585C423 576 424 564 424 552L425 536 425 516ZM802 474L932 477C945 478 955 489 955 502 954 513 945 522 935 524L931 524 801 520C788 520 778 509 778 496 779 485 788 475 798 474L802 474ZM647 469L714 471C727 472 737 482 736 495 736 507 727 516 716 518L713 518 646 516H621C608 516 598 506 598 493 598 481 606 472 617 470L621 470 647 469Z","width":1000,"height":1000},"image-hotspot":{"path":"M229 542C287 542 333 495 333 437S287 333 229 333 125 380 125 437 172 542 229 542ZM229 375C264 375 292 403 292 437S264 500 229 500 167 472 167 437 195 375 229 375ZM979 208H832C833 201 833 194 833 187 833 107 768 42 688 42S542 107 542 187C542 194 542 201 543 208H21C9 208 0 218 0 229V938C0 949 9 958 21 958H979C991 958 1000 949 1000 938V229C1000 218 991 208 979 208ZM688 83C745 83 792 130 792 187 792 262 721 386 688 440 654 386 583 262 583 187 583 130 630 83 688 83ZM552 250C581 356 666 484 670 491 674 496 681 500 688 500S701 496 705 491C709 484 794 356 823 250H958V797L787 591C779 581 763 581 755 591L670 693 539 469C535 462 529 458 521 458 515 459 507 462 503 468L331 736 203 590C199 585 192 583 185 583 179 584 173 588 169 594L42 817V250H552ZM42 917V901L191 640 318 785C322 789 328 792 335 792 341 791 347 788 351 782L520 519 649 740C652 746 658 749 665 750 672 750 678 748 683 742L771 637 958 862V917H42ZM750 187C750 153 722 125 688 125S625 153 625 187 653 250 688 250 750 222 750 187ZM667 187C667 176 676 167 688 167S708 176 708 187 699 208 688 208 667 199 667 187Z","width":1000,"height":1000},"video-playlist":{"path":"M407 377C412 375 419 374 425 377L428 378 720 566C725 570 729 576 729 583 729 589 727 595 723 599L720 601 428 788C425 790 420 792 417 792 413 792 410 791 407 789 401 786 398 781 396 775L396 771V396C396 388 400 381 407 377ZM438 434V733L670 584 438 434ZM904 146C918 146 929 157 929 171V188H71V171C71 157 83 146 96 146H904ZM832 62C846 62 857 74 857 87V104H143V87C143 74 154 62 168 62H832ZM979 938H21C9 938 0 928 0 917V250C0 238 9 229 21 229H979C991 229 1000 238 1000 250V917C1000 928 991 938 979 938ZM42 896H958V271H42V896Z","width":1000,"height":1000},"paypal-button":{"path":"M535 422L826 672C833 677 835 687 832 695 829 703 821 708 813 708H725L799 830C802 835 803 841 801 846 800 852 796 856 792 859L698 914C695 915 692 917 688 917 686 917 684 916 682 916 677 914 672 910 670 905L599 764 536 827C530 833 521 835 514 832 506 828 501 821 501 812V437C501 429 505 422 513 419 520 415 528 416 535 422ZM542 483V762L590 715C593 711 599 708 604 708 605 708 606 708 608 709 614 710 620 714 623 720L696 867 752 834 670 698C666 692 665 684 669 677 673 670 680 666 688 666H756L542 483ZM896 83C953 83 1000 130 1000 187V437C1000 495 953 542 896 542H729C718 542 708 532 708 521S718 500 729 500H896C928 500 955 475 958 443L958 437V187C958 155 934 128 902 125L896 125H104C72 125 45 150 42 182L42 187V437C42 470 66 497 98 500L104 500H438C449 500 458 509 458 521S449 542 438 542H104C47 542 0 495 0 437V187C0 130 47 83 104 83H896ZM538 268C543 268 545 271 543 275L542 277 439 425C438 427 435 428 433 429L430 429H400C397 429 395 426 396 423L397 421 430 375 396 277C395 273 396 270 400 268L402 268H429C433 268 435 269 437 272L438 274 457 336 500 274C502 270 504 269 507 268L510 267H538ZM300 264C315 264 328 268 333 277L335 281C337 283 338 284 338 282L339 280 340 274C340 271 342 270 343 269L345 269H374C377 269 378 270 378 274L378 277 362 379C361 385 359 387 356 387L354 387H327C324 387 323 386 323 384L323 382 323 374C324 372 322 372 320 374L318 375C308 385 298 391 278 391 248 391 227 367 229 336 232 296 259 265 300 264ZM760 264C775 264 787 268 793 277L795 281C796 283 798 284 798 282L798 280 800 274C800 271 801 270 803 269L804 269H833C836 269 838 270 838 274L838 277 821 378C820 384 818 386 815 387L813 387H786C783 387 782 385 782 383L782 381 783 373C783 371 781 371 779 373L778 374C767 384 758 390 737 390 708 390 686 366 688 335 691 296 719 265 760 264ZM906 209C908 209 910 210 910 212L910 213 883 383C883 385 882 386 880 387L878 387H848C846 387 844 386 844 384L844 383 871 213C871 210 873 209 876 209H906ZM189 208C216 208 241 223 238 260 233 303 210 327 173 327H142C137 327 135 331 134 338L128 377C127 383 123 386 119 386H90C85 386 83 383 84 376L108 219C110 211 113 208 118 208H189ZM649 208C676 208 700 223 697 260 693 303 670 327 633 327H601C596 327 594 331 593 338L587 377C586 383 583 386 578 386H549C544 386 543 383 543 376L568 218C569 210 572 207 578 207H649ZM305 296C288 296 271 310 269 327 266 345 278 359 296 359 313 359 330 345 333 327 335 310 323 296 305 296ZM765 296C748 296 731 310 728 327 726 345 738 359 755 359 773 359 790 345 792 327 795 310 783 296 765 296ZM171 243L148 243 140 293H165L169 292C182 290 190 280 191 263 192 251 184 243 171 243ZM631 243L608 243 600 293H624C639 292 650 282 650 263 651 251 643 243 631 243Z","width":1000,"height":1000},"stripe-button":{"path":"M468 505L760 755C766 761 769 770 765 778 763 786 755 792 746 792H658L732 914C735 918 736 924 735 930 733 935 730 940 725 943L632 997C628 999 625 1000 621 1000 619 1000 617 1000 615 999 610 998 605 994 603 988L533 847 470 910C464 916 455 918 447 915 439 912 434 904 434 896V521C434 512 439 505 446 502 453 498 462 500 468 505ZM475 566V846L523 798C527 794 532 792 538 792 539 792 540 792 541 792 548 793 553 797 556 803L630 950 685 918 603 782C599 775 599 767 603 760 606 754 613 750 621 750H690L475 566ZM896 167C953 167 1000 213 1000 271V521C1000 578 953 625 896 625H663C651 625 642 616 642 604S651 583 663 583H896C928 583 955 559 958 527L958 521V271C958 238 934 212 902 209L896 208H104C72 208 45 233 42 265L42 271V521C42 553 66 580 98 583L104 583H371C383 583 392 592 392 604S383 625 371 625H104C47 625 0 578 0 521V271C0 213 47 167 104 167H896ZM635 297C670 297 703 328 704 386 704 450 671 479 635 479 622 479 613 475 605 470L599 466 599 523 549 533V300H593L595 312C603 306 615 297 635 297ZM325 257L325 300H363V342H324V414C324 436 343 436 355 434L359 432 359 432 363 431V472C356 476 344 479 327 479 299 479 278 460 275 433L275 427 275 267 325 257ZM205 297C222 297 239 299 255 306V353C240 345 221 340 205 340 195 340 188 343 188 351 188 357 193 360 201 363L209 366 209 366 222 371 222 371 231 374C249 382 265 395 265 422 265 458 237 479 195 479 177 479 158 475 140 467V420C157 429 178 436 195 436 206 436 214 433 214 424 214 416 207 412 196 408L179 402 179 402 170 398C153 390 138 378 138 353 138 318 165 297 205 297ZM790 297C835 297 860 333 863 382L863 391 863 391 862 407H764C766 430 783 437 803 437 820 437 834 434 846 429L852 426V466C838 473 820 479 796 479 747 479 713 448 713 388 713 337 742 297 790 297ZM530 300V475H480V300H530ZM467 300V346C461 344 441 341 429 357V475H379V300H422L425 315C437 293 461 297 467 300ZM623 341C613 341 606 344 601 349L599 351 599 425C604 430 611 435 623 435 641 435 653 415 653 388 654 362 641 341 623 341ZM790 337C778 337 765 345 763 364L763 369H815C815 347 802 337 790 337ZM530 233V274L480 285V244L530 233Z","width":1000,"height":1000},"media-carousel":{"path":"M500 729C488 729 479 737 479 750 479 762 488 771 500 771 513 771 521 762 521 750 521 737 513 729 500 729M583 729C571 729 563 737 563 750 563 762 571 771 583 771 596 771 604 762 604 750 604 737 596 729 583 729M396 750C396 762 404 771 417 771 429 771 438 762 438 750 438 737 429 729 417 729 404 729 396 737 396 750M117 275L33 317C21 321 17 333 25 342 29 354 42 358 50 350L104 325V587L50 562C38 554 29 558 25 571 17 583 21 592 33 596L117 637 125 646 133 642C142 637 146 633 142 625V292C142 283 138 279 133 275 129 271 121 271 117 275M813 250C813 237 804 229 792 229H208C196 229 188 237 188 250V667C188 679 196 687 208 687H792C804 687 813 679 813 667V250M771 646H229V271H771V646M463 367L458 367C450 367 446 371 446 375V546L446 550C450 554 458 558 463 554L596 471 600 467C604 462 600 454 596 450L463 367M896 329L946 354C958 362 967 358 971 346 979 333 975 325 963 321L879 279C871 275 867 275 858 279 854 283 850 287 850 296V629C850 637 854 646 858 646L871 650 879 646 963 604C975 600 979 592 971 579 967 567 954 562 946 571L896 596V329Z","width":1000,"height":1000},"testimonial-carousel":{"path":"M25 400C17 412 17 421 25 433L108 517C121 525 129 525 142 517 150 508 150 496 142 483L71 417 142 350C150 342 150 329 142 317 133 308 121 308 108 317L25 400M975 433C983 425 983 412 975 400L892 317C883 308 871 308 858 317 850 329 850 337 858 350L925 417 858 483C850 496 850 504 858 517 871 525 879 525 892 517L975 433M746 254C729 237 708 229 683 229H317C292 229 271 237 254 254 238 275 229 296 229 317V542C229 567 238 587 258 608 275 625 296 633 321 633H354L300 737C296 746 296 754 304 762 313 771 321 771 329 762L504 633H679C704 633 725 625 742 608 758 592 767 567 767 542V317C771 296 763 275 746 254M717 283C725 292 729 304 729 317V542C729 554 725 567 717 575 708 583 696 592 683 592H500L488 596 379 679 404 625C408 617 408 612 404 604S396 596 388 596H317C304 596 292 592 283 579 275 571 267 558 267 546V317C267 304 271 292 283 283 292 275 304 271 317 271H683C696 271 704 275 717 283Z","width":1000,"height":1000},"review":{"path":"M254 737C196 737 146 687 146 629V337C146 279 192 229 254 229H746C804 229 854 279 854 337V629C854 687 808 737 746 737H463L263 850C246 858 225 842 233 825L275 737H254ZM446 700C450 700 454 696 454 696H746C783 696 813 667 813 629V337C813 300 783 271 746 271H254C217 271 188 300 188 337V629C188 667 217 696 254 696H313C329 696 338 712 329 725L300 783 446 700ZM492 546C496 542 504 542 513 546L563 571 554 517C554 508 554 504 558 500L596 462 542 454C533 454 529 450 525 442L500 392 475 442C471 446 467 450 458 454L404 462 442 500C446 504 450 512 446 517L438 571 492 546ZM425 629C408 637 392 625 396 608L408 525 346 467C333 454 342 433 358 429L442 417 479 342C488 325 508 325 517 342L554 417 638 429C654 433 663 454 650 467L588 525 600 608C604 625 583 637 571 629L496 587 425 629ZM883 412C875 404 875 392 883 383 892 375 904 375 913 383L988 458C996 467 996 479 988 487L913 562C904 571 892 571 883 562 875 554 875 542 883 533L942 475 883 412ZM121 412L63 471 121 529C129 537 129 550 121 558 113 567 100 567 92 558L17 483C8 475 8 462 17 454L92 379C100 371 113 371 121 379 129 387 129 404 121 412Z","width":1000,"height":1000},"off-canvas":{"path":"M919.3 131.7C896.2 111.7 865.6 101 834.4 101H643.5S643.3 101 643.2 101H165.6C134.4 101 103.8 111.7 80.7 131.7 57.5 151.8 43.5 179.8 43.5 210.1V788.2C43.5 818.5 57.5 846.6 80.7 866.7 103.8 886.6 134.4 897.3 165.6 897.3H834.4C865.6 897.3 896.2 886.6 919.3 866.7 942.5 846.6 956.5 818.5 956.5 788.2V375.5S956.5 375.3 956.5 375.2V210.1C956.5 179.8 942.5 151.7 919.3 131.7ZM604.4 292.7V844.3H165.6C146.2 844.3 128.2 837.5 115.4 826.5 102.8 815.6 96.6 801.8 96.6 788.2V210.1C96.6 196.6 102.8 182.7 115.4 171.8 128.2 160.8 146.2 154.1 165.6 154.1H604.4V292.7ZM657.5 844.3V772.5L725.1 844.3H657.5ZM884.6 826.5C871.8 837.5 853.8 844.3 834.4 844.3H798.1L657.5 695.1V561.8L902.3 798.3C899.9 808.5 894.1 818.3 884.6 826.5ZM903.4 725.6L657.5 487.9V355.3L903.4 593V725.6ZM903.4 519.2L657.5 281.5V174.9L903.4 387.4V519.2ZM903.4 317.3L714.6 154.1H834.4C853.9 154.1 871.9 160.8 884.6 171.8 897.3 182.8 903.4 196.6 903.4 210.2V317.3Z","width":1000,"height":1000},"site-logo":{"path":"M958 250H42V892C42 929 70 958 104 958H896C930 958 958 929 958 892V250ZM958 208V150C958 113 930 83 896 83H104C70 83 42 113 42 150V208H958ZM1000 892C1000 951 954 1000 896 1000H104C46 1000 0 951 0 892V150C0 90 46 42 104 42H896C954 42 1000 90 1000 150V892ZM125 146C125 157 116 167 104 167S83 157 83 146 93 125 104 125 125 134 125 146M208 146C208 157 199 167 188 167S167 157 167 146 176 125 188 125 208 134 208 146M292 146C292 157 283 167 271 167 259 167 250 157 250 146S259 125 271 125C283 125 292 134 292 146M179 544H190C196 544 202 550 202 557V660C202 667 208 672 215 672H245C252 672 258 678 258 685L258 695C258 702 253 707 245 707 245 707 245 707 245 707L180 707C173 707 167 702 167 695V557C167 550 172 544 179 544ZM412 625C412 609 407 596 398 586 388 577 375 572 359 572S331 577 321 586C311 596 306 609 306 625 306 641 311 654 321 664 331 673 343 678 359 678S388 673 398 664C408 654 412 641 412 625ZM297 685C280 669 271 649 271 625 271 601 280 581 297 565S335 542 360 542 406 550 423 565C440 581 448 601 448 625 448 649 440 669 423 685 406 700 385 708 360 708 335 708 314 700 297 685ZM466 625C466 601 475 581 492 565 509 550 530 542 555 542 573 542 590 546 605 555 619 564 630 578 633 590 634 598 625 600 611 600 607 600 603 597 600 593 592 579 573 571 554 571 538 571 526 576 516 586 506 595 501 608 501 625 501 641 506 654 516 663 526 673 538 678 552 678S577 674 586 668C595 662 598 656 600 648H555C549 648 543 643 543 636 543 636 543 635 543 635L543 628C544 622 549 616 556 616L625 617C632 617 637 622 637 630V640C634 658 627 674 611 687 595 701 576 707 552 707S508 700 491 684C474 669 466 649 466 625ZM798 625C798 609 793 596 783 586 773 577 760 572 745 572 729 572 716 577 706 586 696 596 692 609 692 625 692 641 697 654 706 664 716 673 729 678 745 678 760 678 773 673 783 664 793 654 798 641 798 625ZM682 685C665 669 657 649 657 625 657 601 665 581 683 565S720 542 745 542C770 542 791 550 808 565 825 581 834 601 834 625 834 649 825 669 808 685 791 700 770 708 745 708 720 708 699 700 682 685ZM854 792H146C134 792 125 782 125 771S134 750 146 750H854C866 750 875 759 875 771S866 792 854 792ZM854 500H146C134 500 125 491 125 479S134 458 146 458H854C866 458 875 467 875 479S866 500 854 500Z","width":1000,"height":1000},"site-title":{"path":"M958 250H42V892C42 929 70 958 104 958H896C930 958 958 929 958 892V250ZM958 208V150C958 113 930 83 896 83H104C70 83 42 113 42 150V208H958ZM1000 892C1000 951 954 1000 896 1000H104C46 1000 0 951 0 892V150C0 90 46 42 104 42H896C954 42 1000 90 1000 150V892ZM125 146C125 157 116 167 104 167S83 157 83 146 93 125 104 125 125 134 125 146M208 146C208 157 199 167 188 167S167 157 167 146 176 125 188 125 208 134 208 146M292 146C292 157 283 167 271 167 259 167 250 157 250 146S259 125 271 125C283 125 292 134 292 146M667 512C655 512 646 503 646 491V458H354V491C354 503 345 512 333 512S313 503 313 491V437C313 426 322 417 333 417H667C678 417 688 426 688 437V491C688 502 678 512 667 512ZM500 770C488 770 479 761 479 749V442C479 430 488 421 500 421 512 421 521 430 521 442V749C521 761 512 770 500 770ZM563 792H438C426 792 417 782 417 771S426 750 438 750H563C574 750 583 759 583 771S574 792 563 792Z","width":1000,"height":1000},"post-title":{"path":"M479 750C479 750 479 750 479 749V458H354V491C354 503 345 512 333 512S313 503 313 491V437C313 426 322 417 333 417H667C678 417 688 426 688 437V491C688 503 678 512 667 512S646 503 646 491V458H521V749C521 750 521 750 521 750H563C574 750 583 759 583 771S574 792 563 792H438C426 792 417 782 417 771S426 750 438 750H479ZM380 7C384 2 390 0 396 0H813C847 0 875 28 875 62V938C875 972 847 1000 813 1000H188C153 1000 125 972 125 938V271C125 265 128 259 132 255L380 7ZM375 71L196 250H354C366 250 375 241 375 229V71ZM813 42H417V229C417 264 389 292 354 292H167V938C167 949 176 958 188 958H813C824 958 833 949 833 938V62C833 51 824 42 813 42Z","width":1000,"height":1000},"post-content":{"path":"M435 583H315L290 653C287 664 275 670 264 665 253 662 247 650 251 639L355 347C362 329 388 329 395 347L499 639C503 650 497 662 486 665S463 664 460 653L435 583ZM420 542L375 416 330 542H420ZM380 7C384 2 390 0 396 0H813C847 0 875 28 875 62V938C875 972 847 1000 813 1000H188C153 1000 125 972 125 938V271C125 265 128 259 132 255L380 7ZM375 71L196 250H354C366 250 375 241 375 229V71ZM813 42H417V229C417 264 389 292 354 292H167V938C167 949 176 958 188 958H813C824 958 833 949 833 938V62C833 51 824 42 813 42ZM563 375C551 375 542 366 542 354S551 333 563 333H729C741 333 750 342 750 354S741 375 729 375H563ZM563 500C551 500 542 491 542 479S551 458 563 458H729C741 458 750 467 750 479S741 500 729 500H563ZM563 625C551 625 542 616 542 604S551 583 563 583H729C741 583 750 592 750 604S741 625 729 625H563ZM292 771C280 771 271 762 271 750S280 729 292 729H750C762 729 771 738 771 750S762 771 750 771H292ZM292 896C280 896 271 887 271 875S280 854 292 854H750C762 854 771 863 771 875S762 896 750 896H292Z","width":1000,"height":1000},"featured-image":{"path":"M104 667C93 667 83 657 83 646V104C83 92 93 83 104 83H896C908 83 917 92 917 104V646C917 657 908 667 896 667H104ZM125 625H875V125H125V625ZM104 792C93 792 83 782 83 771S93 750 104 750H438C449 750 458 759 458 771S449 792 438 792H104ZM563 792C551 792 542 782 542 771S551 750 563 750H896C908 750 917 759 917 771S908 792 896 792H563ZM104 917C93 917 83 908 83 896S93 875 104 875H438C449 875 458 884 458 896S449 917 438 917H104ZM563 917C551 917 542 908 542 896S551 875 563 875H896C908 875 917 884 917 896S908 917 896 917H563ZM317 440L120 660C112 669 99 669 90 662 81 654 81 641 88 632L298 399C305 391 317 390 325 396L449 484 623 266C632 255 648 256 656 267L913 634C919 644 917 657 908 663 898 670 885 667 878 658L638 315 470 526C463 535 450 537 441 530L317 440ZM306 254C306 229 287 208 263 208S220 229 220 254 240 300 263 300 306 280 306 254ZM348 254C348 302 310 342 263 342S179 302 179 254 216 167 263 167 348 206 348 254Z","width":1000,"height":1000},"archive-title":{"path":"M958 250H42V896C42 930 70 958 104 958H896C930 958 958 930 958 896V250ZM958 208V146C958 111 930 83 896 83H104C70 83 42 111 42 146V208H958ZM1000 896C1000 953 953 1000 896 1000H104C47 1000 0 953 0 896V146C0 88 47 42 104 42H896C953 42 1000 88 1000 146V896ZM125 146C125 157 116 167 104 167S83 157 83 146 93 125 104 125 125 134 125 146ZM208 146C208 157 199 167 188 167S167 157 167 146 176 125 188 125 208 134 208 146ZM292 146C292 157 283 167 271 167 259 167 250 157 250 146S259 125 271 125C283 125 292 134 292 146ZM146 875C134 875 125 866 125 854V771C125 759 134 750 146 750H229C241 750 250 759 250 771V854C250 866 241 875 229 875H146ZM167 833H208V792H167V833ZM313 792C301 792 292 782 292 771S301 750 313 750H438C449 750 458 759 458 771S449 792 438 792H313ZM313 875C301 875 292 866 292 854S301 833 313 833H438C449 833 458 842 458 854S449 875 438 875H313ZM563 875C551 875 542 866 542 854V771C542 759 551 750 563 750H646C658 750 667 759 667 771V854C667 866 658 875 646 875H563ZM583 833H625V792H583V833ZM729 792C718 792 708 782 708 771S718 750 729 750H854C866 750 875 759 875 771S866 792 854 792H729ZM729 875C718 875 708 866 708 854S718 833 729 833H854C866 833 875 842 875 854S866 875 854 875H729ZM479 583V375H396V397C396 409 387 418 375 418S354 409 354 397V354C354 342 363 333 375 333H625C637 333 646 342 646 354V397C646 409 637 418 625 418S604 409 604 397V375H521V583H563C574 583 583 592 583 604S574 625 563 625H438C426 625 417 616 417 604S426 583 438 583H479Z","width":1000,"height":1000},"archive-posts":{"path":"M958 250H42V896C42 930 70 958 104 958H896C930 958 958 930 958 896V250ZM958 208V146C958 111 930 83 896 83H104C70 83 42 111 42 146V208H958ZM1000 896C1000 953 953 1000 896 1000H104C47 1000 0 953 0 896V146C0 88 47 42 104 42H896C953 42 1000 88 1000 146V896ZM146 458C134 458 125 449 125 437V354C125 342 134 333 146 333H229C241 333 250 342 250 354V437C250 449 241 458 229 458H146ZM167 417H208V375H167V417ZM146 667C134 667 125 657 125 646V562C125 551 134 542 146 542H229C241 542 250 551 250 562V646C250 657 241 667 229 667H146ZM167 625H208V583H167V625ZM146 875C134 875 125 866 125 854V771C125 759 134 750 146 750H229C241 750 250 759 250 771V854C250 866 241 875 229 875H146ZM167 833H208V792H167V833ZM313 375C301 375 292 366 292 354S301 333 313 333H438C449 333 458 342 458 354S449 375 438 375H313ZM313 458C301 458 292 449 292 437S301 417 313 417H438C449 417 458 426 458 437S449 458 438 458H313ZM313 583C301 583 292 574 292 562S301 542 313 542H438C449 542 458 551 458 562S449 583 438 583H313ZM313 667C301 667 292 657 292 646S301 625 313 625H438C449 625 458 634 458 646S449 667 438 667H313ZM313 792C301 792 292 782 292 771S301 750 313 750H438C449 750 458 759 458 771S449 792 438 792H313ZM313 875C301 875 292 866 292 854S301 833 313 833H438C449 833 458 842 458 854S449 875 438 875H313ZM563 458C551 458 542 449 542 437V354C542 342 551 333 563 333H646C658 333 667 342 667 354V437C667 449 658 458 646 458H563ZM583 417H625V375H583V417ZM563 667C551 667 542 657 542 646V562C542 551 551 542 563 542H646C658 542 667 551 667 562V646C667 657 658 667 646 667H563ZM583 625H625V583H583V625ZM563 875C551 875 542 866 542 854V771C542 759 551 750 563 750H646C658 750 667 759 667 771V854C667 866 658 875 646 875H563ZM583 833H625V792H583V833ZM729 375C718 375 708 366 708 354S718 333 729 333H854C866 333 875 342 875 354S866 375 854 375H729ZM729 458C718 458 708 449 708 437S718 417 729 417H854C866 417 875 426 875 437S866 458 854 458H729ZM729 583C718 583 708 574 708 562S718 542 729 542H854C866 542 875 551 875 562S866 583 854 583H729ZM729 667C718 667 708 657 708 646S718 625 729 625H854C866 625 875 634 875 646S866 667 854 667H729ZM729 792C718 792 708 782 708 771S718 750 729 750H854C866 750 875 759 875 771S866 792 854 792H729ZM729 875C718 875 708 866 708 854S718 833 729 833H854C866 833 875 842 875 854S866 875 854 875H729ZM125 146C125 157 116 167 104 167S83 157 83 146 93 125 104 125 125 134 125 146M208 146C208 157 199 167 188 167S167 157 167 146 176 125 188 125 208 134 208 146M292 146C292 157 283 167 271 167 259 167 250 157 250 146S259 125 271 125C283 125 292 134 292 146","width":1000,"height":1000},"person":{"path":"M500 708C397 708 306 625 268 500 234 498 208 454 208 396 208 379 211 363 215 349 210 328 208 309 208 292 208 131 339 0 500 0S792 131 792 292C792 309 790 328 785 349 790 363 792 379 792 396 792 454 766 498 732 500 694 625 603 708 500 708ZM283 455C286 455 288 455 290 456 297 459 302 463 303 470 333 588 412 667 500 667S668 588 697 470C698 463 703 458 709 456 715 453 722 454 728 457 735 459 750 436 750 396 750 382 748 368 744 356 743 353 743 349 744 345 748 325 750 308 750 292 750 154 638 42 500 42S250 154 250 292C250 308 252 325 257 345 257 349 257 353 256 356 252 368 250 382 250 396 250 436 266 458 271 458 274 456 279 455 283 455ZM708 375C700 375 693 370 689 363 689 361 673 326 668 291 581 285 490 243 446 198 442 205 437 211 432 216 398 250 345 250 318 250 312 264 309 309 313 353 313 359 311 365 306 369 301 374 295 376 289 375 288 375 260 370 236 370 225 370 215 361 215 350S225 329 236 329C248 329 260 330 270 330 268 293 270 239 289 219 297 211 307 208 318 208 343 208 382 207 402 187 412 177 417 164 417 146 417 134 426 125 438 125S458 134 458 146C461 167 565 250 688 250 699 250 708 259 708 271 708 291 716 317 722 332L762 329C774 328 784 336 785 348 786 359 777 369 766 370L710 375C710 375 709 375 708 375ZM438 417H396C384 417 375 407 375 396S384 375 396 375H438C449 375 458 384 458 396S449 417 438 417ZM604 417H563C551 417 542 407 542 396S551 375 563 375H604C616 375 625 384 625 396S616 417 604 417ZM979 1000H21C14 1000 8 997 4 992 0 987-1 980 1 974L33 845C40 815 60 790 88 777L303 669C308 666 314 666 320 668 325 670 329 674 332 679L439 930 455 898C441 879 417 842 417 812 417 774 449 750 500 750S583 774 583 812C583 842 559 879 545 898L561 930 668 679C671 674 675 670 680 668 686 666 692 666 697 669L913 777C940 790 960 815 967 845L999 974C1001 980 1000 987 996 992 992 997 986 1000 979 1000ZM594 958H953L927 855C922 837 910 822 894 814L698 716 594 958ZM471 958H529L502 905C499 898 500 889 505 883 520 864 542 829 542 812 542 794 513 792 500 792S458 794 458 812C458 829 481 864 496 883 501 889 502 898 498 905L471 958ZM48 958H406L302 716 106 814C90 822 78 837 74 855L48 958Z","width":1000,"height":1000},"comments":{"path":"M217 667C214 667 210 666 208 664 202 660 199 653 201 646L229 533H217C152 533 100 481 100 417V183C100 119 152 67 217 67H617C681 67 733 119 733 183 733 192 726 200 717 200H583C537 200 500 237 500 283V483C500 492 502 501 505 511 507 516 506 522 503 526 500 531 495 533 490 533H389L227 663C224 665 220 667 217 667ZM217 100C171 100 133 137 133 183V417C133 463 171 500 217 500H250C255 500 260 502 263 506S267 516 266 521L245 606 373 504C376 501 380 500 383 500H468C467 494 467 489 467 483V283C467 219 519 167 583 167H698C691 129 657 100 617 100H217ZM983 733C980 733 976 732 973 730L811 600H583C519 600 467 548 467 483V283C467 219 519 167 583 167H983C1048 167 1100 219 1100 283V483C1100 548 1048 600 983 600H971L1000 713C1001 720 998 727 992 731 990 732 987 733 983 733ZM583 200C537 200 500 237 500 283V483C500 529 537 567 583 567H817C820 567 824 568 827 570L955 673 934 587C933 582 934 577 937 573S945 567 950 567H983C1029 567 1067 529 1067 483V283C1067 237 1029 200 983 200H583Z","width":1000,"height":1000},"post-info":{"path":"M380 7C384 2 390 0 396 0H813C847 0 875 28 875 62V938C875 972 847 1000 813 1000H188C153 1000 125 972 125 938V271C125 265 128 259 132 255L380 7ZM375 71L196 250H354C366 250 375 241 375 229V71ZM813 42H417V229C417 264 389 292 354 292H167V938C167 949 176 958 188 958H813C824 958 833 949 833 938V62C833 51 824 42 813 42ZM354 750C354 738 345 729 333 729S313 738 313 750 322 771 333 771 354 762 354 750ZM396 750C396 785 368 812 333 812S271 785 271 750 299 687 333 687 396 715 396 750ZM521 750C521 738 512 729 500 729S479 738 479 750 488 771 500 771 521 762 521 750ZM563 750C563 785 535 812 500 812S438 785 438 750 465 687 500 687 563 715 563 750ZM688 750C688 738 678 729 667 729S646 738 646 750 655 771 667 771 688 762 688 750ZM729 750C729 785 701 812 667 812S604 785 604 750 632 687 667 687 729 715 729 750Z","width":1000,"height":1000},"post-navigation":{"path":"M783 521H625C613 521 604 512 604 500S613 479 625 479H783L754 454C746 446 746 433 754 425 763 417 775 417 783 425L846 483C854 492 854 504 846 512L783 579C775 587 763 587 754 579 746 571 746 558 754 550L783 521ZM500 229H917C950 229 979 258 979 292V708C979 742 950 771 917 771H500 83C50 771 21 742 21 708V292C21 258 50 229 83 229H500ZM217 479H375C388 479 396 487 396 500S388 521 375 521H217L242 550C250 558 250 571 242 579 233 587 221 587 213 579L150 512C142 504 142 492 150 483L213 425C221 417 233 417 242 425S250 446 242 454L217 479ZM479 271H83C71 271 63 279 63 292V708C63 721 71 729 83 729H479V271ZM500 229H521V771H500 479V229H500ZM521 271V729H917C929 729 938 721 938 708V292C938 279 929 271 917 271H521Z","width":1000,"height":1000},"yoast":{"path":"M300 308C300 308 338 417 417 637 433 696 429 742 408 775 392 804 363 825 321 842 321 842 321 867 321 917 363 913 396 896 425 867 463 829 488 787 500 742L742 83C742 83 713 83 654 83 654 83 600 242 492 562 488 579 458 579 454 562L375 312C375 312 350 308 300 308ZM613 71C621 54 633 42 654 42H742C763 42 783 58 783 83 783 87 783 92 779 96L542 754C525 804 496 850 458 892 421 929 379 950 333 954 313 958 292 942 288 917 288 913 288 913 288 913V837C288 821 300 804 313 800 346 787 367 771 379 750 392 729 396 692 383 646L263 325C254 304 267 279 288 271 292 271 296 267 300 267H375C392 267 408 279 413 296L471 487 613 71ZM875 833L875 246C875 204 842 167 817 167 817 167 800 167 800 146S817 125 817 125C875 125 917 179 917 246L917 871 550 871C538 871 529 863 529 850S538 829 550 829L875 833ZM533 125C546 129 550 133 550 146S546 162 533 167L313 167C208 167 125 229 125 333L125 667C125 746 150 833 229 833 246 833 250 842 250 858 250 867 242 875 229 875 125 875 83 771 83 667L83 333C83 208 188 125 313 125L533 125Z","width":1000,"height":1000},"sitemap":{"path":"M479 433V279H404C392 279 383 271 383 258V67C383 54 392 46 404 46H596C608 46 617 54 617 67V262C617 275 608 283 596 283H521V437H788C825 437 858 467 858 508V683H933C946 683 954 692 954 704V900C954 913 946 921 933 921H742C729 921 721 913 721 900V704C721 692 729 683 742 683H817V508C817 492 804 479 788 479H521V679H596C608 679 617 687 617 700V896C617 908 608 917 596 917H404C392 917 383 908 383 896V700C383 687 392 679 404 679H479V479H213C196 479 183 492 183 508V683H258C271 683 279 692 279 704V900C279 913 271 921 258 921H67C54 921 46 913 46 900V704C46 692 54 683 67 683H142V508C142 471 171 437 213 437H479ZM425 87V242H575V87H425ZM88 871H238V717H88V871ZM763 717V871H913V717H763ZM425 871H575V717H425V871Z","width":1000,"height":1000},"progress-tracker":{"path":"M854.2 41.7C909.6 41.7 954.6 86.7 957.9 142.9L958.3 150V850C958.3 907.1 915.4 954.2 861.3 957.9L854.2 958.3H145.8C90.4 958.3 45.4 913.3 42.1 857.1L41.7 850V150C41.7 92.9 84.6 45.8 138.8 42.1L145.8 41.7H854.2ZM916.7 250H83.3V850C83.3 885 108.3 913.3 140 916.3L145.8 916.7H854.2C886.7 916.7 913.3 890.4 916.3 856.3L916.7 850V250ZM833.8 291.7C855 291.7 872.5 307.5 874.6 327.9L875 332.9V458.8C875 480 859.2 497.5 838.8 499.6L833.8 500H166.3C145 500 127.5 484.2 125.4 463.8L125 458.8V332.9C125 311.7 140.8 294.2 161.3 292.1L166.3 291.7H833.8ZM833.3 333.3H166.7V458.3H833.3V333.3ZM645.8 375V416.7H208.3V375H645.8ZM854.2 83.3H145.8C113.3 83.3 86.7 109.6 83.8 143.8L83.3 150V208.3H916.7V150C916.7 115 891.7 86.7 860 83.8L854.2 83.3ZM145.8 125C157.5 125 166.7 134.2 166.7 145.8S157.5 166.7 145.8 166.7 125 157.5 125 145.8 134.2 125 145.8 125ZM229.2 125C240.8 125 250 134.2 250 145.8S240.8 166.7 229.2 166.7 208.3 157.5 208.3 145.8 217.5 125 229.2 125ZM312.5 125C324.2 125 333.3 134.2 333.3 145.8S324.2 166.7 312.5 166.7 291.7 157.5 291.7 145.8 300.8 125 312.5 125Z","width":1000,"height":1000},"taxonomy-filter":{"path":"M471.4 821.4L425 835.7V517.9C425 510.7 421.4 503.6 417.9 500L232.1 296.4C221.4 285.7 217.9 275 217.9 260.7V192.9H832.1V257.1C832.1 271.4 825 285.7 814.3 296.4L632.1 478.6C628.6 482.1 625 489.3 625 496.4V560.7C625 575 635.7 589.3 653.6 589.3S682.1 578.6 682.1 560.7V510.7L857.1 335.7C878.6 314.3 889.3 285.7 889.3 257.1V167.9C889.3 153.6 878.6 139.3 860.7 139.3H189.3C175 139.3 160.7 150 160.7 167.9V260.7C160.7 289.3 171.4 314.3 189.3 335.7L367.9 532.1V875C367.9 882.1 371.4 892.9 378.6 896.4 382.1 900 389.3 900 392.9 900 396.4 900 400 900 400 900L482.1 871.4C496.4 867.9 503.6 850 500 839.3S485.7 817.9 471.4 821.4ZM960.7 667.9C953.6 653.6 946.4 642.9 935.7 632.1 925 621.4 914.3 614.3 900 607.1 871.4 596.4 839.3 596.4 814.3 607.1 800 614.3 789.3 621.4 778.6 632.1L635.7 775C632.1 778.6 628.6 785.7 628.6 792.9V917.9C628.6 932.1 639.3 946.4 657.1 946.4H782.1C789.3 946.4 796.4 942.9 800 939.3L942.9 796.4C953.6 785.7 960.7 775 967.9 760.7 975 746.4 975 732.1 975 717.9S964.3 682.1 960.7 667.9ZM910.7 735.7C907.1 742.9 903.6 750 896.4 757.1L764.3 892.9H678.6V807.1L814.3 675C814.3 675 814.3 675 814.3 675 821.4 667.9 825 664.3 832.1 660.7 846.4 653.6 864.3 653.6 878.6 660.7 885.7 664.3 892.9 667.9 900 675 907.1 682.1 910.7 685.7 914.3 696.4 917.9 703.6 917.9 710.7 917.9 721.4S914.3 728.6 910.7 735.7Z","width":1036,"height":1036},"products":{"path":"M542 42V417H917V42H542ZM521 0H938C949 0 958 9 958 21V437C958 449 949 458 938 458H521C509 458 500 449 500 437V21C500 9 509 0 521 0ZM42 42V417H417V42H42ZM21 0H438C449 0 458 9 458 21V437C458 449 449 458 438 458H21C9 458 0 449 0 437V21C0 9 9 0 21 0ZM542 542V917H917V542H542ZM521 500H938C949 500 958 509 958 521V938C958 949 949 958 938 958H521C509 958 500 949 500 938V521C500 509 509 500 521 500ZM42 542V917H417V542H42ZM21 500H438C449 500 458 509 458 521V938C458 949 449 958 438 958H21C9 958 0 949 0 938V521C0 509 9 500 21 500ZM206 281H295L328 170H174L206 281ZM340 132C356 132 369 145 369 161 369 164 368 166 368 169L330 297C326 310 315 318 302 318H200C187 318 175 310 172 297L131 157C131 156 131 156 131 156 128 147 125 139 119 131 116 126 113 125 110 125 99 125 91 116 91 106S99 87 110 87C127 87 141 95 150 110 155 117 159 125 162 132H340ZM210 378C198 378 189 367 189 355S199 332 210 332 232 342 232 355 223 378 210 378ZM288 378C276 378 267 367 267 355S277 332 288 332 310 342 310 355 300 378 288 378ZM706 281H795L828 170H674L706 281ZM840 132C856 132 869 145 869 161 869 164 868 166 868 169L830 297C826 310 815 318 802 318H700C687 318 675 310 672 297L631 157C631 156 631 156 631 156 628 147 625 139 619 131 616 126 613 125 610 125 599 125 591 116 591 106S599 87 610 87C627 87 641 95 650 110 655 117 659 125 662 132H840ZM710 378C698 378 689 367 689 355S699 332 710 332 732 342 732 355 723 378 710 378ZM788 378C776 378 767 367 767 355S777 332 788 332 810 342 810 355 800 378 788 378ZM206 781H295L328 670H174L206 781ZM340 632C356 632 369 645 369 661 369 664 368 666 368 669L330 797C326 810 315 818 302 818H200C187 818 175 810 172 797L131 657C131 656 131 656 131 656 128 647 125 639 119 631 116 626 113 625 110 625 99 625 91 616 91 606 91 595 99 587 110 587 127 587 141 595 150 610 155 617 159 625 162 632H340ZM210 878C198 878 189 868 189 855 189 842 199 832 210 832S232 842 232 855C232 868 223 878 210 878ZM288 878C276 878 267 868 267 855 267 842 277 832 288 832S310 842 310 855C310 868 300 878 288 878ZM706 781H795L828 670H674L706 781ZM840 632C856 632 869 645 869 661 869 664 868 666 868 669L830 797C826 810 815 818 802 818H700C687 818 675 810 672 797L631 657C631 656 631 656 631 656 628 647 625 639 619 631 616 626 613 625 610 625 599 625 591 616 591 606 591 595 599 587 610 587 627 587 641 595 650 610 655 617 659 625 662 632H840ZM710 878C698 878 689 868 689 855 689 842 699 832 710 832S732 842 732 855C732 868 723 878 710 878ZM788 878C776 878 767 868 767 855 767 842 777 832 788 832S810 842 810 855C810 868 800 878 788 878Z","width":1000,"height":1000},"product-add-to-cart":{"path":"M741 658C734 667 721 669 712 662 703 656 700 643 707 633 713 625 719 616 724 607 778 517 785 407 746 310 743 303 740 295 736 288 733 282 729 275 725 268 702 229 671 195 633 167 485 59 276 92 168 241S93 599 242 707C308 755 388 776 468 769 473 768 477 768 481 767 486 767 492 766 497 765 509 763 521 760 533 757 543 753 555 760 558 771 562 782 555 793 544 797 531 800 518 804 504 806 498 807 492 808 486 809 482 810 477 810 472 811 382 819 292 795 217 741 50 619 13 385 134 217S490 12 658 134C700 165 735 203 761 247 765 255 769 262 773 270 777 278 781 286 784 295 829 403 820 527 760 629 754 639 748 648 741 658ZM417 417V292C417 280 426 271 438 271S458 280 458 292V417H583C595 417 604 426 604 437S595 458 583 458H458V583C458 595 449 604 438 604S417 595 417 583V458H292C280 458 271 449 271 437S280 417 292 417H417ZM654 875H780L825 728H610L654 875ZM837 687C855 687 870 702 870 720 870 723 870 727 869 730L818 894C814 908 801 917 786 917H648C633 917 620 908 615 893L562 714C562 714 562 713 561 713 558 702 553 691 545 681 541 674 536 671 529 671 517 671 508 662 508 650S517 630 529 630C550 630 568 639 580 657 586 667 592 677 596 687H837ZM663 988C647 988 634 975 634 958S647 929 663 929 693 942 693 958 679 988 663 988ZM768 988C751 988 738 975 738 958S751 929 768 929 797 942 797 958 783 988 768 988Z","width":1000,"height":1000},"woo-cart":{"path":"M601 925C617 925 630 938 630 954S617 983 601 983 572 970 572 954 585 925 601 925ZM705 925C721 925 734 938 734 954S721 983 705 983 676 970 676 954 689 925 705 925ZM467 625C488 625 505 635 518 652 524 662 530 672 534 682H775C793 682 808 697 808 716 808 719 808 722 806 726L755 890C751 903 738 913 724 913H585C570 913 558 903 553 889L499 709 499 709C495 697 490 687 483 676 478 670 473 667 466 667 455 667 445 657 445 646S455 625 467 625ZM763 724H548L592 871H718L763 724ZM858 42C913 42 958 79 958 127V707C958 740 935 770 901 784 894 787 886 789 879 790L873 791 873 791 862 792C860 792 860 792 858 792 847 792 837 783 837 772 836 760 845 750 857 750L866 750 866 750 871 749 871 749C876 748 881 747 885 745 905 737 917 722 917 707V127C917 104 891 83 858 83H142C109 83 83 104 83 127V707C83 730 109 750 142 750H448C460 750 469 760 469 771S460 792 448 792H142C88 792 42 755 42 706V127C42 79 88 42 142 42H858ZM374 187L374 187H378 771C792 187 810 204 812 224L813 229V437C813 441 812 444 811 447L811 562C811 584 795 602 775 604L770 604H625C604 604 586 588 584 567L583 562V479H378L374 479 374 479 374 479H229C208 479 190 463 188 442L188 437V229C188 208 204 190 224 188L229 187H374ZM770 479H625V562H770L770 479ZM771 354H378V437H771V354ZM332 354H229V437L332 437V354ZM771 229H378V312L771 312V229ZM332 229L229 229V312H332V229Z","width":1000,"height":1000},"checkout":{"path":"M601 925C617 925 630 938 630 954S617 983 601 983 572 970 572 954 585 925 601 925ZM705 925C721 925 734 938 734 954S721 983 705 983 676 970 676 954 689 925 705 925ZM467 625C488 625 505 635 518 652 524 662 530 672 534 682H775C793 682 808 697 808 716 808 719 808 722 806 726L755 890C751 903 738 913 724 913H585C570 913 558 903 553 889L499 709C495 697 490 687 483 676 478 670 473 667 466 667 455 667 445 657 445 646S455 625 467 625ZM763 724H548L592 871H718L763 724ZM858 42C913 42 958 79 958 127V707C958 740 935 770 901 784 894 787 886 789 879 790L873 791 859 792 859 792C847 792 838 783 837 772 837 760 845 750 857 750L866 750 872 749C877 748 881 747 886 745 905 737 917 722 917 707V127C917 104 892 83 858 83H142C109 83 83 104 83 127V707C83 730 109 750 142 750H448C460 750 469 760 469 771S460 792 448 792H142C88 792 42 755 42 706V127C42 79 88 42 142 42H858ZM729 167C762 167 788 191 791 223L792 229V479C792 512 767 538 735 541L729 542H271C238 542 212 517 209 485L208 479V229C208 197 233 170 265 167L271 167H729ZM750 333H250V479C250 490 258 498 267 500L271 500H729C740 500 748 492 750 483L750 479V333ZM396 417C408 417 417 426 417 437 417 448 409 456 400 458L396 458H313C301 458 292 449 292 437 292 427 299 419 309 417L313 417H396ZM729 208H271C260 208 252 216 250 225L250 229V292H750V229C750 217 741 208 729 208Z","width":1000,"height":1000},"cart":{"path":"M460 792C495 792 523 820 523 854S495 917 460 917 396 889 396 854 425 792 460 792ZM710 792C745 792 773 820 773 854S745 917 710 917 646 889 646 854 675 792 710 792ZM234 251L373 701C375 706 380 710 385 710H765C771 710 776 706 778 701L916 268C916 267 916 266 916 265 916 257 910 252 903 252L234 251 234 251ZM221 210H903C933 210 958 234 958 264 958 270 957 275 955 281L817 714C810 736 789 752 765 752H385C362 752 340 736 333 713L186 237C176 202 160 170 138 140 118 113 94 100 63 100 51 100 42 91 42 79S51 58 63 58C108 58 145 78 172 116 193 146 210 177 221 210Z","width":1000,"height":1000},"my-account":{"path":"M601 925C617 925 630 938 630 954S617 983 601 983 572 970 572 954 585 925 601 925ZM705 925C721 925 734 938 734 954S721 983 705 983 676 970 676 954 689 925 705 925ZM467 625C488 625 505 635 518 652 524 662 530 672 534 682H775C793 682 808 697 808 716 808 719 808 722 806 726L755 890C751 903 738 913 724 913H585C570 913 558 903 553 889L499 709 499 709C495 697 490 687 483 676 478 670 473 667 466 667 455 667 445 657 445 646S455 625 467 625ZM763 724H548L592 871H718L763 724ZM858 42C913 42 958 79 958 127V707C958 740 935 770 901 784 894 787 886 789 879 790L873 791 873 791 862 792C860 792 860 792 858 792 847 792 837 783 837 772 836 760 845 750 857 750L866 750 866 750 871 749 871 749C876 748 881 747 885 745 905 737 917 722 917 707V127C917 104 891 83 858 83H142C109 83 83 104 83 127V707C83 730 109 750 142 750H448C460 750 469 760 469 771S460 792 448 792H142C88 792 42 755 42 706V127C42 79 88 42 142 42H858ZM354 208C412 208 458 255 458 312 458 343 445 370 424 390 468 409 503 446 520 493 523 504 518 516 507 520 496 524 484 518 480 507 462 453 412 417 354 417 297 417 247 453 228 507 224 517 213 523 201 520 190 516 185 504 188 493 205 446 240 409 284 389 263 370 250 343 250 312 250 255 297 208 354 208ZM792 417C803 417 813 426 813 437 813 448 805 456 795 458L792 458H583C572 458 563 449 563 437 563 427 570 419 580 417L583 417H792ZM792 333C803 333 813 342 813 354 813 365 805 373 795 375L792 375H583C572 375 563 366 563 354 563 344 570 335 580 334L583 333H792ZM354 250C320 250 292 278 292 312 292 345 316 372 348 375L354 375 355 375C389 375 417 347 417 312 417 278 389 250 354 250ZM792 250C803 250 813 259 813 271 813 281 805 290 795 291L792 292H583C572 292 563 282 563 271 563 260 570 252 580 250L583 250H792Z","width":1000,"height":1000},"ban":{"path":"M208 300C167 358 146 425 146 500 146 692 300 850 496 850 575 850 646 825 708 779 708 779 704 775 704 775L217 308C213 304 208 304 208 300ZM283 225C288 225 288 229 292 233L775 700C775 700 779 704 779 704 821 646 842 579 842 504 842 312 688 154 492 154 413 150 342 179 283 225ZM492 958C238 958 33 754 33 500S238 42 492 42 950 246 950 500 746 958 492 958Z","width":1000,"height":1000},"ai":{"path":"M825 62.5A37.5 37.5 0 0 1 862.5 100 62.5 62.5 0 0 0 925 162.5 37.5 37.5 0 0 1 925 237.5 62.5 62.5 0 0 0 862.5 300 37.5 37.5 0 0 1 787.5 300 62.5 62.5 0 0 0 725 237.5 37.5 37.5 0 0 1 725 162.5 62.5 62.5 0 0 0 787.5 100 37.5 37.5 0 0 1 825 62.5ZM825 194.3A136.9 136.9 0 0 1 819.4 200 135.4 135.4 0 0 1 825 205.7 136.9 136.9 0 0 1 830.6 200 134.1 134.1 0 0 1 825 194.3ZM375 162.5A37.5 37.5 0 0 1 412.5 200 262.5 262.5 0 0 0 675 462.5 37.5 37.5 0 0 1 675 537.5 262.5 262.5 0 0 0 412.5 800 37.5 37.5 0 0 1 337.5 800 262.5 262.5 0 0 0 75 537.5 37.5 37.5 0 0 1 75 462.5 262.5 262.5 0 0 0 337.5 200 37.5 37.5 0 0 1 375 162.5ZM375 354.6A337.4 337.4 0 0 1 229.6 500 337.5 337.5 0 0 1 375 645.4 337.4 337.4 0 0 1 520.4 500 337.4 337.4 0 0 1 375 354.6ZM825 662.5A37.5 37.5 0 0 1 862.5 700 62.5 62.5 0 0 0 925 762.5 37.5 37.5 0 0 1 925 837.5 62.5 62.5 0 0 0 862.5 900 37.5 37.5 0 0 1 787.5 900 62.5 62.5 0 0 0 725 837.5 37.5 37.5 0 0 1 725 762.5 62.5 62.5 0 0 0 787.5 700 37.5 37.5 0 0 1 825 662.5ZM825 794.4A135.5 135.5 0 0 1 819.4 800 135.5 135.5 0 0 1 825 805.6 135.5 135.5 0 0 1 830.6 800 135.5 135.5 0 0 1 825 794.4Z","width":1000,"height":1000},"sync":{"path":"M500 709C549 710 594 694 636 660 695 612 718 534 697 431 693 408 710 387 733 384S773 398 780 420C813 530 772 657 688 725 631 771 568 793 500 792V897C500 903 498 907 495 911 491 915 487 918 482 918S473 915 469 911L339 765C335 761 334 756 334 751S335 740 339 736L469 590C473 586 477 584 482 584S491 586 495 590C498 595 500 600 500 605V709ZM500 292C451 291 406 307 364 341 305 389 282 467 303 570 308 592 290 614 267 617S227 603 220 581C187 470 228 344 312 276 369 230 432 207 500 208V104C500 98 502 94 505 90S513 83 518 83 528 85 531 90L661 235C665 240 666 245 666 250S665 260 661 265L531 410C528 415 523 417 518 417S509 415 505 410 500 402 500 396V292Z","width":1000,"height":1000},"check-circle":{"path":"M496 46C246 46 42 250 42 504S246 958 496 958 950 754 950 504 750 46 496 46M496 1000C225 1000 0 775 0 504S225 4 496 4 992 229 992 500 771 1000 496 1000M417 712L200 496C192 487 192 475 200 467 208 458 225 458 233 467L433 667 763 337C771 329 783 329 792 337 800 346 800 358 792 367L446 712C442 717 438 721 429 721S421 717 417 712Z","width":1000,"height":1000},"upload":{"path":"M883 542H654V492H754C821 492 858 408 808 362L554 108C525 79 475 79 446 108L192 358C146 404 179 487 246 487H346V542H117C75 542 42 575 42 617V821C42 863 75 896 117 896H879C921 896 954 863 954 821V617C958 575 925 542 883 542ZM246 412L500 158 754 412H575V667H421V412H246ZM883 821H117V617H346V667C346 708 379 742 421 742H575C617 742 650 708 650 667V617H879V821ZM817 721C817 742 800 758 779 758 758 758 742 742 742 721 742 700 758 683 779 683 800 683 817 700 817 721Z","width":1000,"height":1000}}; window.F2E_WIDGET_CATALOG = [{"value":"container","label":"Flexbox Container","category":"Layout","icon":"container","pro":false},{"value":"container-grid","label":"Grid Container (CSS Grid)","category":"Layout","icon":"container-grid","pro":false},{"value":"inner-section","label":"Inner Section / Columns","category":"Layout","icon":"columns","pro":false},{"value":"unwrap","label":"Bỏ qua Container (Unwrap - Giữ con)","category":"Layout","icon":"unwrap","pro":false},{"value":"heading","label":"Heading (H1–H6)","category":"Basic (Free)","icon":"t-letter","pro":false},{"value":"text-editor","label":"Text Editor (Paragraph)","category":"Basic (Free)","icon":"text","pro":false},{"value":"button","label":"Button","category":"Basic (Free)","icon":"button","pro":false},{"value":"image","label":"Image","category":"Basic (Free)","icon":"image","pro":false},{"value":"icon","label":"Icon / Inline SVG","category":"Basic (Free)","icon":"favorite","pro":false},{"value":"video","label":"Video (YouTube/MP4)","category":"Basic (Free)","icon":"youtube","pro":false},{"value":"divider","label":"Divider","category":"Basic (Free)","icon":"divider","pro":false},{"value":"spacer","label":"Spacer","category":"Basic (Free)","icon":"spacer","pro":false},{"value":"google_maps","label":"Google Maps","category":"Basic (Free)","icon":"google-maps","pro":false},{"value":"html","label":"Custom HTML / Inline SVG","category":"Basic (Free)","icon":"code","pro":false},{"value":"icon-box","label":"Icon Box","category":"General (Free)","icon":"icon-box","pro":false},{"value":"image-box","label":"Image Box","category":"General (Free)","icon":"image-box","pro":false},{"value":"icon-list","label":"Icon List","category":"General (Free)","icon":"bullet-list","pro":false},{"value":"counter","label":"Counter / Stats","category":"General (Free)","icon":"counter","pro":false},{"value":"progress","label":"Progress Bar","category":"General (Free)","icon":"skill-bar","pro":false},{"value":"testimonial","label":"Testimonial","category":"General (Free)","icon":"testimonial","pro":false},{"value":"nested-tabs","label":"Nested Tabs","category":"General (Free)","icon":"tabs","pro":false},{"value":"tabs","label":"Tabs (Classic)","category":"General (Free)","icon":"tabs","pro":false},{"value":"nested-accordion","label":"Nested Accordion / FAQ","category":"General (Free)","icon":"accordion","pro":false},{"value":"accordion","label":"Accordion (Classic)","category":"General (Free)","icon":"accordion","pro":false},{"value":"toggle","label":"Toggle","category":"General (Free)","icon":"toggle","pro":false},{"value":"social-icons","label":"Social Icons","category":"General (Free)","icon":"social-icons","pro":false},{"value":"alert","label":"Alert Notice","category":"General (Free)","icon":"alert","pro":false},{"value":"audio","label":"SoundCloud / Audio","category":"General (Free)","icon":"headphones","pro":false},{"value":"shortcode","label":"Shortcode","category":"General (Free)","icon":"shortcode","pro":false},{"value":"menu-anchor","label":"Menu Anchor","category":"General (Free)","icon":"anchor","pro":false},{"value":"sidebar","label":"Sidebar","category":"General (Free)","icon":"sidebar","pro":false},{"value":"read-more","label":"Read More","category":"General (Free)","icon":"post-excerpt","pro":false},{"value":"star-rating","label":"Star Rating","category":"General (Free)","icon":"rating","pro":false},{"value":"image-carousel","label":"Image Carousel","category":"General (Free)","icon":"slider-push","pro":false},{"value":"image-gallery","label":"Basic Gallery","category":"General (Free)","icon":"gallery-grid","pro":false},{"value":"text-path","label":"Text Path","category":"General (Free)","icon":"wordart","pro":false},{"value":"form","label":"Form (Contact / Lead)","category":"Elementor Pro","icon":"form-horizontal","pro":true},{"value":"nav-menu","label":"Nav Menu","category":"Elementor Pro","icon":"nav-menu","pro":true},{"value":"mega-menu","label":"Mega Menu","category":"Elementor Pro","icon":"mega-menu","pro":true},{"value":"call-to-action","label":"Call to Action (CTA)","category":"Elementor Pro","icon":"image-rollover","pro":true},{"value":"price-table","label":"Price Table","category":"Elementor Pro","icon":"price-table","pro":true},{"value":"price-list","label":"Price List / Catalog","category":"Elementor Pro","icon":"price-list","pro":true},{"value":"flip-box","label":"Flip Box","category":"Elementor Pro","icon":"flip-box","pro":true},{"value":"slides","label":"Slides (Hero Slider)","category":"Elementor Pro","icon":"slides","pro":true},{"value":"nested-carousel","label":"Nested Carousel","category":"Elementor Pro","icon":"slider-push","pro":true},{"value":"media-carousel","label":"Media Carousel","category":"Elementor Pro","icon":"media-carousel","pro":true},{"value":"testimonial-carousel","label":"Testimonial Carousel","category":"Elementor Pro","icon":"testimonial-carousel","pro":true},{"value":"reviews","label":"Reviews","category":"Elementor Pro","icon":"review","pro":true},{"value":"loop-grid","label":"Loop Grid (Posts/Products)","category":"Elementor Pro","icon":"loop-builder","pro":true},{"value":"loop-carousel","label":"Loop Carousel","category":"Elementor Pro","icon":"carousel-loop","pro":true},{"value":"posts","label":"Posts Grid","category":"Elementor Pro","icon":"post-list","pro":true},{"value":"portfolio","label":"Portfolio","category":"Elementor Pro","icon":"gallery-grid","pro":true},{"value":"gallery","label":"Pro Gallery (Justified/Masonry)","category":"Elementor Pro","icon":"gallery-justified","pro":true},{"value":"animated-headline","label":"Animated Headline","category":"Elementor Pro","icon":"animated-headline","pro":true},{"value":"blockquote","label":"Blockquote","category":"Elementor Pro","icon":"blockquote","pro":true},{"value":"countdown","label":"Countdown Timer","category":"Elementor Pro","icon":"countdown","pro":true},{"value":"share-buttons","label":"Share Buttons","category":"Elementor Pro","icon":"share","pro":true},{"value":"table-of-contents","label":"Table of Contents","category":"Elementor Pro","icon":"table-of-contents","pro":true},{"value":"login","label":"Login Form","category":"Elementor Pro","icon":"lock-user","pro":true},{"value":"search-form","label":"Search Form","category":"Elementor Pro","icon":"site-search","pro":true},{"value":"lottie","label":"Lottie Animation","category":"Elementor Pro","icon":"lottie","pro":true},{"value":"hotspot","label":"Image Hotspot","category":"Elementor Pro","icon":"image-hotspot","pro":true},{"value":"video-playlist","label":"Video Playlist","category":"Elementor Pro","icon":"video-playlist","pro":true},{"value":"off-canvas","label":"Off-Canvas Panel","category":"Elementor Pro","icon":"off-canvas","pro":true},{"value":"paypal-button","label":"PayPal Button","category":"Elementor Pro","icon":"paypal-button","pro":true},{"value":"stripe-button","label":"Stripe Button","category":"Elementor Pro","icon":"stripe-button","pro":true},{"value":"progress-tracker","label":"Progress Tracker","category":"Elementor Pro","icon":"progress-tracker","pro":true},{"value":"taxonomy-filter","label":"Taxonomy Filter","category":"Elementor Pro","icon":"taxonomy-filter","pro":true},{"value":"theme-site-logo","label":"Site Logo","category":"Theme Builder (Pro)","icon":"site-logo","pro":true},{"value":"theme-site-title","label":"Site Title","category":"Theme Builder (Pro)","icon":"site-title","pro":true},{"value":"theme-post-title","label":"Post / Page Title","category":"Theme Builder (Pro)","icon":"post-title","pro":true},{"value":"theme-post-excerpt","label":"Post Excerpt","category":"Theme Builder (Pro)","icon":"post-excerpt","pro":true},{"value":"theme-post-content","label":"Post Content","category":"Theme Builder (Pro)","icon":"post-content","pro":true},{"value":"theme-post-featured-image","label":"Featured Image","category":"Theme Builder (Pro)","icon":"featured-image","pro":true},{"value":"author-box","label":"Author Box","category":"Theme Builder (Pro)","icon":"person","pro":true},{"value":"post-comments","label":"Post Comments","category":"Theme Builder (Pro)","icon":"comments","pro":true},{"value":"post-navigation","label":"Post Navigation","category":"Theme Builder (Pro)","icon":"post-navigation","pro":true},{"value":"post-info","label":"Post Info / Meta","category":"Theme Builder (Pro)","icon":"post-info","pro":true},{"value":"breadcrumbs","label":"Breadcrumbs","category":"Theme Builder (Pro)","icon":"yoast","pro":true},{"value":"sitemap","label":"Sitemap","category":"Theme Builder (Pro)","icon":"sitemap","pro":true},{"value":"woocommerce-products","label":"WooCommerce Products","category":"WooCommerce (Pro)","icon":"products","pro":true},{"value":"woocommerce-product-add-to-cart","label":"Woo Add To Cart","category":"WooCommerce (Pro)","icon":"product-add-to-cart","pro":true},{"value":"woocommerce-menu-cart","label":"Woo Menu Cart","category":"WooCommerce (Pro)","icon":"cart","pro":true},{"value":"woocommerce-cart","label":"Woo Cart Page","category":"WooCommerce (Pro)","icon":"woo-cart","pro":true},{"value":"woocommerce-checkout-page","label":"Woo Checkout Page","category":"WooCommerce (Pro)","icon":"checkout","pro":true},{"value":"woocommerce-my-account","label":"Woo My Account","category":"WooCommerce (Pro)","icon":"my-account","pro":true},{"value":"skip","label":"Bỏ qua Layer (Skip)","category":"System","icon":"ban","pro":false}];</script>
+  <script>
+    const UI_ICONS = {
+      'arrow-right': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>',
+      'arrow-left': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>',
+      'settings': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+      'copy': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+      'download': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>',
+      'upload': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>',
+      'refresh': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+      'trash': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+      'eye': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+      'check': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>',
+      'close': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+      'desktop': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+      'tablet': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><circle cx="12" cy="18" r="1"/></svg>',
+      'mobile': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>',
+      'code': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>'
+    };
+
+    let savedSites = [];
+    let currentPages = [];
+    let currentTemplates = [];
+    let activePickerTarget = null;
+    let aiConfig = { apiKey: '', model: 'gemini-3.8-flash' };
+
+    function initStaticIcons() {
+      document.querySelectorAll('[data-eicon]').forEach((el) => {
+        el.innerHTML = getEiconSvg(el.dataset.eicon);
+      });
+      document.querySelectorAll('[data-ui-icon]').forEach((el) => {
+        el.innerHTML = UI_ICONS[el.dataset.uiIcon] || '';
+      });
+    }
+    initStaticIcons();
+
+    function updateAiBadge() {
+      const badge = document.getElementById('ai-key-badge');
+      if (!badge) return;
+      const hasKey = Boolean(aiConfig && aiConfig.apiKey && aiConfig.apiKey.trim().length > 5);
+      badge.textContent = hasKey ? 'API Key đã lưu' : 'Chưa cấu hình Key';
+      badge.style.background = hasKey ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.08)';
+      badge.style.color = hasKey ? '#34d399' : '#94a3b8';
+      badge.style.borderColor = hasKey ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)';
+    }
+
+    function getActiveAiModel() {
+      const sel = document.getElementById('sel-gemini-model');
+      if (!sel) return (aiConfig && aiConfig.model) || 'gemini-3.8-flash';
+      if (sel.value === 'custom') {
+        const inp = document.getElementById('inp-custom-model');
+        return (inp && inp.value.trim()) || 'gemini-3.8-flash';
+      }
+      return sel.value || (aiConfig && aiConfig.model) || 'gemini-3.8-flash';
+    }
+
+    function switchStep(stepId) {
+      const steps = ['step-1', 'step-2', 'step-3', 'step-4'];
+      const targetIndex = steps.indexOf(stepId);
+      if (targetIndex === -1) return;
+
+      const track = document.getElementById('step-track');
+      if (track) {
+        track.style.transform = `translateX(-${targetIndex * 25}%)`;
+      }
+
+      document.querySelectorAll('.step-btn').forEach((btn) => {
+        const idx = steps.indexOf(btn.dataset.step);
+        btn.classList.remove('active', 'completed');
+        if (idx === targetIndex) {
+          btn.classList.add('active');
+        } else if (idx < targetIndex) {
+          btn.classList.add('completed');
+        }
+      });
+
+      if (stepId === 'step-2') {
+        postToPlugin('get-outline');
+      }
+    }
+
+    function setAiScanLoading(loading, message = '') {
+      const btn = document.getElementById('btn-ai-smart-scan');
+      const txt = document.getElementById('ai-scan-btn-text');
+      if (!btn || !txt) return;
+      btn.disabled = loading;
+      if (loading) {
+        txt.textContent = message || 'Đang quét AI...';
+        setStatus(message || 'Đang gọi Gemini Vision AI...', false, false);
+      } else {
+        txt.textContent = 'Phân tích & gán nhãn Widget';
+      }
+    }
+
+    function getEiconSvg(iconKey) {
+      if (iconKey === 'unwrap') {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+      }
+      const data = (window.ELEMENTOR_EICONS && window.ELEMENTOR_EICONS[iconKey]) || (window.ELEMENTOR_EICONS && window.ELEMENTOR_EICONS.container);
+      if (!data || !data.path) {
+        return '<svg viewBox="0 0 1000 1000"><rect x="150" y="150" width="700" height="700" rx="80"/></svg>';
+      }
+      const w = data.width || 1000;
+      const h = data.height || 1000;
+      return `<svg viewBox="0 0 ${w} ${h}"><path d="${data.path}"/></svg>`;
+    }
+
+    function getWidgetInfo(widgetValue) {
+      const list = window.F2E_WIDGET_CATALOG || [];
+      return list.find((w) => w.value === widgetValue) || { value: widgetValue || 'container', label: widgetValue || 'Container', icon: 'container', pro: false };
+    }
+
+    // Step switching event listeners
+    document.querySelectorAll('.step-btn').forEach((btn) => {
+      btn.addEventListener('click', () => switchStep(btn.dataset.step));
+    });
+    document.getElementById('btn-go-step-2')?.addEventListener('click', () => switchStep('step-2'));
+    document.getElementById('btn-back-step-1')?.addEventListener('click', () => switchStep('step-1'));
+    document.getElementById('btn-go-step-3')?.addEventListener('click', () => switchStep('step-3'));
+    document.getElementById('btn-back-step-2')?.addEventListener('click', () => switchStep('step-2'));
+    document.getElementById('btn-go-step-4')?.addEventListener('click', () => switchStep('step-4'));
+    document.getElementById('btn-back-step-3')?.addEventListener('click', () => switchStep('step-3'));
+    document.getElementById('btn-sync-tokens-step3')?.addEventListener('click', () => {
+      postToPlugin('sync-design-system', {
+        siteUrl: document.getElementById('site-select').value,
+      });
+    });
+
+    function postToPlugin(type, data = {}) {
+      parent.postMessage({ pluginMessage: { type, ...data } }, '*');
+    }
+
+    function setStatus(text, isError = false, isDone = false) {
+      const bar = document.getElementById('status-bar');
+      const span = document.getElementById('status-text');
+      bar.className = 'status-bar' + (isError ? ' error' : (isDone ? ' done' : ''));
+      span.textContent = text;
+    }
+
+    function copyTextToClipboard(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+
+    function downloadJsonFile(filename, content) {
+      const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    function openWidgetPicker(item) {
+      activePickerTarget = item;
+      document.getElementById('picker-layer-title').textContent = `Layer: ${item.name} (${item.type})`;
+      const searchInput = document.getElementById('picker-search');
+      searchInput.value = '';
+      renderPickerGrid('');
+      document.getElementById('picker-backdrop').classList.add('open');
+      searchInput.focus();
+    }
+
+    function closeWidgetPicker() {
+      document.getElementById('picker-backdrop').classList.remove('open');
+      activePickerTarget = null;
+    }
+
+    function renderPickerGrid(query = '') {
+      const body = document.getElementById('picker-body');
+      const q = String(query || '').trim().toLowerCase();
+      const catalog = window.F2E_WIDGET_CATALOG || [];
+      body.innerHTML = '';
+
+      // Always add "Auto (Heuristics)" card at top
+      const autoGrid = document.createElement('div');
+      autoGrid.className = 'picker-grid';
+      const autoCard = document.createElement('div');
+      autoCard.className = 'picker-card' + (activePickerTarget && activePickerTarget.source !== 'override' ? ' active' : '');
+      autoCard.innerHTML = `<div class="p-icon">${getEiconSvg('ai')}</div><div class="p-title"><strong>Tự động (Auto)</strong></div>`;
+      autoCard.addEventListener('click', () => {
+        if (activePickerTarget) {
+          postToPlugin('set-widget', { nodeId: activePickerTarget.nodeId, widget: '' });
+        }
+        closeWidgetPicker();
+      });
+      autoGrid.appendChild(autoCard);
+      body.appendChild(autoGrid);
+
+      const groups = {};
+      for (const w of catalog) {
+        if (q && !w.label.toLowerCase().includes(q) && !w.value.toLowerCase().includes(q) && !w.category.toLowerCase().includes(q)) {
+          continue;
+        }
+        if (!groups[w.category]) groups[w.category] = [];
+        groups[w.category].push(w);
+      }
+
+      for (const [catName, widgets] of Object.entries(groups)) {
+        const catHeader = document.createElement('div');
+        catHeader.className = 'picker-cat-title';
+        catHeader.textContent = `${catName} (${widgets.length})`;
+        body.appendChild(catHeader);
+
+        const grid = document.createElement('div');
+        grid.className = 'picker-grid';
+        for (const w of widgets) {
+          const card = document.createElement('div');
+          const isSelected = activePickerTarget && activePickerTarget.source === 'override' && activePickerTarget.widget === w.value;
+          card.className = 'picker-card' + (isSelected ? ' active' : '');
+          card.innerHTML =
+            (w.pro ? '<span class="p-pro">PRO</span>' : '') +
+            `<div class="p-icon">${getEiconSvg(w.icon)}</div>` +
+            `<div class="p-title">${w.label}</div>`;
+          card.addEventListener('click', () => {
+            if (activePickerTarget) {
+              postToPlugin('set-widget', { nodeId: activePickerTarget.nodeId, widget: w.value });
+            }
+            closeWidgetPicker();
+          });
+          grid.appendChild(card);
+        }
+        body.appendChild(grid);
+      }
+    }
+
+    document.getElementById('picker-close').addEventListener('click', closeWidgetPicker);
+    document.getElementById('picker-backdrop').addEventListener('click', (e) => {
+      if (e.target.id === 'picker-backdrop') closeWidgetPicker();
+    });
+    document.getElementById('picker-search').addEventListener('input', (e) => {
+      renderPickerGrid(e.target.value);
+    });
+
+    function renderOutline(items) {
+      const container = document.getElementById('outline-container');
+      if (!items || items.length === 0) {
+        container.innerHTML = '<div style="padding: 16px; text-align: center; color: var(--muted);">Chọn một Frame trên Figma để xem cây Layer và gắn thẻ Widget.</div>';
+        return;
+      }
+      container.innerHTML = '';
+      for (const item of items) {
+        const row = document.createElement('div');
+        row.className = 'outline-item';
+
+        const info = document.createElement('div');
+        info.className = 'layer-info';
+        info.style.paddingLeft = `${Math.min(item.depth * 10, 64)}px`;
+
+        const pill = document.createElement('span');
+        pill.className = `tag-pill ${item.source}`;
+        pill.textContent = item.source === 'override' ? 'Pinned' : (item.source.startsWith('name') ? 'Tag' : item.type.slice(0, 5));
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'layer-name';
+        nameSpan.textContent = item.name;
+        nameSpan.title = `${item.name} (${item.type})`;
+
+        info.appendChild(pill);
+        info.appendChild(nameSpan);
+
+        const wInfo = getWidgetInfo(item.widget);
+        const isUnwrap = item.widget === 'unwrap';
+        const triggerBtn = document.createElement('button');
+        triggerBtn.type = 'button';
+        triggerBtn.className = 'widget-trigger-btn' + (item.source === 'override' ? ' is-override' : '') + (isUnwrap ? ' is-unwrap' : '');
+        const prefix = item.source === 'override' ? '' : (isUnwrap ? '' : 'Auto: ');
+        const labelText = isUnwrap ? '⚡ Unwrap Container' : `${prefix}${wInfo.label}`;
+        triggerBtn.innerHTML =
+          `<span class="w-icon">${getEiconSvg(wInfo.icon)}</span>` +
+          `<span class="w-label">${labelText}</span>` +
+          `<span style="color:var(--muted);font-size:9px;">▼</span>`;
+        triggerBtn.addEventListener('click', () => openWidgetPicker(item));
+
+        row.appendChild(info);
+        row.appendChild(triggerBtn);
+        container.appendChild(row);
+      }
+    }
+
+    function populateSitesDropdown(sites, activeUrl) {
+      savedSites = sites || [];
+      const sel = document.getElementById('site-select');
+      sel.innerHTML = '';
+      if (savedSites.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '-- Chưa có website nào --';
+        sel.appendChild(opt);
+        document.getElementById('add-site-box').style.display = 'block';
+        return;
+      }
+      for (const s of savedSites) {
+        const opt = document.createElement('option');
+        opt.value = s.siteUrl;
+        opt.textContent = `${s.label} (${s.siteUrl})`;
+        if (s.siteUrl === activeUrl) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      document.getElementById('add-site-box').style.display = 'none';
+    }
+
+    function refreshTargetPostDropdown() {
+      const targetType = document.getElementById('push-target-type').value;
+      const wrapTpl = document.getElementById('wrap-template-type');
+      wrapTpl.style.display = targetType === 'elementor_library' ? 'block' : 'none';
+
+      const sel = document.getElementById('push-post-id');
+      sel.innerHTML = '<option value="0">+ Tạo Trang / Template Mới</option>';
+      const list = targetType === 'elementor_library' ? currentTemplates : currentPages;
+      for (const item of list) {
+        const opt = document.createElement('option');
+        opt.value = String(item.id);
+        opt.textContent = `#${item.id} — ${item.title} (${item.status || 'draft'})`;
+        sel.appendChild(opt);
+      }
+    }
+
+    // UI Event Listeners
+    document.getElementById('btn-refresh').addEventListener('click', () => postToPlugin('get-outline'));
+    document.getElementById('btn-reset-tags').addEventListener('click', () => postToPlugin('reset-all-widgets'));
+
+    document.getElementById('btn-copy-clipboard').addEventListener('click', () => {
+      postToPlugin('export-action', {
+        payload: {
+          action: 'clipboard',
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+          siteUrl: document.getElementById('site-select').value || '',
+        }
+      });
+    });
+
+    document.getElementById('btn-dl-bundle').addEventListener('click', () => {
+      postToPlugin('export-action', {
+        payload: {
+          action: 'download-f2e-bundle',
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+          siteUrl: document.getElementById('site-select').value || '',
+        }
+      });
+    });
+
+    document.getElementById('btn-dl-v3').addEventListener('click', () => {
+      postToPlugin('export-action', {
+        payload: {
+          action: 'download-elementor-v3',
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+          siteUrl: document.getElementById('site-select').value || '',
+        }
+      });
+    });
+
+    document.getElementById('btn-dl-v4').addEventListener('click', () => {
+      postToPlugin('export-action', {
+        payload: {
+          action: 'download-elementor-v4',
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+        }
+      });
+    });
+
+    document.getElementById('btn-toggle-add-site').addEventListener('click', () => {
+      const box = document.getElementById('add-site-box');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('btn-verify-site').addEventListener('click', () => {
+      postToPlugin('verify-site', {
+        config: {
+          siteUrl: document.getElementById('inp-site-url').value,
+          token: document.getElementById('inp-site-token').value,
+        }
+      });
+    });
+
+    document.getElementById('btn-delete-site').addEventListener('click', () => {
+      const url = document.getElementById('site-select').value;
+      if (url) postToPlugin('delete-site', { siteUrl: url });
+    });
+
+    document.getElementById('site-select').addEventListener('change', (e) => {
+      if (e.target.value) postToPlugin('load-site-targets', { siteUrl: e.target.value });
+    });
+
+    document.getElementById('push-target-type').addEventListener('change', refreshTargetPostDropdown);
+
+    document.getElementById('btn-live-push').addEventListener('click', () => {
+      postToPlugin('live-push', {
+        payload: {
+          siteUrl: document.getElementById('site-select').value,
+          targetType: document.getElementById('push-target-type').value,
+          templateType: document.getElementById('push-template-type').value,
+          targetPostId: Number(document.getElementById('push-post-id').value),
+          postTitle: document.getElementById('push-title').value,
+          importMode: document.getElementById('push-mode').value,
+          elementorVersion: document.getElementById('push-el-version').value,
+          postStatus: document.getElementById('push-status').value,
+          syncGlobalStyles: document.getElementById('chk-sync-globals').checked,
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+        }
+      });
+    });
+
+    document.getElementById('btn-sync-tokens-only').addEventListener('click', () => {
+      postToPlugin('sync-design-system', {
+        siteUrl: document.getElementById('site-select').value,
+      });
+    });
+
+    document.getElementById('btn-fix-layout').addEventListener('click', () => {
+      postToPlugin('fix-auto-layout');
+    });
+
+    document.querySelectorAll('[data-vp]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        postToPlugin('capture-responsive', { viewport: btn.dataset.vp });
+      });
+    });
+
+    document.getElementById('btn-clear-resp').addEventListener('click', () => {
+      postToPlugin('clear-responsive');
+    });
+
+    // AI Smart Scan Event Listeners
+    document.getElementById('sel-gemini-model')?.addEventListener('change', (e) => {
+      const wrap = document.getElementById('wrap-custom-model');
+      if (wrap) wrap.style.display = e.target.value === 'custom' ? 'block' : 'none';
+    });
+
+    document.getElementById('btn-toggle-ai-cfg').addEventListener('click', () => {
+      const box = document.getElementById('ai-cfg-box');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('btn-toggle-key-vis').addEventListener('click', () => {
+      const inp = document.getElementById('inp-gemini-key');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+    });
+
+    document.getElementById('btn-save-ai-cfg').addEventListener('click', () => {
+      const keyVal = document.getElementById('inp-gemini-key').value.trim();
+      const modelVal = getActiveAiModel();
+      aiConfig = { apiKey: keyVal, model: modelVal };
+      postToPlugin('save-ai-config', { config: aiConfig });
+      updateAiBadge();
+      document.getElementById('ai-cfg-box').style.display = 'none';
+    });
+
+    let aiProgressInterval = null;
+
+    function showAiProgressModal(rootName = '') {
+      const backdrop = document.getElementById('ai-progress-backdrop');
+      const badge = document.getElementById('ai-modal-model-badge');
+      badge.textContent = getActiveAiModel();
+      document.getElementById('ai-progress-fill').style.background = 'linear-gradient(90deg, #3b82f6, #9333ea, #10b981)';
+      document.getElementById('ai-modal-footer').style.display = 'none';
+      document.getElementById('btn-close-ai-modal').style.display = 'none';
+
+      updateAiProgress(12, rootName ? `Đang chụp ảnh "${rootName}"...` : 'Đang chụp ảnh canvas...');
+      setAiStepState(1, 'active');
+      setAiStepState(2, 'waiting');
+      setAiStepState(3, 'waiting');
+      setAiStepState(4, 'waiting');
+
+      backdrop.classList.add('open');
+    }
+
+    function closeAiProgressModal() {
+      if (aiProgressInterval) {
+        clearInterval(aiProgressInterval);
+        aiProgressInterval = null;
+      }
+      document.getElementById('ai-progress-backdrop').classList.remove('open');
+      setAiScanLoading(false);
+    }
+
+    function updateAiProgress(percent, statusText) {
+      const p = Math.max(0, Math.min(100, Math.round(percent)));
+      document.getElementById('ai-progress-fill').style.width = `${p}%`;
+      document.getElementById('ai-progress-percent').textContent = `${p}%`;
+      if (statusText) {
+        document.getElementById('ai-progress-status-text').textContent = statusText;
+      }
+    }
+
+    function setAiStepState(stepNum, state, customLabel) {
+      const stepEl = document.getElementById(`ai-step-${stepNum}`);
+      if (!stepEl) return;
+      stepEl.classList.remove('active', 'done', 'error');
+      const iconEl = stepEl.querySelector('.ai-step-icon');
+      const labelEl = stepEl.querySelector('.ai-step-label');
+      if (customLabel && labelEl) labelEl.textContent = customLabel;
+
+      if (state === 'active') {
+        stepEl.classList.add('active');
+        iconEl.innerHTML = '<div class="ai-spinner"></div>';
+      } else if (state === 'done') {
+        stepEl.classList.add('done');
+        iconEl.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      } else if (state === 'error') {
+        stepEl.classList.add('error');
+        iconEl.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+      } else {
+        iconEl.innerHTML = '<span style="color:var(--muted);font-size:10px;">○</span>';
+      }
+    }
+
+    function completeAiProgress(appliedCount) {
+      if (aiProgressInterval) {
+        clearInterval(aiProgressInterval);
+        aiProgressInterval = null;
+      }
+      updateAiProgress(100, `✨ Hoàn tất! Đã tự động gán nhãn ${appliedCount} widget.`);
+      setAiStepState(4, 'done', `4. Đã gán nhãn thành công ${appliedCount} widget vào Figma`);
+      document.getElementById('ai-modal-footer').style.display = 'flex';
+      document.getElementById('btn-close-ai-modal').style.display = 'block';
+
+      const btnDone = document.getElementById('btn-ai-modal-done');
+      btnDone.textContent = 'Đóng và xem kết quả';
+      btnDone.className = 'btn btn-primary btn-sm';
+      setAiScanLoading(false);
+
+      // Auto close after 3.2s
+      setTimeout(() => {
+        const fill = document.getElementById('ai-progress-fill');
+        if (fill && fill.style.width === '100%') {
+          closeAiProgressModal();
+        }
+      }, 3200);
+    }
+
+    function failAiProgress(errorMessage) {
+      if (aiProgressInterval) {
+        clearInterval(aiProgressInterval);
+        aiProgressInterval = null;
+      }
+      updateAiProgress(100, `Lỗi: ${errorMessage}`);
+      document.getElementById('ai-progress-fill').style.background = '#ef4444';
+      document.getElementById('ai-modal-footer').style.display = 'flex';
+      document.getElementById('btn-close-ai-modal').style.display = 'block';
+      const btnDone = document.getElementById('btn-ai-modal-done');
+      btnDone.textContent = 'Đóng';
+      btnDone.className = 'btn btn-secondary btn-sm';
+      setAiScanLoading(false);
+    }
+
+    document.getElementById('btn-close-ai-modal').addEventListener('click', closeAiProgressModal);
+    document.getElementById('btn-ai-modal-done').addEventListener('click', closeAiProgressModal);
+    document.getElementById('ai-progress-backdrop').addEventListener('click', (e) => {
+      if (e.target.id === 'ai-progress-backdrop' && document.getElementById('ai-modal-footer').style.display === 'flex') {
+        closeAiProgressModal();
+      }
+    });
+
+    document.getElementById('btn-reset-tags-quick').addEventListener('click', () => {
+      postToPlugin('reset-all-widgets');
+    });
+
+    document.getElementById('btn-ai-smart-scan').addEventListener('click', () => {
+      const key = (aiConfig.apiKey || document.getElementById('inp-gemini-key').value || '').trim();
+      if (!key) {
+        document.getElementById('ai-cfg-box').style.display = 'block';
+        document.getElementById('inp-gemini-key').focus();
+        setStatus('Vui lòng nhập Gemini API Key để quét AI!', true, false);
+        return;
+      }
+      const sum = document.getElementById('sel-summary').textContent || '';
+      showAiProgressModal(sum);
+      setAiScanLoading(true, 'Đang chụp ảnh canvas...');
+      postToPlugin('request-ai-scan-payload');
+    });
+
+    async function executeGeminiVisionInference(payload) {
+      setAiStepState(1, 'done');
+      setAiStepState(2, 'active');
+      updateAiProgress(30, 'Đang chuẩn bị dữ liệu và hình ảnh gửi Gemini...');
+
+      try {
+        const { imageBase64, tree, rootName } = payload;
+        const apiKey = (aiConfig.apiKey || document.getElementById('inp-gemini-key').value || '').trim();
+        const model = getActiveAiModel();
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+        setAiStepState(2, 'done');
+        setAiStepState(3, 'active');
+        updateAiProgress(48, `${model} đang phân tích thị giác và đối chiếu 86 widget Elementor...`);
+
+        // Smooth visual ticking while LLM generates tokens
+        let currP = 48;
+        if (aiProgressInterval) clearInterval(aiProgressInterval);
+        aiProgressInterval = setInterval(() => {
+          if (currP < 82) {
+            currP += 3;
+            updateAiProgress(currP);
+          }
+        }, 500);
+
+        const systemPrompt = `Bạn là Chuyên gia WordPress & Elementor (Free + Pro).
+Nhiệm vụ của bạn là nhìn vào ẢNH CHỤP THIẾT KẾ UI đính kèm và CÂY LAYER JSON để gán nhãn Widget Elementor chuẩn 100%.
+
+DANH MỤC WIDGET ELEMENTOR HỢP LỆ (Chỉ chọn đúng các từ khóa sau):
+- container (Flexbox Container chứa các phần tử khác: section, row, col, card)
+- container-grid (CSS Grid Container cho lưới card)
+- heading (Tiêu đề H1-H6)
+- text-editor (Đoạn văn, mô tả, subtext)
+- button (Nút bấm CTA có nền/viền/bo góc)
+- image (Hình ảnh raster, mockup sản phẩm)
+- icon (Icon vector đơn lẻ, inline SVG)
+- divider (Vạch kẻ phân cách mỏng, đường line trang trí)
+- spacer (Khoảng trống)
+- icon-box (Khối tính năng/thẻ gồm Icon/Badge + Tiêu đề + Đoạn mô tả. QUAN TRỌNG: Gán icon-box vào Frame cha để tự động gom cả icon, tiêu đề và mô tả!)
+- image-box (Khối thẻ gồm Ảnh + Tiêu đề + Đoạn mô tả)
+- icon-list (Dải ticker hoặc danh sách gạch đầu dòng dạng dot/check + text, ví dụ: dải tính năng dưới hero)
+- nav-menu (Thanh menu điều hướng gồm các link text ngang)
+- theme-site-logo (Khung Logo website ở Header)
+- counter (Số đếm thống kê kèm tiêu đề, ví dụ: 08, 100%, 12 tháng)
+- star-rating (Đánh giá sao)
+- testimonial (Khối trích dẫn đánh giá của khách hàng)
+- price-table (Bảng giá dịch vụ)
+- call-to-action (Khối kêu gọi hành động có banner + text + nút)
+- form (Khối form liên hệ có ô input và nút gửi)
+- skip (Bỏ qua hoàn toàn layer này và các con của nó: ví dụ hình nền vector chìm watermark, hoa văn nền không cần xuất riêng)
+
+QUY TẮC CỐT LÕI:
+1. Nếu một Frame là widget nguyên tử phức hợp ("icon-box", "nav-menu", "icon-list", "button", "theme-site-logo"), HÃY GÁN WIDGET ĐÓ CHO CHÍNH FRAME CHA để hệ thống tự động hấp thụ toàn bộ text/icon con vào widget và không bung container rác!
+2. Nếu Frame là watermark chìm nền hoặc hoa văn nền thừa, hãy gán là "skip".
+3. Các card chứa nhiều phần tử độc lập (như Stat card có số, chữ, icon absolute, divider) thì Frame ngoài là "container", số là "heading" hoặc "counter", chữ là "text-editor", vạch kẻ là "divider", icon là "icon".
+
+HÃY TRẢ VỀ DUY NHẤT MỘT MẢNG JSON HỢP LỆ (KHÔNG KÈM TEXT GIẢI THÍCH HAY MARKDOWN KHÁC):
+[
+  { "id": "layer_id", "widget": "tên_widget_trong_danh_mục", "reason": "lý do ngắn gọn" }
+]`;
+
+        const requestBody = {
+          contents: [
+            {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: 'image/png',
+                    data: imageBase64,
+                  },
+                },
+                {
+                  text: `${systemPrompt}\n\nCÂY LAYER HIỆN TẠI (Vùng chọn: ${rootName}):\n${JSON.stringify(tree, null, 2)}`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.1,
+          },
+        };
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (aiProgressInterval) {
+          clearInterval(aiProgressInterval);
+          aiProgressInterval = null;
+        }
+
+        if (!res.ok) {
+          const errText = await res.text();
+          let errMsg = `Gemini API Error (${res.status})`;
+          try {
+            const errObj = JSON.parse(errText);
+            if (errObj.error && errObj.error.message) errMsg += `: ${errObj.error.message}`;
+          } catch (e) {
+            errMsg += `: ${errText.slice(0, 160)}`;
+          }
+          throw new Error(errMsg);
+        }
+
+        const data = await res.json();
+        let rawContent = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '[]';
+        rawContent = rawContent.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+        const parsed = JSON.parse(rawContent);
+        const tags = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.tags) ? parsed.tags : (Array.isArray(parsed.widgets) ? parsed.widgets : []));
+
+        if (tags.length === 0) {
+          throw new Error('AI đã phân tích xong nhưng không tìm thấy gợi ý gán thẻ nào.');
+        }
+
+        setAiStepState(3, 'done', `3. Phân tích hoàn tất: Tìm thấy ${tags.length} widget phù hợp`);
+        setAiStepState(4, 'active');
+        updateAiProgress(88, `Đang áp dụng ${tags.length} nhãn widget vào canvas Figma...`);
+
+        setStatus(`AI đã phân tích xong. Đang áp dụng ${tags.length} nhãn widget...`, false, false);
+        postToPlugin('apply-ai-tags', { tags });
+      } catch (err) {
+        if (aiProgressInterval) {
+          clearInterval(aiProgressInterval);
+          aiProgressInterval = null;
+        }
+        failAiProgress(err.message || 'Lỗi khi gọi Gemini AI');
+        setStatus(err.message || 'Lỗi khi gọi Gemini AI', true, false);
+      }
+    }
+
+    // Handle messages from Figma Sandbox
+    window.onmessage = (event) => {
+      const msg = event.data && event.data.pluginMessage;
+      if (!msg) return;
+
+      if (msg.widgetCatalog) {
+        window.F2E_WIDGET_CATALOG = msg.widgetCatalog;
+      }
+
+      if (msg.type === 'status') {
+        setStatus(msg.message, Boolean(msg.error), Boolean(msg.done));
+      } else if (msg.type === 'busy') {
+        document.querySelectorAll('button').forEach((b) => { b.disabled = Boolean(msg.busy); });
+      } else if (msg.type === 'outline') {
+        const sum = document.getElementById('sel-summary');
+        sum.textContent = msg.selectionCount > 0
+          ? `${msg.selectionNames.join(', ')} (${msg.items.length} nodes)`
+          : 'Chưa chọn Frame nào';
+        renderOutline(msg.items);
+        if (msg.responsiveStatus) {
+          document.getElementById('vp-desktop-name').textContent = msg.responsiveStatus.desktop || 'Theo Frame đang chọn';
+          document.getElementById('vp-tablet-name').textContent = msg.responsiveStatus.tablet || 'Tự động co giãn (Auto)';
+          document.getElementById('vp-mobile-name').textContent = msg.responsiveStatus.mobile || 'Tự động gập cột (Auto)';
+        }
+      } else if (msg.type === 'init-state' || msg.type === 'sites-loaded') {
+        initStaticIcons();
+        populateSitesDropdown(msg.sites || [], msg.activeSiteUrl || '');
+        if (msg.pages) currentPages = msg.pages;
+        if (msg.templates) currentTemplates = msg.templates;
+        refreshTargetPostDropdown();
+        if (msg.aiConfig) {
+          aiConfig = msg.aiConfig;
+          if (aiConfig.apiKey) document.getElementById('inp-gemini-key').value = aiConfig.apiKey;
+          if (aiConfig.model) {
+            const isStandard = ['gemini-3.8-flash', 'gemini-4-neon', 'gemini-3.8-pro'].includes(aiConfig.model);
+            const selEl = document.getElementById('sel-gemini-model');
+            const wrapEl = document.getElementById('wrap-custom-model');
+            const customInp = document.getElementById('inp-custom-model');
+            if (selEl) {
+              if (isStandard) {
+                selEl.value = aiConfig.model;
+                if (wrapEl) wrapEl.style.display = 'none';
+              } else {
+                selEl.value = 'custom';
+                if (customInp) customInp.value = aiConfig.model;
+                if (wrapEl) wrapEl.style.display = 'block';
+              }
+            }
+          }
+          updateAiBadge();
+        }
+      } else if (msg.type === 'ai-scan-payload-ready') {
+        executeGeminiVisionInference(msg);
+      } else if (msg.type === 'ai-tags-applied') {
+        completeAiProgress(msg.appliedCount || 0);
+      } else if (msg.type === 'site-targets') {
+        currentPages = msg.pages || [];
+        currentTemplates = msg.templates || [];
+        refreshTargetPostDropdown();
+      } else if (msg.type === 'clipboard-ready') {
+        copyTextToClipboard(msg.json);
+      } else if (msg.type === 'download-ready') {
+        downloadJsonFile(msg.filename, msg.json);
+      } else if (msg.type === 'push-complete' && msg.result) {
+        const box = document.getElementById('push-result-links');
+        box.style.display = 'block';
+        box.innerHTML = `Đã lưu <strong>#${msg.result.postId}</strong> (${msg.result.actionLabel || 'Updated'}).<br>` +
+          (msg.result.editUrl ? `<a href="${msg.result.editUrl}" target="_blank" style="color: #60a5fa; text-decoration:none;">Mở trong Elementor Editor ↗</a> &nbsp;|&nbsp; ` : '') +
+          (msg.result.viewUrl ? `<a href="${msg.result.viewUrl}" target="_blank" style="color: #34d399; text-decoration:none;">Xem trang thực tế ↗</a>` : '');
+      }
+    };
+
+    // Initialize icons on DOM ready as well
+    document.addEventListener('DOMContentLoaded', initStaticIcons);
+  </script>
+</body>
+
+</html>

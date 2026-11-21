@@ -1,0 +1,18 @@
+{
+  "name": "F2E Bridge — Figma to Elementor (Free & Pro)",
+  "id": "f2e-figma-to-elementor-bridge",
+  "api": "1.0.0",
+  "editorType": [
+    "figma",
+    "dev"
+  ],
+  "main": "dist/code.js",
+  "ui": "src/ui/index.html",
+  "documentAccess": "dynamic-page",
+  "networkAccess": {
+    "allowedDomains": [
+      "*"
+    ],
+    "reasoning": "Allows connecting directly to any user-hosted WordPress site (HTTPS or localhost) via REST API."
+  }
+}

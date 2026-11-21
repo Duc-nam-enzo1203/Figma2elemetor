@@ -1,0 +1,2308 @@
+<!DOCTYPE html>
+<html lang="vi">
+
+<head>
+  <meta charset="UTF-8" />
+  <title>F2E Bridge — Figma to Elementor</title>
+  <style>
+    :root {
+      --bg: #18181b;
+      --bg-subtle: #121214;
+      --panel: #202024;
+      --panel-hover: #27272a;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-focus: #3b82f6;
+      --text: #f4f4f5;
+      --text-secondary: #a1a1aa;
+      --muted: #71717a;
+      --primary: #2563eb;
+      --primary-hover: #1d4ed8;
+      --brand: #92003b;
+      --brand-hover: #a50044;
+      --success: #10b981;
+      --danger: #ef4444;
+      --radius: 6px;
+      --radius-sm: 4px;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Inter, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+      font-size: 11.5px;
+      line-height: 1.45;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      height: 100vh;
+      overflow: hidden;
+      -webkit-font-smoothing: antialiased;
+    }
+
+    header {
+      padding: 8px 12px;
+      background: var(--bg-subtle);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      flex-shrink: 0;
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      font-weight: 600;
+      font-size: 12px;
+      color: var(--text);
+    }
+
+    .brand-logo {
+      width: 18px;
+      height: 18px;
+      border-radius: var(--radius-sm);
+      background: var(--brand);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .brand-logo svg {
+      width: 11px;
+      height: 11px;
+      fill: #fff;
+    }
+
+    .badge-group {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+    }
+
+    .badge {
+      font-size: 10px;
+      padding: 2px 6px;
+      border-radius: var(--radius-sm);
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-secondary);
+      font-weight: 500;
+      border: 1px solid var(--border);
+    }
+
+    .badge-accent {
+      background: rgba(146, 0, 59, 0.2);
+      color: #f472b6;
+      border-color: rgba(146, 0, 59, 0.4);
+    }
+
+    /* Stepper Navigation (Impeccable & unslop design) */
+    .stepper-nav {
+      display: flex;
+      align-items: center;
+      background: var(--bg-subtle);
+      border-bottom: 1px solid var(--border);
+      padding: 5px 8px;
+      gap: 4px;
+      flex-shrink: 0;
+    }
+
+    .step-btn {
+      flex: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      background: transparent;
+      border: 1px solid transparent;
+      border-radius: var(--radius);
+      color: var(--muted);
+      padding: 6px 4px;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.15s ease;
+      font-family: inherit;
+    }
+
+    .step-btn:hover {
+      background: var(--panel);
+      color: var(--text-secondary);
+    }
+
+    .step-btn.active {
+      background: var(--panel);
+      border-color: var(--border);
+      color: var(--text);
+      font-weight: 600;
+    }
+
+    .step-num {
+      width: 16px;
+      height: 16px;
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 9.5px;
+      font-weight: 600;
+      flex-shrink: 0;
+      transition: all 0.15s ease;
+    }
+
+    .step-btn.active .step-num {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .step-btn.completed .step-num {
+      background: #059669;
+      color: #fff;
+    }
+
+    .step-divider {
+      color: var(--muted);
+      opacity: 0.35;
+      font-size: 10px;
+      user-select: none;
+      display: flex;
+      align-items: center;
+    }
+
+    .selection-bar {
+      padding: 6px 12px;
+      background: rgba(32, 32, 36, 0.6);
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11px;
+      color: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .selection-bar strong {
+      color: var(--text);
+      font-weight: 500;
+    }
+
+    /* Step Carousel Track (Smooth slide transition) */
+    .step-viewport {
+      flex: 1;
+      overflow: hidden;
+      position: relative;
+      background: var(--bg);
+    }
+
+    .step-track {
+      display: flex;
+      width: 400%;
+      height: 100%;
+      transform: translateX(0%);
+      transition: transform 0.28s cubic-bezier(0.2, 0, 0, 1);
+      will-change: transform;
+    }
+
+    .step-pane {
+      width: 25%;
+      height: 100%;
+      overflow-y: auto;
+      padding: 12px 14px;
+      box-sizing: border-box;
+    }
+
+    .card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 11px 12px;
+      margin-bottom: 10px;
+    }
+
+    .card-title {
+      font-size: 11.5px;
+      font-weight: 600;
+      color: var(--text);
+      margin: 0 0 7px 0;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .card-title .title-left {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .field {
+      margin-bottom: 9px;
+    }
+
+    .field label {
+      display: block;
+      font-size: 11px;
+      color: var(--text-secondary);
+      margin-bottom: 4px;
+      font-weight: 500;
+    }
+
+    input[type="text"],
+    input[type="password"],
+    select {
+      width: 100%;
+      padding: 6px 9px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      font-size: 11px;
+      outline: none;
+      font-family: inherit;
+      transition: border-color 0.12s ease;
+    }
+
+    input:focus,
+    select:focus {
+      border-color: var(--border-focus);
+    }
+
+    .row {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
+      padding: 7px 11px;
+      border-radius: var(--radius-sm);
+      border: 1px solid transparent;
+      font-size: 11px;
+      font-weight: 500;
+      cursor: pointer;
+      transition: all 0.12s ease;
+      font-family: inherit;
+      user-select: none;
+    }
+
+    .btn:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    .btn-primary {
+      background: var(--primary);
+      color: #fff;
+    }
+
+    .btn-primary:hover:not(:disabled) {
+      background: var(--primary-hover);
+    }
+
+    .btn-brand {
+      background: var(--brand);
+      color: #fff;
+    }
+
+    .btn-brand:hover:not(:disabled) {
+      background: var(--brand-hover);
+    }
+
+    .btn-secondary {
+      background: var(--panel);
+      color: var(--text);
+      border: 1px solid var(--border);
+    }
+
+    .btn-secondary:hover:not(:disabled) {
+      background: var(--panel-hover);
+      border-color: rgba(255, 255, 255, 0.16);
+    }
+
+    .btn-sm {
+      padding: 3px 7px;
+      font-size: 10.5px;
+    }
+
+    .btn-icon {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 13px;
+      height: 13px;
+      flex-shrink: 0;
+    }
+
+    .btn-icon svg {
+      width: 13px;
+      height: 13px;
+      fill: currentColor;
+    }
+
+    .step-nav-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-top: 14px;
+      padding-top: 10px;
+      border-top: 1px solid var(--border);
+    }
+
+    /* Outline list */
+    .outline-list {
+      max-height: 380px;
+      overflow-y: auto;
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--bg-subtle);
+    }
+
+    .outline-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 5px 8px;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.04);
+      gap: 6px;
+    }
+
+    .outline-item:last-child {
+      border-bottom: none;
+    }
+
+    .outline-item:hover {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .layer-info {
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      min-width: 0;
+      flex: 1;
+    }
+
+    .layer-name {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      font-size: 11px;
+      color: var(--text);
+    }
+
+    .tag-pill {
+      font-size: 9px;
+      padding: 1px 5px;
+      border-radius: 3px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-secondary);
+      font-weight: 500;
+      flex-shrink: 0;
+    }
+
+    .tag-pill.override {
+      background: rgba(214, 51, 132, 0.18);
+      color: #f472b6;
+    }
+
+    .tag-pill.name,
+    .tag-pill.name-tag {
+      background: rgba(16, 185, 129, 0.15);
+      color: #34d399;
+    }
+
+    .widget-trigger-btn {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      color: var(--text);
+      padding: 4px 7px;
+      font-size: 11px;
+      cursor: pointer;
+      width: 160px;
+      flex-shrink: 0;
+      text-align: left;
+      transition: all 0.12s ease;
+      font-family: inherit;
+    }
+
+    .widget-trigger-btn:hover {
+      border-color: rgba(255, 255, 255, 0.2);
+      background: var(--panel-hover);
+    }
+
+    .widget-trigger-btn.is-unwrap {
+      background: rgba(245, 158, 11, 0.14);
+      border-color: rgba(245, 158, 11, 0.5);
+      color: #fbbf24;
+    }
+
+    .widget-trigger-btn.is-unwrap .w-icon {
+      color: #fbbf24;
+    }
+
+    .widget-trigger-btn.is-override {
+      border-color: rgba(214, 51, 132, 0.5);
+      background: rgba(214, 51, 132, 0.12);
+    }
+
+    .widget-trigger-btn .w-icon {
+      width: 14px;
+      height: 14px;
+      flex-shrink: 0;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .widget-trigger-btn .w-icon svg {
+      width: 14px;
+      height: 14px;
+      fill: currentColor;
+    }
+
+    .widget-trigger-btn .w-label {
+      flex: 1;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    /* Modal Picker */
+    .picker-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.65);
+      backdrop-filter: blur(2px);
+      z-index: 999;
+      align-items: center;
+      justify-content: center;
+      padding: 14px;
+    }
+
+    .picker-backdrop.open {
+      display: flex;
+    }
+
+    .picker-modal {
+      background: #1c1c20;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 8px;
+      width: 100%;
+      max-width: 440px;
+      max-height: 85vh;
+      display: flex;
+      flex-direction: column;
+      box-shadow: 0 16px 36px rgba(0, 0, 0, 0.5);
+    }
+
+    .picker-header {
+      padding: 9px 12px;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .picker-body {
+      padding: 10px 12px;
+      overflow-y: auto;
+      flex: 1;
+    }
+
+    .picker-cat-title {
+      font-size: 10px;
+      font-weight: 600;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      margin: 10px 0 6px 0;
+    }
+
+    .picker-cat-title:first-child {
+      margin-top: 0;
+    }
+
+    .picker-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 6px;
+    }
+
+    .picker-card {
+      background: var(--panel);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      padding: 8px 6px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      text-align: center;
+      gap: 4px;
+      cursor: pointer;
+      position: relative;
+      transition: all 0.12s ease;
+    }
+
+    .picker-card:hover {
+      border-color: rgba(255, 255, 255, 0.24);
+      background: var(--panel-hover);
+    }
+
+    .picker-card.active {
+      border-color: rgba(214, 51, 132, 0.6);
+      background: rgba(214, 51, 132, 0.14);
+    }
+
+    .picker-card .p-icon {
+      width: 20px;
+      height: 20px;
+      color: var(--text-secondary);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    .picker-card:hover .p-icon {
+      color: var(--text);
+    }
+
+    .picker-card.active .p-icon {
+      color: #f472b6;
+    }
+
+    .picker-card .p-icon svg {
+      width: 20px;
+      height: 20px;
+      fill: currentColor;
+    }
+
+    .picker-card .p-title {
+      font-size: 10px;
+      color: var(--text);
+      line-height: 1.25;
+      word-break: break-word;
+    }
+
+    .picker-card .p-pro {
+      position: absolute;
+      top: 3px;
+      right: 3px;
+      font-size: 8px;
+      padding: 1px 3px;
+      border-radius: 2px;
+      background: rgba(214, 51, 132, 0.25);
+      color: #f472b6;
+      font-weight: 600;
+    }
+
+    .vp-slot {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 7px 10px;
+      background: var(--bg-subtle);
+      border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      margin-bottom: 6px;
+    }
+
+    .vp-slot-info {
+      display: flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .status-bar {
+      padding: 7px 12px;
+      background: var(--bg-subtle);
+      border-top: 1px solid var(--border);
+      font-size: 11px;
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      flex-shrink: 0;
+    }
+
+    .status-indicator {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .status-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 999px;
+      background: var(--muted);
+      flex-shrink: 0;
+    }
+
+    .status-bar.error {
+      color: #f87171;
+    }
+
+    .status-bar.error .status-dot {
+      background: #ef4444;
+    }
+
+    .status-bar.done {
+      color: #34d399;
+    }
+
+    .status-bar.done .status-dot {
+      background: #10b981;
+    }
+
+    .checkbox-row {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      color: var(--text);
+      margin-bottom: 8px;
+      cursor: pointer;
+    }
+
+    .hint {
+      font-size: 11px;
+      color: var(--muted);
+      margin: 4px 0 8px 0;
+      line-height: 1.4;
+    }
+
+    /* AI Progress Popup Modal */
+    .ai-progress-backdrop {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(0, 0, 0, 0.75);
+      backdrop-filter: blur(4px);
+      z-index: 1000;
+      align-items: center;
+      justify-content: center;
+      padding: 16px;
+    }
+
+    .ai-progress-backdrop.open {
+      display: flex;
+    }
+
+    .ai-progress-modal {
+      background: #1e1e22;
+      border: 1px solid rgba(255, 255, 255, 0.14);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 410px;
+      padding: 18px 20px;
+      box-shadow: 0 20px 48px rgba(0, 0, 0, 0.65);
+      display: flex;
+      flex-direction: column;
+      gap: 14px;
+      animation: aiModalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+
+    @keyframes aiModalFadeIn {
+      from {
+        opacity: 0;
+        transform: scale(0.96) translateY(6px);
+      }
+
+      to {
+        opacity: 1;
+        transform: scale(1) translateY(0);
+      }
+    }
+
+    .ai-modal-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+
+    .ai-modal-title {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+    }
+
+    .ai-modal-badge {
+      font-size: 10px;
+      font-weight: 500;
+      padding: 2px 7px;
+      border-radius: 999px;
+      background: rgba(147, 51, 234, 0.2);
+      color: #c084fc;
+      border: 1px solid rgba(147, 51, 234, 0.35);
+    }
+
+    .ai-progress-track {
+      width: 100%;
+      height: 6px;
+      background: #2a2a30;
+      border-radius: 999px;
+      overflow: hidden;
+      position: relative;
+    }
+
+    .ai-progress-fill {
+      height: 100%;
+      width: 0%;
+      background: linear-gradient(90deg, #3b82f6, #9333ea, #10b981);
+      border-radius: 999px;
+      transition: width 0.35s ease;
+    }
+
+    .ai-progress-meta {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--muted);
+      margin-top: -4px;
+    }
+
+    .ai-progress-percent {
+      font-weight: 600;
+      color: #e2e8f0;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .ai-steps-list {
+      display: flex;
+      flex-direction: column;
+      gap: 9px;
+      background: #141416;
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 8px;
+      padding: 12px 14px;
+    }
+
+    .ai-step-item {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 11.5px;
+      color: var(--muted);
+      transition: color 0.2s ease;
+    }
+
+    .ai-step-item.active {
+      color: #e2e8f0;
+      font-weight: 500;
+    }
+
+    .ai-step-item.done {
+      color: #10b981;
+    }
+
+    .ai-step-item.error {
+      color: #ef4444;
+    }
+
+    .ai-step-icon {
+      width: 16px;
+      height: 16px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+
+    .ai-spinner {
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(255, 255, 255, 0.2);
+      border-top-color: #3b82f6;
+      border-radius: 50%;
+      animation: aiSpin 0.8s linear infinite;
+    }
+
+    @keyframes aiSpin {
+      to {
+        transform: rotate(360deg);
+      }
+    }
+
+    .ai-modal-footer {
+      display: flex;
+      justify-content: flex-end;
+      gap: 8px;
+      margin-top: 2px;
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <div class="brand">
+      <span class="brand-logo">
+        <svg viewBox="0 0 1000 1000">
+          <path
+            d="M292 208H375V792H292V208ZM458 208H708V292H458V208ZM458 458H708V542H458V458ZM458 708H708V792H458V708Z" />
+        </svg>
+      </span>
+      <span>F2E Bridge</span>
+    </div>
+    <div class="badge-group">
+      <span class="badge">Elementor v3 / v4</span>
+      <span class="badge badge-accent">86 Widgets</span>
+    </div>
+  </header>
+
+  <nav class="stepper-nav">
+    <button class="step-btn active" data-step="step-1">
+      <span class="step-num">1</span>
+      <span class="step-text">Bố cục</span>
+    </button>
+    <div class="step-divider">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6" />
+      </svg>
+    </div>
+    <button class="step-btn" data-step="step-2">
+      <span class="step-num">2</span>
+      <span class="step-text">Widget</span>
+    </button>
+    <div class="step-divider">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6" />
+      </svg>
+    </div>
+    <button class="step-btn" data-step="step-3">
+      <span class="step-num">3</span>
+      <span class="step-text">Design System</span>
+    </button>
+    <div class="step-divider">
+      <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <path d="M9 18l6-6-6-6" />
+      </svg>
+    </div>
+    <button class="step-btn" data-step="step-4">
+      <span class="step-num">4</span>
+      <span class="step-text">Xuất WP</span>
+    </button>
+  </nav>
+
+  <div class="selection-bar">
+    <span>Đang chọn: <strong id="sel-summary">Chưa chọn Frame nào</strong></span>
+    <div style="display:flex;gap:4px;">
+      <button class="btn btn-secondary btn-sm" id="btn-reset-tags">Đặt lại thẻ</button>
+      <button class="btn btn-secondary btn-sm" id="btn-refresh">Làm mới</button>
+    </div>
+  </div>
+
+  <main class="step-viewport">
+    <div class="step-track" id="step-track">
+      <!-- BƯỚC 1: TỐI ƯU BỐ CỤC & RESPONSIVE -->
+      <section id="step-1" class="step-pane">
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-eicon="flexbox"></span>
+              <span>Tối ưu bố cục Auto-Layout & Vector</span>
+            </span>
+          </div>
+          <p class="hint">
+            Chuyển đổi cấu trúc Figma sang Flexbox Container chuẩn Elementor. Tự động gom các đường vector rời rạc thành
+            Icon và gán padding, gap chuẩn xác.
+          </p>
+          <button class="btn btn-primary" id="btn-fix-layout" style="width:100%;">
+            <span class="btn-icon" data-eicon="flexbox"></span>
+            <span>Chuẩn hoá Auto-Layout trên Canvas</span>
+          </button>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="desktop"></span>
+              <span>Cấu hình Responsive (Desktop / Tablet / Mobile)</span>
+            </span>
+            <button class="btn btn-secondary btn-sm" id="btn-clear-resp">Xoá ghép</button>
+          </div>
+          <p class="hint">
+            Hệ thống tự động tính toán co giãn & gập cột từ 1 Frame gốc. Nếu bạn có 3 Frame riêng cho từng điểm ngắt,
+            chọn Frame và bấm Gán:
+          </p>
+          <div class="vp-slot">
+            <div class="vp-slot-info">
+              <span class="btn-icon" data-ui-icon="desktop"></span>
+              <div>
+                <strong style="color:var(--text);">Desktop:</strong>
+                <span id="vp-desktop-name" style="color:var(--muted);margin-left:4px;">Theo Frame đang chọn</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-vp="desktop">Gán Desktop</button>
+          </div>
+          <div class="vp-slot">
+            <div class="vp-slot-info">
+              <span class="btn-icon" data-ui-icon="tablet"></span>
+              <div>
+                <strong style="color:var(--text);">Tablet (1024px):</strong>
+                <span id="vp-tablet-name" style="color:var(--muted);margin-left:4px;">Tự động co giãn (Auto)</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-vp="tablet">Gán Tablet</button>
+          </div>
+          <div class="vp-slot">
+            <div class="vp-slot-info">
+              <span class="btn-icon" data-ui-icon="mobile"></span>
+              <div>
+                <strong style="color:var(--text);">Mobile (767px):</strong>
+                <span id="vp-mobile-name" style="color:var(--muted);margin-left:4px;">Tự động gập cột (Auto)</span>
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" data-vp="mobile">Gán Mobile</button>
+          </div>
+        </div>
+
+        <!-- Navigation footer to Step 2 -->
+        <div class="step-nav-footer">
+          <span style="font-size:11px;color:var(--muted);">Bước 1 / 4</span>
+          <button class="btn btn-primary" id="btn-go-step-2">
+            <span>Tiếp tục: Nhận diện Widget</span>
+            <span class="btn-icon" data-ui-icon="arrow-right"></span>
+          </button>
+        </div>
+      </section>
+
+      <!-- BƯỚC 2: AI QUÉT & GẮN THẺ WIDGET -->
+      <section id="step-2" class="step-pane">
+        <!-- AI SMART SCAN CARD -->
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-eicon="ai"></span>
+              <span>Nhận diện Widget bằng Vision AI</span>
+              <span id="ai-key-badge" class="badge" style="font-size:9.5px;">Chưa cấu hình Key</span>
+            </span>
+            <button class="btn btn-secondary btn-sm" id="btn-toggle-ai-cfg">
+              <span class="btn-icon" data-ui-icon="settings"></span>
+              <span>Cấu hình Key</span>
+            </button>
+          </div>
+
+          <!-- Collapsible AI Config Box -->
+          <div id="ai-cfg-box"
+            style="display: none; border-top: 1px solid var(--border); padding-top: 8px; margin-top: 8px;">
+            <div class="field">
+              <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                <label style="margin:0;">Gemini API Key</label>
+                <a href="https://aistudio.google.com/app/apikey" target="_blank"
+                  style="color:#60a5fa;text-decoration:none;font-size:10px;">Lấy Key miễn phí ↗</a>
+              </div>
+              <div style="display:flex;gap:6px;">
+                <input type="password" id="inp-gemini-key" placeholder="AIzaSy..." style="flex:1;" />
+                <button class="btn btn-secondary btn-sm" id="btn-toggle-key-vis" title="Hiện/ẩn Key">
+                  <span class="btn-icon" data-ui-icon="eye"></span>
+                </button>
+              </div>
+            </div>
+            <div class="field">
+              <label>Model AI</label>
+              <select id="sel-gemini-model">
+                <option value="gemini-3.8-flash" selected>Gemini 3.8 Flash (Tối ưu độ trễ & thị giác UI)</option>
+                <option value="gemini-4-neon">Gemini 4 Neon (Mô hình suy luận thế hệ mới)</option>
+                <option value="gemini-3.8-pro">Gemini 3.8 Pro (Mô hình tham chiếu mở rộng)</option>
+                <option value="custom">Tùy chỉnh model ID...</option>
+              </select>
+              <div id="wrap-custom-model" style="display:none;margin-top:5px;">
+                <input type="text" id="inp-custom-model"
+                  placeholder="Nhập model ID (ví dụ: gemini-3.8-flash-preview)" />
+              </div>
+            </div>
+            <button class="btn btn-secondary btn-sm" id="btn-save-ai-cfg" style="width:100%;margin-top:2px;">
+              Lưu cấu hình API
+            </button>
+          </div>
+
+          <p class="hint">
+            Hệ thống chụp ảnh canvas và phân tích cây layer để nhận diện chính xác 86 Widget Elementor (Icon Box, Nav
+            Menu, Logo, Icon List, Stat Card, Watermark...).
+          </p>
+
+          <div style="display:flex;gap:6px;">
+            <button class="btn btn-primary" id="btn-ai-smart-scan" style="flex:1;">
+              <span class="btn-icon" data-eicon="ai"></span>
+              <span id="ai-scan-btn-text">Phân tích & gán nhãn Widget</span>
+            </button>
+            <button class="btn btn-secondary btn-sm" id="btn-reset-tags-quick" title="Đặt lại toàn bộ về Auto">
+              <span class="btn-icon" data-ui-icon="refresh"></span>
+              <span>Đặt lại</span>
+            </button>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-eicon="library-grid"></span>
+              <span>Cây cấu trúc Layer & Danh mục Widget</span>
+            </span>
+          </div>
+          <p class="hint">
+            Bấm vào nút widget bên phải mỗi layer để duyệt nhanh và chọn từ 86 widget Elementor chính thức:
+          </p>
+
+          <!-- Container Optimization & Auto-Unwrap setting -->
+          <div
+            style="margin-bottom:12px;padding:10px 12px;background:rgba(255,255,255,0.02);border:1px solid rgba(255,255,255,0.08);border-radius:8px;">
+            <div style="display:flex;align-items:center;justify-content:space-between;">
+              <label
+                style="display:flex;align-items:center;gap:7px;font-size:12px;font-weight:600;color:var(--text);cursor:pointer;">
+                <input type="checkbox" id="chk-auto-unwrap" checked style="accent-color:#3b82f6;" />
+                <span>Tối ưu Container trung gian (Auto-Unwrap)</span>
+              </label>
+              <span class="pill pill-amber" style="font-size:10px;padding:2px 6px;">Chuẩn Dev</span>
+            </div>
+            <p style="font-size:11px;color:var(--muted);margin:4px 0 0 0;line-height:1.4;">
+              Loại bỏ các Frame Container bọc ngoài trung gian thừa (ví dụ <code>Section → Container → Nội dung</code>).
+              Bạn cũng có thể bấm vào nút widget để chọn <strong>"Bỏ qua Container (Unwrap - Giữ con)"</strong> cho từng
+              layer.
+            </p>
+          </div>
+          <div id="outline-container" class="outline-list">
+            <div style="padding: 16px; text-align: center; color: var(--muted);">
+              Chọn một Frame trên Figma để xem cây Layer và gắn thẻ Widget.
+            </div>
+          </div>
+        </div>
+
+        <!-- Navigation footer to Step 3 -->
+        <div class="step-nav-footer">
+          <button class="btn btn-secondary" id="btn-back-step-1">
+            <span class="btn-icon" data-ui-icon="arrow-left"></span>
+            <span>Quay lại Bước 1</span>
+          </button>
+          <button class="btn btn-primary" id="btn-go-step-3">
+            <span>Tiếp tục: Design System</span>
+            <span class="btn-icon" data-ui-icon="arrow-right"></span>
+          </button>
+        </div>
+      </section>
+
+      <!-- BƯỚC 3: THIẾT LẬP DESIGN SYSTEM & TOKENS -->
+      <section id="step-3" class="step-pane">
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="settings"></span>
+              <span>Bảng màu & Hiệu ứng viền Gradient</span>
+            </span>
+            <span class="badge"
+              style="background:rgba(59,130,246,0.15);color:#60a5fa;border-color:rgba(59,130,246,0.3);">Chuẩn Figma
+              2026</span>
+          </div>
+          <p class="hint">
+            Xử lý tự động các thuộc tính thẩm mỹ nâng cao không hỗ trợ nguyên bản trên Elementor:
+          </p>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-linear-border" checked style="accent-color:#3b82f6;" />
+              <span>Tự động sinh Custom CSS cho Viền dải màu (Linear Border)</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Elementor không có control viền gradient trực tiếp. Plugin tự động sinh CSS
+              <code>background-clip: padding-box, border-box</code> giữ nguyên góc bo tròn (<code>border-radius</code>),
+              kèm fallback màu đơn sắc cho bản Free.
+            </p>
+          </div>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-sync-colors-opt" checked style="accent-color:#3b82f6;" />
+              <span>Trích xuất Color Variables từ Figma</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Tự động nhận diện màu chủ đạo, màu phụ, màu trung tính và màu nền từ Local Variables của file Figma để
+              đồng bộ vào Elementor Global Colors.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-eicon="editor-paragraph"></span>
+              <span>Hệ thống Kiểu chữ & Typography</span>
+            </span>
+          </div>
+          <p class="hint">
+            Bảo toàn độ nét và tỷ lệ hiển thị chữ tương đương 100% bản thiết kế:
+          </p>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-text-pixel-perfect" checked style="accent-color:#3b82f6;" />
+              <span>Ưu tiên Pixel-Perfect Typography (Tránh bị Theme ghi đè)</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Giữ nguyên font-size, font-weight, line-height và màu kèm opacity (ví dụ số thống kê lớn 40px Bold,
+              opacity 30%) thay vì bị theme kit mặc định của Elementor ghi đè.
+            </p>
+          </div>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-calc-lineheight" checked style="accent-color:#3b82f6;" />
+              <span>Tự động tính Line-Height khi Figma để 'Auto'</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Tự động tính tỷ lệ line-height chuẩn (~1.2 - 1.4) theo kích cỡ chữ khi Figma đặt chế độ Auto, đảm bảo chữ
+              không bị dính vào nhau trên Elementor.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="code"></span>
+              <span>Figma Dev Mode Engine (node.getCSSAsync)</span>
+            </span>
+            <span class="badge"
+              style="background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3);">Đang kích
+              hoạt</span>
+          </div>
+          <p class="hint">
+            Trích xuất trực tiếp 100% thuộc tính CSS từ Dev Mode (Inspect) của Figma sang Elementor JSON:
+          </p>
+
+          <div
+            style="padding:8px 10px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:8px;">
+            <label class="checkbox-row" style="margin-bottom:4px;font-weight:600;">
+              <input type="checkbox" id="chk-dev-mode-css" checked style="accent-color:#10b981;" />
+              <span>Đồng bộ Full CSS từ Figma Dev Mode</span>
+            </label>
+            <p style="font-size:10.5px;color:var(--muted);margin:0;line-height:1.4;">
+              Tự động lấy chính xác <code>width</code>, <code>height</code>, <code>padding</code>, <code>gap</code>,
+              <code>border-image-source</code>, <code>color</code>, <code>font-size</code>, <code>line-height</code> từ
+              API Dev Mode của Figma, loại bỏ hoàn toàn tình trạng thiếu thông số style.
+            </p>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="refresh"></span>
+              <span>Đồng bộ Design System vào WordPress</span>
+            </span>
+          </div>
+          <p class="hint">
+            Đẩy trực tiếp các biến màu và Text Styles từ Figma vào Site Settings Kit của website WordPress:
+          </p>
+          <button class="btn btn-secondary" id="btn-sync-tokens-step3" style="width:100%;">
+            <span class="btn-icon" data-ui-icon="upload"></span>
+            <span>Đồng bộ Global Colors & Fonts vào WP</span>
+          </button>
+        </div>
+
+        <!-- Navigation footer to Step 4 -->
+        <div class="step-nav-footer">
+          <button class="btn btn-secondary" id="btn-back-step-2">
+            <span class="btn-icon" data-ui-icon="arrow-left"></span>
+            <span>Quay lại Bước 2</span>
+          </button>
+          <button class="btn btn-primary" id="btn-go-step-4">
+            <span>Tiếp tục: Xuất WordPress</span>
+            <span class="btn-icon" data-ui-icon="arrow-right"></span>
+          </button>
+        </div>
+      </section>
+
+      <!-- BƯỚC 4: XUẤT SANG ELEMENTOR & WORDPRESS -->
+      <section id="step-4" class="step-pane">
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="upload"></span>
+              <span>Đẩy trực tiếp lên WordPress (Live Push & Re-sync)</span>
+            </span>
+            <span class="badge">Khuyên dùng</span>
+          </div>
+
+          <div class="field">
+            <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+              <label style="margin:0;">Website WordPress kết nối</label>
+              <button class="btn btn-secondary btn-sm" id="btn-toggle-add-site">+ Thêm Web</button>
+            </div>
+            <div style="display: flex; gap: 6px;">
+              <select id="site-select" style="flex: 1;">
+                <option value="">-- Chưa có website nào --</option>
+              </select>
+              <button class="btn btn-secondary btn-sm" id="btn-delete-site" title="Xóa site">
+                <span class="btn-icon" data-ui-icon="trash"></span>
+              </button>
+            </div>
+          </div>
+
+          <div id="add-site-box"
+            style="display: none; border-top: 1px solid var(--border); padding-top: 9px; margin-top: 8px;">
+            <div class="field">
+              <label>WordPress Site URL (HTTPS hoặc http://localhost:PORT)</label>
+              <input type="text" id="inp-site-url" placeholder="http://localhost:10040" />
+            </div>
+            <div class="field">
+              <label>Connection Token (Lấy trong WP Admin → F2E Bridge)</label>
+              <input type="password" id="inp-site-token" placeholder="f2e_live_..." />
+            </div>
+            <button class="btn btn-primary" id="btn-verify-site" style="width:100%;">
+              Kiểm tra & lưu kết nối
+            </button>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label>Đích lưu trên WordPress</label>
+              <select id="push-target-type">
+                <option value="page">Trang (WP Page)</option>
+                <option value="elementor_library">Elementor Template / Theme Builder</option>
+              </select>
+            </div>
+            <div class="field" id="wrap-template-type" style="display: none;">
+              <label>Loại Template (Free + Pro)</label>
+              <select id="push-template-type">
+                <option value="page">Page Template</option>
+                <option value="section">Section / Container</option>
+                <option value="header">Header (Elementor Pro)</option>
+                <option value="footer">Footer (Elementor Pro)</option>
+                <option value="single-post">Single Post/Page (Pro)</option>
+                <option value="loop-item">Loop Item (Elementor Pro)</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>Chọn Trang/Template có sẵn (Để Re-sync) hoặc Tạo mới</label>
+            <select id="push-post-id">
+              <option value="0">+ Tạo Trang / Template Mới</option>
+            </select>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label>Tiêu đề (Để trống = Theo tên Frame)</label>
+              <input type="text" id="push-title" placeholder="Tự động theo tên Frame" />
+            </div>
+            <div class="field">
+              <label>Chế độ cập nhật</label>
+              <select id="push-mode">
+                <option value="resync" selected>Đồng bộ gia tăng (Re-sync)</option>
+                <option value="append">Chèn nối tiếp xuống cuối</option>
+                <option value="replace">Ghi đè toàn bộ trang</option>
+              </select>
+            </div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label>Chuẩn Elementor</label>
+              <select id="push-el-version">
+                <option value="v3" selected>Elementor v3 (Flexbox & Grid)</option>
+                <option value="v4">Elementor v4 (Atomic Widgets)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Trạng thái bài đăng</label>
+              <select id="push-status">
+                <option value="draft" selected>Bản nháp (Draft)</option>
+                <option value="publish">Xuất bản ngay (Publish)</option>
+              </select>
+            </div>
+          </div>
+
+          <label class="checkbox-row">
+            <input type="checkbox" id="chk-sync-globals" checked />
+            <span style="color:var(--text-secondary);">Tự động đồng bộ màu sắc & kiểu chữ vào Elementor Global
+              Colors/Fonts</span>
+          </label>
+
+          <div style="display: flex; flex-direction: column; gap: 6px;">
+            <button class="btn btn-brand" id="btn-live-push" style="width:100%;">
+              <span class="btn-icon" data-ui-icon="upload"></span>
+              <span>Đẩy giao diện lên WordPress</span>
+            </button>
+            <button class="btn btn-secondary" id="btn-sync-tokens-only" style="width:100%;">
+              Chỉ đồng bộ Global Colors & Fonts
+            </button>
+          </div>
+
+          <div id="push-result-links"
+            style="display: none; margin-top: 10px; padding: 8px; background: var(--bg-subtle); border: 1px solid var(--border); border-radius: var(--radius-sm); font-size: 11px;">
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="copy"></span>
+              <span>Sao chép vào Clipboard (Ctrl + V)</span>
+            </span>
+            <span class="badge">Ngoại tuyến</span>
+          </div>
+          <p class="hint">
+            Bấm nút dưới → Chuyển sang trình soạn thảo Elementor → Bấm <strong>Ctrl + V</strong> để dán trực tiếp.
+          </p>
+          <div class="row">
+            <div class="field">
+              <label>Định dạng ảnh</label>
+              <select id="exp-img-format">
+                <option value="PNG">PNG (Trong suốt)</option>
+                <option value="JPG">JPG (Dung lượng nhẹ)</option>
+              </select>
+            </div>
+            <div class="field">
+              <label>Độ phân giải</label>
+              <select id="exp-img-scale">
+                <option value="2" selected>2x (Chuẩn Retina)</option>
+                <option value="1">1x (Tiêu chuẩn)</option>
+              </select>
+            </div>
+          </div>
+          <button class="btn btn-primary" id="btn-copy-clipboard" style="width:100%;margin-bottom:8px;">
+            <span class="btn-icon" data-ui-icon="copy"></span>
+            <span>Sao chép Elementor JSON (Ctrl + V)</span>
+          </button>
+
+          <div style="border-top:1px solid var(--border);padding-top:8px;">
+            <label
+              style="font-size:11px;font-weight:500;color:var(--text-secondary);display:block;margin-bottom:6px;">Tải
+              file dự phòng (.json / .f2e.json):</label>
+            <div style="display: flex; flex-direction: column; gap: 6px;">
+              <button class="btn btn-secondary btn-sm" id="btn-dl-bundle" style="width:100%;">
+                <span class="btn-icon" data-ui-icon="download"></span>
+                <span>Tải gói Bundle đầy đủ (.f2e.json)</span>
+              </button>
+              <div class="row">
+                <button class="btn btn-secondary btn-sm" id="btn-dl-v3">
+                  Tải Elementor v3 (.json)
+                </button>
+                <button class="btn btn-secondary btn-sm" id="btn-dl-v4">
+                  Tải Elementor v4 (.json)
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Navigation footer back to Step 3 -->
+        <div class="step-nav-footer">
+          <button class="btn btn-secondary" id="btn-back-step-3">
+            <span class="btn-icon" data-ui-icon="arrow-left"></span>
+            <span>Quay lại Bước 3</span>
+          </button>
+          <span style="font-size:11px;color:var(--success);font-weight:500;">Sẵn sàng xuất ✓</span>
+        </div>
+      </section>
+    </div>
+  </main>
+
+  <!-- Visual Elementor Widget Picker Modal -->
+  <div class="picker-backdrop" id="picker-backdrop">
+    <div class="picker-modal">
+      <div class="picker-header">
+        <div style="min-width:0;flex:1;">
+          <strong id="picker-layer-title"
+            style="display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:11.5px;">Chọn
+            Widget Elementor</strong>
+        </div>
+        <input type="text" id="picker-search" placeholder="Tìm kiếm trong 86 Widgets..."
+          style="width:200px;padding:5px 8px;font-size:11px;" />
+        <button class="btn btn-secondary btn-sm" id="picker-close">
+          <span class="btn-icon" data-ui-icon="close"></span>
+        </button>
+      </div>
+      <div class="picker-body" id="picker-body"></div>
+    </div>
+  </div>
+
+  <!-- AI Vision Scan Progress Popup Modal -->
+  <div class="ai-progress-backdrop" id="ai-progress-backdrop">
+    <div class="ai-progress-modal" id="ai-progress-modal">
+      <div class="ai-modal-header">
+        <div class="ai-modal-title">
+          <span style="display:inline-flex;color:#9333ea;">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"
+              stroke-linecap="round" stroke-linejoin="round">
+              <path
+                d="m12 3-1.912 5.813a2 2 0 0 1-1.275 1.275L3 12l5.813 1.912a2 2 0 0 1 1.275 1.275L12 21l1.912-5.813a2 2 0 0 1 1.275-1.275L21 12l-5.813-1.912a2 2 0 0 1-1.275-1.275L12 3Z" />
+            </svg>
+          </span>
+          <span>Gemini Vision AI Scanner</span>
+          <span class="ai-modal-badge" id="ai-modal-model-badge">Gemini 3.8 Flash</span>
+        </div>
+        <button class="btn btn-secondary btn-sm" id="btn-close-ai-modal" style="display:none;padding:2px 6px;">
+          <span class="btn-icon" data-ui-icon="close"></span>
+        </button>
+      </div>
+
+      <div class="ai-progress-track">
+        <div class="ai-progress-fill" id="ai-progress-fill"></div>
+      </div>
+
+      <div class="ai-progress-meta">
+        <span id="ai-progress-status-text">Đang chuẩn bị quét...</span>
+        <span class="ai-progress-percent" id="ai-progress-percent">0%</span>
+      </div>
+
+      <div class="ai-steps-list">
+        <div class="ai-step-item" id="ai-step-1">
+          <span class="ai-step-icon">
+            <div class="ai-spinner"></div>
+          </span>
+          <span class="ai-step-label">1. Chụp ảnh Canvas & trích xuất cây Layer</span>
+        </div>
+        <div class="ai-step-item" id="ai-step-2">
+          <span class="ai-step-icon"><span style="color:var(--muted);font-size:10px;">○</span></span>
+          <span class="ai-step-label">2. Gửi dữ liệu & hình ảnh lên Gemini Vision</span>
+        </div>
+        <div class="ai-step-item" id="ai-step-3">
+          <span class="ai-step-icon"><span style="color:var(--muted);font-size:10px;">○</span></span>
+          <span class="ai-step-label">3. AI phân tích thị giác & đối chiếu 86 widget</span>
+        </div>
+        <div class="ai-step-item" id="ai-step-4">
+          <span class="ai-step-icon"><span style="color:var(--muted);font-size:10px;">○</span></span>
+          <span class="ai-step-label">4. Tự động gán nhãn vào Figma & tối ưu DOM</span>
+        </div>
+      </div>
+
+      <div class="ai-modal-footer" id="ai-modal-footer" style="display:none;">
+        <button class="btn btn-primary btn-sm" id="btn-ai-modal-done" style="width:100%;">
+          Đóng và xem kết quả
+        </button>
+      </div>
+    </div>
+  </div>
+
+  <footer class="status-bar" id="status-bar">
+    <div class="status-indicator">
+      <span class="status-dot"></span>
+      <span id="status-text">Sẵn sàng. Chọn một Frame trên Figma để bắt đầu.</span>
+    </div>
+  </footer>
+
+  <!-- EICONS_AND_CATALOG_INJECTION -->
+  <script>
+    const UI_ICONS = {
+      'arrow-right': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M5 12h14M12 5l7 7-7 7"/></svg>',
+      'arrow-left': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M19 12H5M12 19l-7-7 7-7"/></svg>',
+      'settings': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>',
+      'copy': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2" ry="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>',
+      'download': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/></svg>',
+      'upload': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M17 8l-5-5-5 5M12 3v12"/></svg>',
+      'refresh': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M23 4v6h-6M1 20v-6h6"/><path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"/></svg>',
+      'trash': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M3 6h18M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg>',
+      'eye': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>',
+      'check': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>',
+      'close': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>',
+      'desktop': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="3" width="20" height="14" rx="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+      'tablet': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="4" y="2" width="16" height="20" rx="2"/><circle cx="12" cy="18" r="1"/></svg>',
+      'mobile': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="5" y="2" width="14" height="20" rx="2"/><line x1="12" y1="18" x2="12.01" y2="18"/></svg>',
+      'code': '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>'
+    };
+
+    let savedSites = [];
+    let currentPages = [];
+    let currentTemplates = [];
+    let activePickerTarget = null;
+    let aiConfig = { apiKey: '', model: 'gemini-3.8-flash' };
+
+    function initStaticIcons() {
+      document.querySelectorAll('[data-eicon]').forEach((el) => {
+        el.innerHTML = getEiconSvg(el.dataset.eicon);
+      });
+      document.querySelectorAll('[data-ui-icon]').forEach((el) => {
+        el.innerHTML = UI_ICONS[el.dataset.uiIcon] || '';
+      });
+    }
+    initStaticIcons();
+
+    function updateAiBadge() {
+      const badge = document.getElementById('ai-key-badge');
+      if (!badge) return;
+      const hasKey = Boolean(aiConfig && aiConfig.apiKey && aiConfig.apiKey.trim().length > 5);
+      badge.textContent = hasKey ? 'API Key đã lưu' : 'Chưa cấu hình Key';
+      badge.style.background = hasKey ? 'rgba(16, 185, 129, 0.15)' : 'rgba(255, 255, 255, 0.08)';
+      badge.style.color = hasKey ? '#34d399' : '#94a3b8';
+      badge.style.borderColor = hasKey ? 'rgba(16, 185, 129, 0.3)' : 'var(--border)';
+    }
+
+    function getActiveAiModel() {
+      const sel = document.getElementById('sel-gemini-model');
+      if (!sel) return (aiConfig && aiConfig.model) || 'gemini-3.8-flash';
+      if (sel.value === 'custom') {
+        const inp = document.getElementById('inp-custom-model');
+        return (inp && inp.value.trim()) || 'gemini-3.8-flash';
+      }
+      return sel.value || (aiConfig && aiConfig.model) || 'gemini-3.8-flash';
+    }
+
+    function switchStep(stepId) {
+      const steps = ['step-1', 'step-2', 'step-3', 'step-4'];
+      const targetIndex = steps.indexOf(stepId);
+      if (targetIndex === -1) return;
+
+      const track = document.getElementById('step-track');
+      if (track) {
+        track.style.transform = `translateX(-${targetIndex * 25}%)`;
+      }
+
+      document.querySelectorAll('.step-btn').forEach((btn) => {
+        const idx = steps.indexOf(btn.dataset.step);
+        btn.classList.remove('active', 'completed');
+        if (idx === targetIndex) {
+          btn.classList.add('active');
+        } else if (idx < targetIndex) {
+          btn.classList.add('completed');
+        }
+      });
+
+      if (stepId === 'step-2') {
+        postToPlugin('get-outline');
+      }
+    }
+
+    function setAiScanLoading(loading, message = '') {
+      const btn = document.getElementById('btn-ai-smart-scan');
+      const txt = document.getElementById('ai-scan-btn-text');
+      if (!btn || !txt) return;
+      btn.disabled = loading;
+      if (loading) {
+        txt.textContent = message || 'Đang quét AI...';
+        setStatus(message || 'Đang gọi Gemini Vision AI...', false, false);
+      } else {
+        txt.textContent = 'Phân tích & gán nhãn Widget';
+      }
+    }
+
+    function getEiconSvg(iconKey) {
+      if (iconKey === 'unwrap') {
+        return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h6v6M9 21H3v-6M21 3l-7 7M3 21l7-7"/></svg>';
+      }
+      const data = (window.ELEMENTOR_EICONS && window.ELEMENTOR_EICONS[iconKey]) || (window.ELEMENTOR_EICONS && window.ELEMENTOR_EICONS.container);
+      if (!data || !data.path) {
+        return '<svg viewBox="0 0 1000 1000"><rect x="150" y="150" width="700" height="700" rx="80"/></svg>';
+      }
+      const w = data.width || 1000;
+      const h = data.height || 1000;
+      return `<svg viewBox="0 0 ${w} ${h}"><path d="${data.path}"/></svg>`;
+    }
+
+    function getWidgetInfo(widgetValue) {
+      const list = window.F2E_WIDGET_CATALOG || [];
+      return list.find((w) => w.value === widgetValue) || { value: widgetValue || 'container', label: widgetValue || 'Container', icon: 'container', pro: false };
+    }
+
+    // Step switching event listeners
+    document.querySelectorAll('.step-btn').forEach((btn) => {
+      btn.addEventListener('click', () => switchStep(btn.dataset.step));
+    });
+    document.getElementById('btn-go-step-2')?.addEventListener('click', () => switchStep('step-2'));
+    document.getElementById('btn-back-step-1')?.addEventListener('click', () => switchStep('step-1'));
+    document.getElementById('btn-go-step-3')?.addEventListener('click', () => switchStep('step-3'));
+    document.getElementById('btn-back-step-2')?.addEventListener('click', () => switchStep('step-2'));
+    document.getElementById('btn-go-step-4')?.addEventListener('click', () => switchStep('step-4'));
+    document.getElementById('btn-back-step-3')?.addEventListener('click', () => switchStep('step-3'));
+    document.getElementById('btn-sync-tokens-step3')?.addEventListener('click', () => {
+      postToPlugin('sync-design-system', {
+        siteUrl: document.getElementById('site-select').value,
+      });
+    });
+
+    function postToPlugin(type, data = {}) {
+      parent.postMessage({ pluginMessage: { type, ...data } }, '*');
+    }
+
+    function setStatus(text, isError = false, isDone = false) {
+      const bar = document.getElementById('status-bar');
+      const span = document.getElementById('status-text');
+      bar.className = 'status-bar' + (isError ? ' error' : (isDone ? ' done' : ''));
+      span.textContent = text;
+    }
+
+    function copyTextToClipboard(text) {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.left = '-9999px';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      document.execCommand('copy');
+      document.body.removeChild(ta);
+    }
+
+    function downloadJsonFile(filename, content) {
+      const blob = new Blob([content], { type: 'application/json;charset=utf-8' });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(() => URL.revokeObjectURL(url), 2000);
+    }
+
+    function openWidgetPicker(item) {
+      activePickerTarget = item;
+      document.getElementById('picker-layer-title').textContent = `Layer: ${item.name} (${item.type})`;
+      const searchInput = document.getElementById('picker-search');
+      searchInput.value = '';
+      renderPickerGrid('');
+      document.getElementById('picker-backdrop').classList.add('open');
+      searchInput.focus();
+    }
+
+    function closeWidgetPicker() {
+      document.getElementById('picker-backdrop').classList.remove('open');
+      activePickerTarget = null;
+    }
+
+    function renderPickerGrid(query = '') {
+      const body = document.getElementById('picker-body');
+      const q = String(query || '').trim().toLowerCase();
+      const catalog = window.F2E_WIDGET_CATALOG || [];
+      body.innerHTML = '';
+
+      // Always add "Auto (Heuristics)" card at top
+      const autoGrid = document.createElement('div');
+      autoGrid.className = 'picker-grid';
+      const autoCard = document.createElement('div');
+      autoCard.className = 'picker-card' + (activePickerTarget && activePickerTarget.source !== 'override' ? ' active' : '');
+      autoCard.innerHTML = `<div class="p-icon">${getEiconSvg('ai')}</div><div class="p-title"><strong>Tự động (Auto)</strong></div>`;
+      autoCard.addEventListener('click', () => {
+        if (activePickerTarget) {
+          postToPlugin('set-widget', { nodeId: activePickerTarget.nodeId, widget: '' });
+        }
+        closeWidgetPicker();
+      });
+      autoGrid.appendChild(autoCard);
+      body.appendChild(autoGrid);
+
+      const groups = {};
+      for (const w of catalog) {
+        if (q && !w.label.toLowerCase().includes(q) && !w.value.toLowerCase().includes(q) && !w.category.toLowerCase().includes(q)) {
+          continue;
+        }
+        if (!groups[w.category]) groups[w.category] = [];
+        groups[w.category].push(w);
+      }
+
+      for (const [catName, widgets] of Object.entries(groups)) {
+        const catHeader = document.createElement('div');
+        catHeader.className = 'picker-cat-title';
+        catHeader.textContent = `${catName} (${widgets.length})`;
+        body.appendChild(catHeader);
+
+        const grid = document.createElement('div');
+        grid.className = 'picker-grid';
+        for (const w of widgets) {
+          const card = document.createElement('div');
+          const isSelected = activePickerTarget && activePickerTarget.source === 'override' && activePickerTarget.widget === w.value;
+          card.className = 'picker-card' + (isSelected ? ' active' : '');
+          card.innerHTML =
+            (w.pro ? '<span class="p-pro">PRO</span>' : '') +
+            `<div class="p-icon">${getEiconSvg(w.icon)}</div>` +
+            `<div class="p-title">${w.label}</div>`;
+          card.addEventListener('click', () => {
+            if (activePickerTarget) {
+              postToPlugin('set-widget', { nodeId: activePickerTarget.nodeId, widget: w.value });
+            }
+            closeWidgetPicker();
+          });
+          grid.appendChild(card);
+        }
+        body.appendChild(grid);
+      }
+    }
+
+    document.getElementById('picker-close').addEventListener('click', closeWidgetPicker);
+    document.getElementById('picker-backdrop').addEventListener('click', (e) => {
+      if (e.target.id === 'picker-backdrop') closeWidgetPicker();
+    });
+    document.getElementById('picker-search').addEventListener('input', (e) => {
+      renderPickerGrid(e.target.value);
+    });
+
+    function renderOutline(items) {
+      const container = document.getElementById('outline-container');
+      if (!items || items.length === 0) {
+        container.innerHTML = '<div style="padding: 16px; text-align: center; color: var(--muted);">Chọn một Frame trên Figma để xem cây Layer và gắn thẻ Widget.</div>';
+        return;
+      }
+      container.innerHTML = '';
+      for (const item of items) {
+        const row = document.createElement('div');
+        row.className = 'outline-item';
+
+        const info = document.createElement('div');
+        info.className = 'layer-info';
+        info.style.paddingLeft = `${Math.min(item.depth * 10, 64)}px`;
+
+        const pill = document.createElement('span');
+        pill.className = `tag-pill ${item.source}`;
+        pill.textContent = item.source === 'override' ? 'Pinned' : (item.source.startsWith('name') ? 'Tag' : item.type.slice(0, 5));
+
+        const nameSpan = document.createElement('span');
+        nameSpan.className = 'layer-name';
+        nameSpan.textContent = item.name;
+        nameSpan.title = `${item.name} (${item.type})`;
+
+        info.appendChild(pill);
+        info.appendChild(nameSpan);
+
+        const wInfo = getWidgetInfo(item.widget);
+        const isUnwrap = item.widget === 'unwrap';
+        const triggerBtn = document.createElement('button');
+        triggerBtn.type = 'button';
+        triggerBtn.className = 'widget-trigger-btn' + (item.source === 'override' ? ' is-override' : '') + (isUnwrap ? ' is-unwrap' : '');
+        const prefix = item.source === 'override' ? '' : (isUnwrap ? '' : 'Auto: ');
+        const labelText = isUnwrap ? '⚡ Unwrap Container' : `${prefix}${wInfo.label}`;
+        triggerBtn.innerHTML =
+          `<span class="w-icon">${getEiconSvg(wInfo.icon)}</span>` +
+          `<span class="w-label">${labelText}</span>` +
+          `<span style="color:var(--muted);font-size:9px;">▼</span>`;
+        triggerBtn.addEventListener('click', () => openWidgetPicker(item));
+
+        row.appendChild(info);
+        row.appendChild(triggerBtn);
+        container.appendChild(row);
+      }
+    }
+
+    function populateSitesDropdown(sites, activeUrl) {
+      savedSites = sites || [];
+      const sel = document.getElementById('site-select');
+      sel.innerHTML = '';
+      if (savedSites.length === 0) {
+        const opt = document.createElement('option');
+        opt.value = '';
+        opt.textContent = '-- Chưa có website nào --';
+        sel.appendChild(opt);
+        document.getElementById('add-site-box').style.display = 'block';
+        return;
+      }
+      for (const s of savedSites) {
+        const opt = document.createElement('option');
+        opt.value = s.siteUrl;
+        opt.textContent = `${s.label} (${s.siteUrl})`;
+        if (s.siteUrl === activeUrl) opt.selected = true;
+        sel.appendChild(opt);
+      }
+      document.getElementById('add-site-box').style.display = 'none';
+    }
+
+    function refreshTargetPostDropdown() {
+      const targetType = document.getElementById('push-target-type').value;
+      const wrapTpl = document.getElementById('wrap-template-type');
+      wrapTpl.style.display = targetType === 'elementor_library' ? 'block' : 'none';
+
+      const sel = document.getElementById('push-post-id');
+      sel.innerHTML = '<option value="0">+ Tạo Trang / Template Mới</option>';
+      const list = targetType === 'elementor_library' ? currentTemplates : currentPages;
+      for (const item of list) {
+        const opt = document.createElement('option');
+        opt.value = String(item.id);
+        opt.textContent = `#${item.id} — ${item.title} (${item.status || 'draft'})`;
+        sel.appendChild(opt);
+      }
+    }
+
+    // UI Event Listeners
+    document.getElementById('btn-refresh').addEventListener('click', () => postToPlugin('get-outline'));
+    document.getElementById('btn-reset-tags').addEventListener('click', () => postToPlugin('reset-all-widgets'));
+
+    document.getElementById('btn-copy-clipboard').addEventListener('click', () => {
+      postToPlugin('export-action', {
+        payload: {
+          action: 'clipboard',
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+          siteUrl: document.getElementById('site-select').value || '',
+        }
+      });
+    });
+
+    document.getElementById('btn-dl-bundle').addEventListener('click', () => {
+      postToPlugin('export-action', {
+        payload: {
+          action: 'download-f2e-bundle',
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+          siteUrl: document.getElementById('site-select').value || '',
+        }
+      });
+    });
+
+    document.getElementById('btn-dl-v3').addEventListener('click', () => {
+      postToPlugin('export-action', {
+        payload: {
+          action: 'download-elementor-v3',
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+          siteUrl: document.getElementById('site-select').value || '',
+        }
+      });
+    });
+
+    document.getElementById('btn-dl-v4').addEventListener('click', () => {
+      postToPlugin('export-action', {
+        payload: {
+          action: 'download-elementor-v4',
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+        }
+      });
+    });
+
+    document.getElementById('btn-toggle-add-site').addEventListener('click', () => {
+      const box = document.getElementById('add-site-box');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('btn-verify-site').addEventListener('click', () => {
+      postToPlugin('verify-site', {
+        config: {
+          siteUrl: document.getElementById('inp-site-url').value,
+          token: document.getElementById('inp-site-token').value,
+        }
+      });
+    });
+
+    document.getElementById('btn-delete-site').addEventListener('click', () => {
+      const url = document.getElementById('site-select').value;
+      if (url) postToPlugin('delete-site', { siteUrl: url });
+    });
+
+    document.getElementById('site-select').addEventListener('change', (e) => {
+      if (e.target.value) postToPlugin('load-site-targets', { siteUrl: e.target.value });
+    });
+
+    document.getElementById('push-target-type').addEventListener('change', refreshTargetPostDropdown);
+
+    document.getElementById('btn-live-push').addEventListener('click', () => {
+      postToPlugin('live-push', {
+        payload: {
+          siteUrl: document.getElementById('site-select').value,
+          targetType: document.getElementById('push-target-type').value,
+          templateType: document.getElementById('push-template-type').value,
+          targetPostId: Number(document.getElementById('push-post-id').value),
+          postTitle: document.getElementById('push-title').value,
+          importMode: document.getElementById('push-mode').value,
+          elementorVersion: document.getElementById('push-el-version').value,
+          postStatus: document.getElementById('push-status').value,
+          syncGlobalStyles: document.getElementById('chk-sync-globals').checked,
+          imageFormat: document.getElementById('exp-img-format').value,
+          imageScale: Number(document.getElementById('exp-img-scale').value),
+        }
+      });
+    });
+
+    document.getElementById('btn-sync-tokens-only').addEventListener('click', () => {
+      postToPlugin('sync-design-system', {
+        siteUrl: document.getElementById('site-select').value,
+      });
+    });
+
+    document.getElementById('btn-fix-layout').addEventListener('click', () => {
+      postToPlugin('fix-auto-layout');
+    });
+
+    document.querySelectorAll('[data-vp]').forEach((btn) => {
+      btn.addEventListener('click', () => {
+        postToPlugin('capture-responsive', { viewport: btn.dataset.vp });
+      });
+    });
+
+    document.getElementById('btn-clear-resp').addEventListener('click', () => {
+      postToPlugin('clear-responsive');
+    });
+
+    // AI Smart Scan Event Listeners
+    document.getElementById('sel-gemini-model')?.addEventListener('change', (e) => {
+      const wrap = document.getElementById('wrap-custom-model');
+      if (wrap) wrap.style.display = e.target.value === 'custom' ? 'block' : 'none';
+    });
+
+    document.getElementById('btn-toggle-ai-cfg').addEventListener('click', () => {
+      const box = document.getElementById('ai-cfg-box');
+      box.style.display = box.style.display === 'none' ? 'block' : 'none';
+    });
+
+    document.getElementById('btn-toggle-key-vis').addEventListener('click', () => {
+      const inp = document.getElementById('inp-gemini-key');
+      inp.type = inp.type === 'password' ? 'text' : 'password';
+    });
+
+    document.getElementById('btn-save-ai-cfg').addEventListener('click', () => {
+      const keyVal = document.getElementById('inp-gemini-key').value.trim();
+      const modelVal = getActiveAiModel();
+      aiConfig = { apiKey: keyVal, model: modelVal };
+      postToPlugin('save-ai-config', { config: aiConfig });
+      updateAiBadge();
+      document.getElementById('ai-cfg-box').style.display = 'none';
+    });
+
+    let aiProgressInterval = null;
+
+    function showAiProgressModal(rootName = '') {
+      const backdrop = document.getElementById('ai-progress-backdrop');
+      const badge = document.getElementById('ai-modal-model-badge');
+      badge.textContent = getActiveAiModel();
+      document.getElementById('ai-progress-fill').style.background = 'linear-gradient(90deg, #3b82f6, #9333ea, #10b981)';
+      document.getElementById('ai-modal-footer').style.display = 'none';
+      document.getElementById('btn-close-ai-modal').style.display = 'none';
+
+      updateAiProgress(12, rootName ? `Đang chụp ảnh "${rootName}"...` : 'Đang chụp ảnh canvas...');
+      setAiStepState(1, 'active');
+      setAiStepState(2, 'waiting');
+      setAiStepState(3, 'waiting');
+      setAiStepState(4, 'waiting');
+
+      backdrop.classList.add('open');
+    }
+
+    function closeAiProgressModal() {
+      if (aiProgressInterval) {
+        clearInterval(aiProgressInterval);
+        aiProgressInterval = null;
+      }
+      document.getElementById('ai-progress-backdrop').classList.remove('open');
+      setAiScanLoading(false);
+    }
+
+    function updateAiProgress(percent, statusText) {
+      const p = Math.max(0, Math.min(100, Math.round(percent)));
+      document.getElementById('ai-progress-fill').style.width = `${p}%`;
+      document.getElementById('ai-progress-percent').textContent = `${p}%`;
+      if (statusText) {
+        document.getElementById('ai-progress-status-text').textContent = statusText;
+      }
+    }
+
+    function setAiStepState(stepNum, state, customLabel) {
+      const stepEl = document.getElementById(`ai-step-${stepNum}`);
+      if (!stepEl) return;
+      stepEl.classList.remove('active', 'done', 'error');
+      const iconEl = stepEl.querySelector('.ai-step-icon');
+      const labelEl = stepEl.querySelector('.ai-step-label');
+      if (customLabel && labelEl) labelEl.textContent = customLabel;
+
+      if (state === 'active') {
+        stepEl.classList.add('active');
+        iconEl.innerHTML = '<div class="ai-spinner"></div>';
+      } else if (state === 'done') {
+        stepEl.classList.add('done');
+        iconEl.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>';
+      } else if (state === 'error') {
+        stepEl.classList.add('error');
+        iconEl.innerHTML = '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="#ef4444" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="15" y1="9" x2="9" y2="15"/><line x1="9" y1="9" x2="15" y2="15"/></svg>';
+      } else {
+        iconEl.innerHTML = '<span style="color:var(--muted);font-size:10px;">○</span>';
+      }
+    }
+
+    function completeAiProgress(appliedCount) {
+      if (aiProgressInterval) {
+        clearInterval(aiProgressInterval);
+        aiProgressInterval = null;
+      }
+      updateAiProgress(100, `✨ Hoàn tất! Đã tự động gán nhãn ${appliedCount} widget.`);
+      setAiStepState(4, 'done', `4. Đã gán nhãn thành công ${appliedCount} widget vào Figma`);
+      document.getElementById('ai-modal-footer').style.display = 'flex';
+      document.getElementById('btn-close-ai-modal').style.display = 'block';
+
+      const btnDone = document.getElementById('btn-ai-modal-done');
+      btnDone.textContent = 'Đóng và xem kết quả';
+      btnDone.className = 'btn btn-primary btn-sm';
+      setAiScanLoading(false);
+
+      // Auto close after 3.2s
+      setTimeout(() => {
+        const fill = document.getElementById('ai-progress-fill');
+        if (fill && fill.style.width === '100%') {
+          closeAiProgressModal();
+        }
+      }, 3200);
+    }
+
+    function failAiProgress(errorMessage) {
+      if (aiProgressInterval) {
+        clearInterval(aiProgressInterval);
+        aiProgressInterval = null;
+      }
+      updateAiProgress(100, `Lỗi: ${errorMessage}`);
+      document.getElementById('ai-progress-fill').style.background = '#ef4444';
+      document.getElementById('ai-modal-footer').style.display = 'flex';
+      document.getElementById('btn-close-ai-modal').style.display = 'block';
+      const btnDone = document.getElementById('btn-ai-modal-done');
+      btnDone.textContent = 'Đóng';
+      btnDone.className = 'btn btn-secondary btn-sm';
+      setAiScanLoading(false);
+    }
+
+    document.getElementById('btn-close-ai-modal').addEventListener('click', closeAiProgressModal);
+    document.getElementById('btn-ai-modal-done').addEventListener('click', closeAiProgressModal);
+    document.getElementById('ai-progress-backdrop').addEventListener('click', (e) => {
+      if (e.target.id === 'ai-progress-backdrop' && document.getElementById('ai-modal-footer').style.display === 'flex') {
+        closeAiProgressModal();
+      }
+    });
+
+    document.getElementById('btn-reset-tags-quick').addEventListener('click', () => {
+      postToPlugin('reset-all-widgets');
+    });
+
+    document.getElementById('btn-ai-smart-scan').addEventListener('click', () => {
+      const key = (aiConfig.apiKey || document.getElementById('inp-gemini-key').value || '').trim();
+      if (!key) {
+        document.getElementById('ai-cfg-box').style.display = 'block';
+        document.getElementById('inp-gemini-key').focus();
+        setStatus('Vui lòng nhập Gemini API Key để quét AI!', true, false);
+        return;
+      }
+      const sum = document.getElementById('sel-summary').textContent || '';
+      showAiProgressModal(sum);
+      setAiScanLoading(true, 'Đang chụp ảnh canvas...');
+      postToPlugin('request-ai-scan-payload');
+    });
+
+    async function executeGeminiVisionInference(payload) {
+      setAiStepState(1, 'done');
+      setAiStepState(2, 'active');
+      updateAiProgress(30, 'Đang chuẩn bị dữ liệu và hình ảnh gửi Gemini...');
+
+      try {
+        const { imageBase64, tree, rootName } = payload;
+        const apiKey = (aiConfig.apiKey || document.getElementById('inp-gemini-key').value || '').trim();
+        const model = getActiveAiModel();
+        const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+
+        setAiStepState(2, 'done');
+        setAiStepState(3, 'active');
+        updateAiProgress(48, `${model} đang phân tích thị giác và đối chiếu 86 widget Elementor...`);
+
+        // Smooth visual ticking while LLM generates tokens
+        let currP = 48;
+        if (aiProgressInterval) clearInterval(aiProgressInterval);
+        aiProgressInterval = setInterval(() => {
+          if (currP < 82) {
+            currP += 3;
+            updateAiProgress(currP);
+          }
+        }, 500);
+
+        const systemPrompt = `Bạn là Chuyên gia WordPress & Elementor (Free + Pro).
+Nhiệm vụ của bạn là nhìn vào ẢNH CHỤP THIẾT KẾ UI đính kèm và CÂY LAYER JSON để gán nhãn Widget Elementor chuẩn 100%.
+
+DANH MỤC WIDGET ELEMENTOR HỢP LỆ (Chỉ chọn đúng các từ khóa sau):
+- container (Flexbox Container chứa các phần tử khác: section, row, col, card)
+- container-grid (CSS Grid Container cho lưới card)
+- heading (Tiêu đề H1-H6)
+- text-editor (Đoạn văn, mô tả, subtext)
+- button (Nút bấm CTA có nền/viền/bo góc)
+- image (Hình ảnh raster, mockup sản phẩm)
+- icon (Icon vector đơn lẻ, inline SVG)
+- divider (Vạch kẻ phân cách mỏng, đường line trang trí)
+- spacer (Khoảng trống)
+- icon-box (Khối tính năng/thẻ gồm Icon/Badge + Tiêu đề + Đoạn mô tả. QUAN TRỌNG: Gán icon-box vào Frame cha để tự động gom cả icon, tiêu đề và mô tả!)
+- image-box (Khối thẻ gồm Ảnh + Tiêu đề + Đoạn mô tả)
+- icon-list (Dải ticker hoặc danh sách gạch đầu dòng dạng dot/check + text, ví dụ: dải tính năng dưới hero)
+- nav-menu (Thanh menu điều hướng gồm các link text ngang)
+- theme-site-logo (Khung Logo website ở Header)
+- counter (Số đếm thống kê kèm tiêu đề, ví dụ: 08, 100%, 12 tháng)
+- star-rating (Đánh giá sao)
+- testimonial (Khối trích dẫn đánh giá của khách hàng)
+- price-table (Bảng giá dịch vụ)
+- call-to-action (Khối kêu gọi hành động có banner + text + nút)
+- form (Khối form liên hệ có ô input và nút gửi)
+- skip (Bỏ qua hoàn toàn layer này và các con của nó: ví dụ hình nền vector chìm watermark, hoa văn nền không cần xuất riêng)
+
+QUY TẮC CỐT LÕI:
+1. Nếu một Frame là widget nguyên tử phức hợp ("icon-box", "nav-menu", "icon-list", "button", "theme-site-logo"), HÃY GÁN WIDGET ĐÓ CHO CHÍNH FRAME CHA để hệ thống tự động hấp thụ toàn bộ text/icon con vào widget và không bung container rác!
+2. Nếu Frame là watermark chìm nền hoặc hoa văn nền thừa, hãy gán là "skip".
+3. Các card chứa nhiều phần tử độc lập (như Stat card có số, chữ, icon absolute, divider) thì Frame ngoài là "container", số là "heading" hoặc "counter", chữ là "text-editor", vạch kẻ là "divider", icon là "icon".
+
+HÃY TRẢ VỀ DUY NHẤT MỘT MẢNG JSON HỢP LỆ (KHÔNG KÈM TEXT GIẢI THÍCH HAY MARKDOWN KHÁC):
+[
+  { "id": "layer_id", "widget": "tên_widget_trong_danh_mục", "reason": "lý do ngắn gọn" }
+]`;
+
+        const requestBody = {
+          contents: [
+            {
+              parts: [
+                {
+                  inlineData: {
+                    mimeType: 'image/png',
+                    data: imageBase64,
+                  },
+                },
+                {
+                  text: `${systemPrompt}\n\nCÂY LAYER HIỆN TẠI (Vùng chọn: ${rootName}):\n${JSON.stringify(tree, null, 2)}`,
+                },
+              ],
+            },
+          ],
+          generationConfig: {
+            responseMimeType: 'application/json',
+            temperature: 0.1,
+          },
+        };
+
+        const res = await fetch(url, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(requestBody),
+        });
+
+        if (aiProgressInterval) {
+          clearInterval(aiProgressInterval);
+          aiProgressInterval = null;
+        }
+
+        if (!res.ok) {
+          const errText = await res.text();
+          let errMsg = `Gemini API Error (${res.status})`;
+          try {
+            const errObj = JSON.parse(errText);
+            if (errObj.error && errObj.error.message) errMsg += `: ${errObj.error.message}`;
+          } catch (e) {
+            errMsg += `: ${errText.slice(0, 160)}`;
+          }
+          throw new Error(errMsg);
+        }
+
+        const data = await res.json();
+        let rawContent = (data.candidates && data.candidates[0] && data.candidates[0].content && data.candidates[0].content.parts && data.candidates[0].content.parts[0] && data.candidates[0].content.parts[0].text) || '[]';
+        rawContent = rawContent.replace(/^```json\s*/i, '').replace(/```\s*$/i, '').trim();
+        const parsed = JSON.parse(rawContent);
+        const tags = Array.isArray(parsed) ? parsed : (Array.isArray(parsed.tags) ? parsed.tags : (Array.isArray(parsed.widgets) ? parsed.widgets : []));
+
+        if (tags.length === 0) {
+          throw new Error('AI đã phân tích xong nhưng không tìm thấy gợi ý gán thẻ nào.');
+        }
+
+        setAiStepState(3, 'done', `3. Phân tích hoàn tất: Tìm thấy ${tags.length} widget phù hợp`);
+        setAiStepState(4, 'active');
+        updateAiProgress(88, `Đang áp dụng ${tags.length} nhãn widget vào canvas Figma...`);
+
+        setStatus(`AI đã phân tích xong. Đang áp dụng ${tags.length} nhãn widget...`, false, false);
+        postToPlugin('apply-ai-tags', { tags });
+      } catch (err) {
+        if (aiProgressInterval) {
+          clearInterval(aiProgressInterval);
+          aiProgressInterval = null;
+        }
+        failAiProgress(err.message || 'Lỗi khi gọi Gemini AI');
+        setStatus(err.message || 'Lỗi khi gọi Gemini AI', true, false);
+      }
+    }
+
+    // Handle messages from Figma Sandbox
+    window.onmessage = (event) => {
+      const msg = event.data && event.data.pluginMessage;
+      if (!msg) return;
+
+      if (msg.widgetCatalog) {
+        window.F2E_WIDGET_CATALOG = msg.widgetCatalog;
+      }
+
+      if (msg.type === 'status') {
+        setStatus(msg.message, Boolean(msg.error), Boolean(msg.done));
+      } else if (msg.type === 'busy') {
+        document.querySelectorAll('button').forEach((b) => { b.disabled = Boolean(msg.busy); });
+      } else if (msg.type === 'outline') {
+        const sum = document.getElementById('sel-summary');
+        sum.textContent = msg.selectionCount > 0
+          ? `${msg.selectionNames.join(', ')} (${msg.items.length} nodes)`
+          : 'Chưa chọn Frame nào';
+        renderOutline(msg.items);
+        if (msg.responsiveStatus) {
+          document.getElementById('vp-desktop-name').textContent = msg.responsiveStatus.desktop || 'Theo Frame đang chọn';
+          document.getElementById('vp-tablet-name').textContent = msg.responsiveStatus.tablet || 'Tự động co giãn (Auto)';
+          document.getElementById('vp-mobile-name').textContent = msg.responsiveStatus.mobile || 'Tự động gập cột (Auto)';
+        }
+      } else if (msg.type === 'init-state' || msg.type === 'sites-loaded') {
+        initStaticIcons();
+        populateSitesDropdown(msg.sites || [], msg.activeSiteUrl || '');
+        if (msg.pages) currentPages = msg.pages;
+        if (msg.templates) currentTemplates = msg.templates;
+        refreshTargetPostDropdown();
+        if (msg.aiConfig) {
+          aiConfig = msg.aiConfig;
+          if (aiConfig.apiKey) document.getElementById('inp-gemini-key').value = aiConfig.apiKey;
+          if (aiConfig.model) {
+            const isStandard = ['gemini-3.8-flash', 'gemini-4-neon', 'gemini-3.8-pro'].includes(aiConfig.model);
+            const selEl = document.getElementById('sel-gemini-model');
+            const wrapEl = document.getElementById('wrap-custom-model');
+            const customInp = document.getElementById('inp-custom-model');
+            if (selEl) {
+              if (isStandard) {
+                selEl.value = aiConfig.model;
+                if (wrapEl) wrapEl.style.display = 'none';
+              } else {
+                selEl.value = 'custom';
+                if (customInp) customInp.value = aiConfig.model;
+                if (wrapEl) wrapEl.style.display = 'block';
+              }
+            }
+          }
+          updateAiBadge();
+        }
+      } else if (msg.type === 'ai-scan-payload-ready') {
+        executeGeminiVisionInference(msg);
+      } else if (msg.type === 'ai-tags-applied') {
+        completeAiProgress(msg.appliedCount || 0);
+      } else if (msg.type === 'site-targets') {
+        currentPages = msg.pages || [];
+        currentTemplates = msg.templates || [];
+        refreshTargetPostDropdown();
+      } else if (msg.type === 'clipboard-ready') {
+        copyTextToClipboard(msg.json);
+      } else if (msg.type === 'download-ready') {
+        downloadJsonFile(msg.filename, msg.json);
+      } else if (msg.type === 'push-complete' && msg.result) {
+        const box = document.getElementById('push-result-links');
+        box.style.display = 'block';
+        box.innerHTML = `Đã lưu <strong>#${msg.result.postId}</strong> (${msg.result.actionLabel || 'Updated'}).<br>` +
+          (msg.result.editUrl ? `<a href="${msg.result.editUrl}" target="_blank" style="color: #60a5fa; text-decoration:none;">Mở trong Elementor Editor ↗</a> &nbsp;|&nbsp; ` : '') +
+          (msg.result.viewUrl ? `<a href="${msg.result.viewUrl}" target="_blank" style="color: #34d399; text-decoration:none;">Xem trang thực tế ↗</a>` : '');
+      }
+    };
+
+    // Initialize icons on DOM ready as well
+    document.addEventListener('DOMContentLoaded', initStaticIcons);
+  </script>
+</body>
+
+</html>
