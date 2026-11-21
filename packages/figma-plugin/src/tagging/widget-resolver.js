@@ -338,6 +338,20 @@ export function resolveWidget(node) {
   // 1. Explicit Override via UI Tagging
   const explicit = typeof node.getPluginData === 'function' ? node.getPluginData(WIDGET_PLUGIN_KEY) : '';
   if (explicit && SUPPORTED_WIDGETS.includes(explicit)) {
+    const kids = visibleChildren(node);
+    // Auto-heal 1: Never allow AI/override 'skip' to delete a structural divider line (LINE / 1px vector divider)
+    if (explicit === 'skip' && isDividerNode(node, kids)) {
+      return { widget: 'divider', source: 'auto-heal' };
+    }
+    // Auto-heal 2: An icon-box requires BOTH a title AND a description (2+ texts).
+    // If a frame only has 1 text block + an icon (like a Situation card), keep it as a Container
+    // so the inline SVG icon, gap, alignment, and borders render with 100% visual accuracy!
+    if (explicit === 'icon-box') {
+      const texts = collectTextDescendants(node);
+      if (texts.length <= 1) {
+        return { widget: 'container', source: 'auto-heal' };
+      }
+    }
     return { widget: explicit, source: 'override' };
   }
 
@@ -352,6 +366,12 @@ export function resolveWidget(node) {
     if (mapped) {
       return { widget: mapped, source: 'name-tag' };
     }
+  }
+
+  // 2A-Divider. Check if node is a horizontal or vertical divider line BEFORE generic vector graphic check
+  // so 1px VECTOR lines become 'divider' instead of 'icon'!
+  if (node.type !== 'TEXT' && isDividerNode(node, visibleChildren(node))) {
+    return { widget: 'divider', source: 'heuristic' };
   }
 
   // 2B. If the entire node is a pure vector graphic (icons, SVG logos, illustrations, watermarks),
@@ -419,7 +439,10 @@ function candidateFitsNode(node, widget) {
   if (['nested-accordion', 'nested-tabs', 'accordion', 'tabs', 'toggle', 'image-carousel', 'image-gallery', 'form', 'loop-grid', 'social-icons', 'slides'].includes(widget)) {
     return kids.length >= 1;
   }
-  if (['icon-box', 'image-box', 'call-to-action', 'price-table', 'flip-box', 'testimonial'].includes(widget)) {
+  if (['icon-box', 'image-box'].includes(widget)) {
+    return kids.length >= 2 && collectTextDescendants(node).length >= 2;
+  }
+  if (['call-to-action', 'price-table', 'flip-box', 'testimonial'].includes(widget)) {
     return kids.length >= 2;
   }
   return true;
@@ -446,6 +469,11 @@ function classifyByHeuristics(node) {
     return { widget: 'text-editor', source: 'heuristic' };
   }
 
+  // Divider (LINE or very thin rectangle/vector, including 0px width/height straight vector paths)
+  if (isDividerNode(node, kids)) {
+    return { widget: 'divider', source: 'heuristic' };
+  }
+
   // Vector graphic, illustration, background watermark, or pure vector group -> Icon or Image (SVG)
   if (isVectorGraphic(node)) {
     const w = Number(node.width) || 0;
@@ -456,11 +484,6 @@ function classifyByHeuristics(node) {
   // Leaf with Image fill -> Image widget
   if (hasImageFill(node) && kids.length === 0) {
     return { widget: 'image', source: 'heuristic' };
-  }
-
-  // Divider (LINE or very thin rectangle)
-  if (isDividerNode(node, kids)) {
-    return { widget: 'divider', source: 'heuristic' };
   }
 
   // Button heuristic (compact container with 1 text label and optional 1 icon)
@@ -486,14 +509,15 @@ function classifyByHeuristics(node) {
   return { widget: 'container', source: 'heuristic' };
 }
 
-function isDividerNode(node, kids) {
-  if (kids.length > 0) return false;
+export function isDividerNode(node, kids = []) {
+  if (!node || kids.length > 0) return false;
   if (node.type === 'LINE') return true;
-  // A divider / accent line can be a RECTANGLE, FRAME, or VECTOR with very small height (<= 6px) or width (<= 6px)
+  // A divider / accent line can be a RECTANGLE, FRAME, or VECTOR with very small height (<= 6px, including 0px on straight horizontal vectors)
+  // or very small width (<= 6px, including 0px on straight vertical vectors)
   const w = Number(node.width) || 0;
   const h = Number(node.height) || 0;
-  if (w <= 0 || h <= 0) return false;
-  return (h <= 6 && w >= 20) || (w <= 6 && h >= 20);
+  if (w <= 0 && h <= 0) return false;
+  return (h >= 0 && h <= 6 && w >= 16) || (w >= 0 && w <= 6 && h >= 16);
 }
 
 function isButtonNode(node, kids) {

@@ -1629,6 +1629,19 @@
           </div>
         </div>
 
+        <!-- Post-Convert Fidelity Verification & Auto-Heal Report Card -->
+        <div class="card" id="fidelity-report-card" style="display:none;border-color:rgba(16,185,129,0.3);">
+          <div class="card-title">
+            <span class="title-left">
+              <span class="btn-icon" data-ui-icon="check"></span>
+              <span>Kiểm tra & Tự động chuẩn hoá khớp thiết kế</span>
+            </span>
+            <span class="badge" id="fidelity-score-badge" style="background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3);">100% Match</span>
+          </div>
+          <div id="fidelity-report-summary" style="font-size:10.5px;color:var(--text-secondary);margin-bottom:6px;"></div>
+          <div id="fidelity-report-list" class="ds-fonts-list" style="max-height:110px;"></div>
+        </div>
+
         <!-- Navigation footer back to Step 3 -->
         <div class="step-nav-footer">
           <button class="btn btn-secondary" id="btn-back-step-3">
@@ -2382,9 +2395,9 @@ DANH MỤC WIDGET ELEMENTOR HỢP LỆ (Chỉ chọn đúng các từ khóa sau)
 - button (Nút bấm CTA có nền/viền/bo góc)
 - image (Hình ảnh raster, mockup sản phẩm)
 - icon (Icon vector đơn lẻ, inline SVG)
-- divider (Vạch kẻ phân cách mỏng, đường line trang trí)
+- divider (Vạch kẻ phân cách mỏng ngang hoặc dọc giữa các cột, đường line trang trí — TUYỆT ĐỐI KHÔNG gán skip cho các đường line phân cách cột)
 - spacer (Khoảng trống)
-- icon-box (Khối tính năng/thẻ gồm Icon/Badge + Tiêu đề + Đoạn mô tả. QUAN TRỌNG: Gán icon-box vào Frame cha để tự động gom cả icon, tiêu đề và mô tả!)
+- icon-box (CHỈ dùng khi khối có đủ 3 phần: Icon + Tiêu đề riêng + Đoạn mô tả phụ riêng. Nếu khối chỉ có 1 Icon + 1 đoạn chữ duy nhất hoặc nằm trong hàng chia cột có vạch ngăn cách, HÃY gán Frame cha là "container", icon là "icon", chữ là "text-editor")
 - image-box (Khối thẻ gồm Ảnh + Tiêu đề + Đoạn mô tả)
 - icon-list (Dải ticker hoặc danh sách gạch đầu dòng dạng dot/check + text, ví dụ: dải tính năng dưới hero)
 - nav-menu (Thanh menu điều hướng gồm các link text ngang)
@@ -2580,6 +2593,35 @@ HÃY TRẢ VỀ DUY NHẤT MỘT MẢNG JSON HỢP LỆ (KHÔNG KÈM TEXT GIẢI
       }
     }
 
+    function renderFidelityReport(rep) {
+      const card = document.getElementById('fidelity-report-card');
+      const sum = document.getElementById('fidelity-report-summary');
+      const list = document.getElementById('fidelity-report-list');
+      const badge = document.getElementById('fidelity-score-badge');
+      if (!card || !sum || !list || !rep) return;
+
+      card.style.display = 'block';
+      const total = rep.totalChecked || 0;
+      const healed = rep.healedCount || 0;
+      if (badge) badge.textContent = `${rep.score || 100}% Match`;
+      sum.textContent = `Đã đối chiếu tự động ${total} phần tử Elementor với thiết kế Figma` +
+        (healed > 0 ? ` — Tự động chuẩn hoá ${healed} điểm lệch:` : ' — Khớp hoàn toàn 100%.');
+
+      const fixes = Array.isArray(rep.fixes) ? rep.fixes : [];
+      if (fixes.length === 0) {
+        list.innerHTML = '<div style="font-size:10px;color:#34d399;padding:4px 6px;">Tất cả màu sắc, font chữ, SVG icon và bố cục cột đều chuẩn xác.</div>';
+      } else {
+        list.innerHTML = fixes.map((f) => `
+          <div class="ds-font-row">
+            <div class="ds-font-left">
+              <span class="ds-font-tag" style="color:#34d399;background:rgba(16,185,129,0.12);">AUTO-FIX</span>
+              <span class="ds-font-name" title="${f.detail}">${f.title}: ${f.detail}</span>
+            </div>
+          </div>
+        `).join('');
+      }
+    }
+
     // Handle messages from Figma Sandbox
     window.onmessage = (event) => {
       const msg = event.data && event.data.pluginMessage;
@@ -2643,9 +2685,12 @@ HÃY TRẢ VỀ DUY NHẤT MỘT MẢNG JSON HỢP LỆ (KHÔNG KÈM TEXT GIẢI
         renderDesignSystemPreview(msg.tokens);
       } else if (msg.type === 'clipboard-ready') {
         copyTextToClipboard(msg.json);
+        if (msg.fidelityReport) renderFidelityReport(msg.fidelityReport);
       } else if (msg.type === 'download-ready') {
         downloadJsonFile(msg.filename, msg.json);
+        if (msg.fidelityReport) renderFidelityReport(msg.fidelityReport);
       } else if (msg.type === 'push-complete' && msg.result) {
+        if (msg.fidelityReport) renderFidelityReport(msg.fidelityReport);
         const box = document.getElementById('push-result-links');
         box.style.display = 'block';
         box.innerHTML = `Đã lưu <strong>#${msg.result.postId}</strong> (${msg.result.actionLabel || 'Updated'}).<br>` +

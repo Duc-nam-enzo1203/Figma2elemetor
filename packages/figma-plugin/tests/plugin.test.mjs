@@ -1023,5 +1023,214 @@ test('Design System & Site Settings Extraction: Colors, Typography roles, Theme 
   assert.ok(extracted.settings.background.color);
 });
 
+test('Post-Convert Fidelity Verifier & Auto-Healer: Heals Situations 4-column SVG Icon-Box & Eyebrow Section JSON', async () => {
+  const { verifyAndHealElementorJson } = await import('../src/exporters/fidelity-verifier.js');
+
+  const brokenClipboardElements = [
+    {
+      id: 'dab8413',
+      elType: 'container',
+      isInner: false,
+      settings: {
+        container_type: 'flex',
+        flex_direction: 'column',
+        background_background: 'classic',
+        background_color: '#F6F5F1',
+        _f2e_node_id: '47:5888',
+        _title: 'Section',
+      },
+      elements: [
+        {
+          id: 'aef4cec',
+          elType: 'container',
+          isInner: true,
+          settings: { container_type: 'flex', flex_direction: 'column', _f2e_node_id: '47:5890', _title: 'Heading + Conclusion' },
+          elements: [
+            {
+              id: '245693a',
+              elType: 'container',
+              isInner: true,
+              settings: { container_type: 'flex', flex_direction: 'column', _f2e_node_id: '47:5891', _title: 'Heading' },
+              elements: [
+                {
+                  id: '746197f',
+                  elType: 'container',
+                  isInner: true,
+                  settings: {
+                    container_type: 'flex',
+                    flex_direction: 'row',
+                    width: { unit: 'px', size: 157, sizes: [] },
+                    _f2e_node_id: '47:5892',
+                    _title: 'Eyebrow',
+                  },
+                  elements: [
+                    {
+                      id: 'd314fb4',
+                      elType: 'widget',
+                      widgetType: 'text-editor',
+                      isInner: false,
+                      settings: {
+                        editor: '<p style="margin:0;">TÌNH HUỐNG THỰC TẾ</p>',
+                        text_color: '#16A34A',
+                        __globals__: {
+                          text_color: 'globals/colors?id=primary',
+                          typography_typography: 'globals/typography?id=text',
+                        },
+                        _f2e_node_id: '47:5893',
+                        _title: 'TÌNH HUỐNG THỰC TẾ',
+                      },
+                      elements: [],
+                    },
+                  ],
+                },
+              ],
+            },
+          ],
+        },
+        {
+          id: '924fab7',
+          elType: 'container',
+          isInner: true,
+          settings: {
+            container_type: 'flex',
+            flex_direction: 'row',
+            flex_gap: { unit: 'px', size: 24, column: '24', row: '24', isLinked: true },
+            flex_wrap: 'wrap',
+            background_background: 'classic',
+            background_color: '#FFFFFF',
+            __globals__: {
+              background_color: 'globals/colors?id=848461d',
+              border_color: 'globals/colors?id=31b945e',
+            },
+            border_border: 'solid',
+            border_color: '#E2E8F0',
+            _f2e_node_id: '47:5897',
+            _title: 'Situations',
+          },
+          elements: [
+            {
+              id: '5eca9f6',
+              elType: 'widget',
+              widgetType: 'icon-box',
+              isInner: false,
+              settings: {
+                title_text: 'Không biết xe ở đâu, chỉ biết khi khách hàng chủ động thông báo',
+                description_text: '',
+                position: 'top',
+                title_color: '#000000',
+                __globals__: { title_color: 'globals/colors?id=text', title_typography_typography: 'globals/typography?id=text' },
+                selected_icon: {
+                  value: '<svg width="42" height="42" viewBox="0 0 42 42" fill="none"><path d="M0 0h42v42" stroke="#16A34A"/></svg>',
+                  library: 'svg',
+                },
+                _element_width: 'inherit',
+                _flex_size: 'grow',
+                _f2e_node_id: '47:5898',
+                _title: 'Situation',
+              },
+              elements: [],
+            },
+            {
+              id: '33486aa',
+              elType: 'widget',
+              widgetType: 'icon-box',
+              isInner: false,
+              settings: {
+                title_text: 'Xe rời khỏi khu vực kiểm soát mà không ai hay',
+                description_text: '',
+                position: 'top',
+                title_color: '#000000',
+                selected_icon: {
+                  value: '<svg width="40" height="40" viewBox="0 0 40 40" fill="none"><path d="M0 0h40v40" stroke="#16A34A"/></svg>',
+                  library: 'svg',
+                },
+                _element_width: 'inherit',
+                _flex_size: 'grow',
+                _f2e_node_id: '47:5906',
+                _title: 'Situation',
+              },
+              elements: [],
+            },
+            {
+              id: 'f7bd335',
+              elType: 'widget',
+              widgetType: 'icon-box',
+              isInner: false,
+              settings: {
+                title_text: 'Thiết bị bị tháo hoặc bị ngắt nguồn giữa đường',
+                description_text: '',
+                position: 'top',
+                title_color: '#000000',
+                selected_icon: {
+                  value: '<svg width="40" height="40" viewBox="0 0 40 40" fill="none"><path d="M0 0h40v40" stroke="#16A34A"/></svg>',
+                  library: 'svg',
+                },
+                _element_width: 'inherit',
+                _flex_size: 'grow',
+                _f2e_node_id: '47:5913',
+                _title: 'Situation',
+              },
+              elements: [],
+            },
+            {
+              id: '9bddf9a',
+              elType: 'widget',
+              widgetType: 'icon-box',
+              isInner: false,
+              settings: {
+                title_text: 'Cần xem lại xe đã đi những đâu nhưng không có dữ liệu',
+                description_text: '',
+                position: 'top',
+                title_color: '#000000',
+                selected_icon: {
+                  value: '<svg width="40" height="40" viewBox="0 0 40 40" fill="none"><path d="M0 0h40v40" stroke="#16A34A"/></svg>',
+                  library: 'svg',
+                },
+                _element_width: 'inherit',
+                _flex_size: 'grow',
+                _f2e_node_id: '47:5921',
+                _title: 'Situation',
+              },
+              elements: [],
+            },
+          ],
+        },
+      ],
+    },
+  ];
+
+  const { elements: healed, report } = verifyAndHealElementorJson(brokenClipboardElements);
+
+  assert.ok(report.healedCount >= 6);
+  const root = healed[0];
+  const eyebrowContainer = root.elements[0].elements[0].elements[0];
+  const eyebrowText = eyebrowContainer.elements[0];
+
+  // 1. Eyebrow tight width removed & bogus __globals__ removed
+  assert.equal(eyebrowContainer.settings.width, undefined);
+  assert.equal(eyebrowText.settings.__globals__, undefined);
+  assert.equal(eyebrowText.settings.text_color, '#16A34A');
+
+  // 2. Situations card keeps white background (#FFFFFF) without bogus 848461d global ID
+  const situationsBox = root.elements[1];
+  assert.equal(situationsBox.settings.__globals__, undefined);
+  assert.equal(situationsBox.settings.background_color, '#FFFFFF');
+  assert.equal(situationsBox.settings.flex_wrap, 'nowrap');
+
+  // 3. 4 Situations + 3 Vertical Dividers = 7 children in the horizontal row
+  assert.equal(situationsBox.elements.length, 7);
+  const firstSituation = situationsBox.elements[0];
+  assert.equal(firstSituation.elType, 'container');
+  assert.equal(firstSituation.settings.width.size, 22);
+  assert.equal(firstSituation.elements[0].widgetType, 'html');
+  assert.ok(firstSituation.elements[0].settings.html.includes('<svg'));
+  assert.equal(firstSituation.elements[1].widgetType, 'text-editor');
+  assert.equal(firstSituation.elements[1].settings.align, 'left');
+
+  const firstDivider = situationsBox.elements[1];
+  assert.equal(firstDivider.widgetType, 'html');
+  assert.ok(firstDivider.settings.html.includes('f2e-vertical-divider'));
+});
+
 
 

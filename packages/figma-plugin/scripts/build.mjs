@@ -19,6 +19,7 @@ const moduleOrder = [
   'src/tagging/widget-resolver.js',
   'src/optimizer/auto-layout-fixer.js',
   'src/extraction/extractor.js',
+  'src/exporters/fidelity-verifier.js',
   'src/exporters/elementor-compiler.js',
   'src/code.js',
 ];

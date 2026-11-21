@@ -20,6 +20,7 @@
  */
 
 import { shortId } from '../utils/crypto.js';
+import { verifyAndHealElementorJson } from './fidelity-verifier.js';
 
 const FLEX_ALIGN_MAP = {
   MIN: 'flex-start',
@@ -82,7 +83,7 @@ export function compileElementorV3(doc, options = {}) {
         el = buildGoogleMaps(node, allocId);
         break;
       case 'divider':
-        el = buildDivider(node, allocId);
+        el = buildDivider(node, allocId, parentNode);
         break;
       case 'spacer':
         el = buildSpacer(node, allocId);
@@ -202,13 +203,15 @@ export function compileElementorV3(doc, options = {}) {
     return el;
   };
 
-  const content = [];
+  const rawContent = [];
   for (const rootId of doc.roots || []) {
     // Container 1 (Root selection) is strictly preserved!
     // Never strip Container 1 when it contains multiple children (container 2 + container 3)
     const built = buildElement(rootId, true, null);
-    if (built) content.push(built);
+    if (built) rawContent.push(built);
   }
+
+  const { elements: content, report: fidelityReport } = verifyAndHealElementorJson(rawContent, doc, options);
 
   return {
     title: doc.title || 'Figma Import',
@@ -216,6 +219,7 @@ export function compileElementorV3(doc, options = {}) {
     version: '0.4',
     page_settings: [],
     content,
+    fidelityReport,
   };
 }
 
@@ -323,7 +327,8 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
       // Parent is Column
       if (sizingH === 'FILL' || (parentWidth > 0 && nodeW >= parentWidth * 0.92)) {
         settings._flex_align_self = 'stretch';
-      } else if (nodeW > 0 && nodeW < parentWidth * 0.92) {
+      } else if (sizingH === 'FIXED' && nodeW > 0 && nodeW < parentWidth * 0.92) {
+        // Only lock explicit FIXED width containers; never lock HUG containers (like Eyebrow text wrappers) to fixed pixel widths!
         settings.width = { unit: 'px', size: nodeW, sizes: [] };
         settings.width_mobile = { unit: '%', size: 100, sizes: [] };
       }
@@ -332,7 +337,7 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
     // Widget inside a Row or Column Container
     if (parentIsRow) {
       if (sizingH === 'FILL') {
-        settings._element_width = 'inherit';
+        settings._element_width = 'initial';
         settings._flex_size = 'grow';
       } else {
         // Prevent buttons, text links, and icons in a horizontal row from stretching to 100% width!
@@ -351,6 +356,7 @@ export function compileElementorClipboard(doc, options = {}) {
     type: 'elementor',
     siteurl: options.siteUrl || 'https://localhost/wp-json/',
     elements: v3.content,
+    fidelityReport: v3.fidelityReport,
   };
 }
 
@@ -1350,10 +1356,34 @@ function buildGoogleMaps(node, allocId) {
   };
 }
 
-function buildDivider(node, allocId) {
-  const weight = Math.max(1, Math.min(20, Number(node.layout && node.layout.height) || 1));
-  const color = (node.style && (node.style.background || node.style.borderColor)) || '#10B981';
+function buildDivider(node, allocId, parentNode = null) {
   const w = Number(node.layout && node.layout.width) || 0;
+  const h = Number(node.layout && node.layout.height) || 0;
+  const parentIsRow = Boolean(parentNode && parentNode.layout && parentNode.layout.direction === 'row');
+  const isVertical = (parentIsRow && h >= w) || (h >= 16 && w <= 6);
+  const color = (node.style && (node.style.borderColor || node.style.background)) || '#16A34A';
+
+  if (isVertical) {
+    const thickness = Math.max(1, Math.min(8, w || 1));
+    const minH = Math.max(24, Math.round(h || 80));
+    return {
+      id: allocId(node.id),
+      elType: 'widget',
+      widgetType: 'html',
+      isInner: false,
+      settings: {
+        html: `<div class="f2e-vertical-divider" style="width:${thickness}px;min-height:${minH}px;height:100%;background-color:${color};opacity:0.5;"></div>`,
+        _element_width: 'auto',
+        _flex_size: 'none',
+        _flex_align_self: 'stretch',
+        hide_tablet: 'hidden-tablet',
+        hide_mobile: 'hidden-mobile',
+      },
+      elements: [],
+    };
+  }
+
+  const weight = Math.max(1, Math.min(20, h || 1));
   const settings = {
     style: 'solid',
     weight: { unit: 'px', size: weight, sizes: [] },

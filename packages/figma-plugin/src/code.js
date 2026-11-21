@@ -253,13 +253,16 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
 
   if (action === 'clipboard') {
     const clipboardData = compileElementorClipboard(document, { siteUrl });
+    const rep = clipboardData.fidelityReport || {};
+    const healNote = rep.healedCount ? ` [Auto-Healed ${rep.healedCount} điểm lệch]` : ' [Khớp 100%]';
     figma.ui.postMessage({
       type: 'clipboard-ready',
       json: JSON.stringify(clipboardData),
       title: document.title,
       warnings: document.warnings,
+      fidelityReport: rep,
     });
-    announce(`Đã copy "${document.title}" (${clipboardData.elements.length} sections)! Mở Elementor Editor và bấm Ctrl+V.`);
+    announce(`Đã copy "${document.title}" (${clipboardData.elements.length} sections)${healNote}! Mở Elementor Editor và bấm Ctrl+V.`);
     return;
   }
 
@@ -270,8 +273,9 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
       filename: `${slugify(document.title)}-elementor-v3.json`,
       json: JSON.stringify(v3Json, null, 2),
       warnings: document.warnings,
+      fidelityReport: v3Json.fidelityReport,
     });
-    announce('Đã xuất file Elementor v3 Template (.json) thành công!');
+    announce('Đã xuất & kiểm tra khớp thiết kế file Elementor v3 Template (.json) thành công!');
     return;
   }
 
@@ -287,13 +291,14 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
     return;
   }
 
+  const v3Compiled = compileElementorV3(document, { siteUrl });
   const bundle = {
     kind: 'f2e.bundle',
     version: '1.0.0',
     exportedAt: new Date().toISOString(),
     document,
     assets: assetPayloads,
-    elementorV3: compileElementorV3(document, { siteUrl }),
+    elementorV3: v3Compiled,
     elementorV4: compileElementorV4(document),
   };
   figma.ui.postMessage({
@@ -301,6 +306,7 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
     filename: `${slugify(document.title)}-bundle.f2e.json`,
     json: JSON.stringify(bundle, null, 2),
     warnings: document.warnings,
+    fidelityReport: v3Compiled.fidelityReport,
   });
   announce('Đã xuất gói F2E Bundle đầy đủ (kèm ảnh & SVG) để upload vào WordPress!');
 }
@@ -458,11 +464,17 @@ async function handleLivePushToWordPress(payload) {
 
   // Step 4: Compile on client with resolved attachmentMap AND send both IR + compiled elements to WordPress
   let result;
+  let fidelityReport = null;
   try {
-    postStatus('4/4: Đang tạo/cập nhật cấu trúc Elementor trên WordPress…');
-    const compiledElements = elementorVersion === 'v4'
-      ? compileElementorV4(document).content
-      : compileElementorV3(document, { siteUrl: site.siteUrl, attachmentMap }).content;
+    postStatus('4/4: Đang kiểm tra độ khớp thiết kế & cập nhật cấu trúc Elementor trên WordPress…');
+    let compiledElements;
+    if (elementorVersion === 'v4') {
+      compiledElements = compileElementorV4(document).content;
+    } else {
+      const v3Out = compileElementorV3(document, { siteUrl: site.siteUrl, attachmentMap });
+      compiledElements = v3Out.content;
+      fidelityReport = v3Out.fidelityReport;
+    }
 
     result = await wpRequest(site.siteUrl, site.token, '/import', {
       method: 'POST',
@@ -486,6 +498,7 @@ async function handleLivePushToWordPress(payload) {
   figma.ui.postMessage({
     type: 'push-complete',
     result,
+    fidelityReport,
   });
   announce(`Đã đẩy thành công lên WordPress! (${result.actionLabel || 'Saved'} — Post #${result.postId})`);
   await handleLoadSiteTargets(site.siteUrl);

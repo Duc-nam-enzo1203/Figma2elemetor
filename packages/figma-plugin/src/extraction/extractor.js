@@ -113,8 +113,23 @@ export function extractGradient(paints) {
 }
 
 export function extractLayout(node, parentNode = null) {
-  const width = Math.round(safeNum(node.width, 0));
-  const height = Math.round(safeNum(node.height, 0));
+  let width = Math.round(safeNum(node.width, 0));
+  let height = Math.round(safeNum(node.height, 0));
+  const strokeW = Math.max(1, Math.round(safeNum(node.strokeWeight, 1)));
+  if (node.type === 'LINE') {
+    const rot = Math.abs(safeNum(node.rotation, 0));
+    const isVertLine = (rot >= 45 && rot <= 135) || (parentNode && parentNode.layoutMode === 'HORIZONTAL' && height === 0);
+    if (isVertLine) {
+      height = Math.max(width, height, 24);
+      width = strokeW;
+    } else if (height === 0) {
+      height = strokeW;
+    }
+  } else if (width === 0 && height > 0) {
+    width = strokeW;
+  } else if (height === 0 && width > 0) {
+    height = strokeW;
+  }
   const x = Math.round(safeNum(node.x, 0));
   const y = Math.round(safeNum(node.y, 0));
 
@@ -237,15 +252,13 @@ export function extractStyle(node) {
     }
     style.borderColor = borderColor;
 
-    if (typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
-      const w = Math.max(1, Math.round(node.strokeWeight));
-      style.borderWidth = { top: w, right: w, bottom: w, left: w, isLinked: true };
-    } else if (
+    const hasIndividualStrokes =
       typeof node.strokeTopWeight === 'number' ||
       typeof node.strokeRightWeight === 'number' ||
       typeof node.strokeBottomWeight === 'number' ||
-      typeof node.strokeLeftWeight === 'number'
-    ) {
+      typeof node.strokeLeftWeight === 'number';
+
+    if (hasIndividualStrokes) {
       const bt = Math.round(safeNum(node.strokeTopWeight, 0));
       const br = Math.round(safeNum(node.strokeRightWeight, 0));
       const bb = Math.round(safeNum(node.strokeBottomWeight, 0));
@@ -253,6 +266,10 @@ export function extractStyle(node) {
       if (bt > 0 || br > 0 || bb > 0 || bl > 0) {
         style.borderWidth = { top: bt, right: br, bottom: bb, left: bl, isLinked: bt === br && br === bb && bb === bl };
       }
+    }
+    if (!style.borderWidth && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
+      const w = Math.max(1, Math.round(node.strokeWeight));
+      style.borderWidth = { top: w, right: w, bottom: w, left: w, isLinked: true };
     }
   }
 
@@ -508,6 +525,35 @@ export function applyDevModeCSSToNode(entry, devModeCSS) {
     }
   }
 
+  if (devModeCSS['border-top'] || devModeCSS['border-right'] || devModeCSS['border-bottom'] || devModeCSS['border-left']) {
+    const parseSide = (val) => {
+      if (!val || typeof val !== 'string') return { w: 0, c: null };
+      const wMatch = val.match(/([\d.]+)px/);
+      const cMatch = val.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/);
+      return {
+        w: wMatch ? Math.max(1, Math.round(parseFloat(wMatch[1]))) : 0,
+        c: cMatch ? cMatch[0] : null,
+      };
+    };
+    const st = parseSide(devModeCSS['border-top']);
+    const sr = parseSide(devModeCSS['border-right']);
+    const sb = parseSide(devModeCSS['border-bottom']);
+    const sl = parseSide(devModeCSS['border-left']);
+    if (st.w > 0 || sr.w > 0 || sb.w > 0 || sl.w > 0) {
+      style.borderWidth = {
+        top: st.w,
+        right: sr.w,
+        bottom: sb.w,
+        left: sl.w,
+        isLinked: st.w === sr.w && sr.w === sb.w && sb.w === sl.w,
+      };
+      const sideColor = st.c || sr.c || sb.c || sl.c;
+      if (sideColor && !style.borderColor) {
+        style.borderColor = sideColor;
+      }
+    }
+  }
+
   if (devModeCSS['border-width'] || devModeCSS['border']) {
     const bwStr = devModeCSS['border-width'] || (devModeCSS['border'] && devModeCSS['border'].match(/([\d.]+)px/) ? devModeCSS['border'].match(/([\d.]+)px/)[1] : null);
     if (bwStr) {
@@ -515,6 +561,10 @@ export function applyDevModeCSSToNode(entry, devModeCSS) {
       if (!style.borderWidth) {
         style.borderWidth = { top: bw, right: bw, bottom: bw, left: bw, isLinked: true };
       }
+    }
+    if (devModeCSS['border'] && !style.borderColor) {
+      const cMatch = devModeCSS['border'].match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/);
+      if (cMatch) style.borderColor = cMatch[0];
     }
   }
 

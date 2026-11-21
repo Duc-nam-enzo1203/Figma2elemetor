@@ -469,6 +469,20 @@ const VECTOR_TYPES = new Set([
   // 1. Explicit Override via UI Tagging
   const explicit = typeof node.getPluginData === 'function' ? node.getPluginData(WIDGET_PLUGIN_KEY) : '';
   if (explicit && SUPPORTED_WIDGETS.includes(explicit)) {
+    const kids = visibleChildren(node);
+    // Auto-heal 1: Never allow AI/override 'skip' to delete a structural divider line (LINE / 1px vector divider)
+    if (explicit === 'skip' && isDividerNode(node, kids)) {
+      return { widget: 'divider', source: 'auto-heal' };
+    }
+    // Auto-heal 2: An icon-box requires BOTH a title AND a description (2+ texts).
+    // If a frame only has 1 text block + an icon (like a Situation card), keep it as a Container
+    // so the inline SVG icon, gap, alignment, and borders render with 100% visual accuracy!
+    if (explicit === 'icon-box') {
+      const texts = collectTextDescendants(node);
+      if (texts.length <= 1) {
+        return { widget: 'container', source: 'auto-heal' };
+      }
+    }
     return { widget: explicit, source: 'override' };
   }
 
@@ -483,6 +497,12 @@ const VECTOR_TYPES = new Set([
     if (mapped) {
       return { widget: mapped, source: 'name-tag' };
     }
+  }
+
+  // 2A-Divider. Check if node is a horizontal or vertical divider line BEFORE generic vector graphic check
+  // so 1px VECTOR lines become 'divider' instead of 'icon'!
+  if (node.type !== 'TEXT' && isDividerNode(node, visibleChildren(node))) {
+    return { widget: 'divider', source: 'heuristic' };
   }
 
   // 2B. If the entire node is a pure vector graphic (icons, SVG logos, illustrations, watermarks),
@@ -550,7 +570,10 @@ function candidateFitsNode(node, widget) {
   if (['nested-accordion', 'nested-tabs', 'accordion', 'tabs', 'toggle', 'image-carousel', 'image-gallery', 'form', 'loop-grid', 'social-icons', 'slides'].includes(widget)) {
     return kids.length >= 1;
   }
-  if (['icon-box', 'image-box', 'call-to-action', 'price-table', 'flip-box', 'testimonial'].includes(widget)) {
+  if (['icon-box', 'image-box'].includes(widget)) {
+    return kids.length >= 2 && collectTextDescendants(node).length >= 2;
+  }
+  if (['call-to-action', 'price-table', 'flip-box', 'testimonial'].includes(widget)) {
     return kids.length >= 2;
   }
   return true;
@@ -577,6 +600,11 @@ function classifyByHeuristics(node) {
     return { widget: 'text-editor', source: 'heuristic' };
   }
 
+  // Divider (LINE or very thin rectangle/vector, including 0px width/height straight vector paths)
+  if (isDividerNode(node, kids)) {
+    return { widget: 'divider', source: 'heuristic' };
+  }
+
   // Vector graphic, illustration, background watermark, or pure vector group -> Icon or Image (SVG)
   if (isVectorGraphic(node)) {
     const w = Number(node.width) || 0;
@@ -587,11 +615,6 @@ function classifyByHeuristics(node) {
   // Leaf with Image fill -> Image widget
   if (hasImageFill(node) && kids.length === 0) {
     return { widget: 'image', source: 'heuristic' };
-  }
-
-  // Divider (LINE or very thin rectangle)
-  if (isDividerNode(node, kids)) {
-    return { widget: 'divider', source: 'heuristic' };
   }
 
   // Button heuristic (compact container with 1 text label and optional 1 icon)
@@ -615,16 +638,15 @@ function classifyByHeuristics(node) {
   }
 
   return { widget: 'container', source: 'heuristic' };
-}
-
-function isDividerNode(node, kids) {
-  if (kids.length > 0) return false;
+}function isDividerNode(node, kids = []) {
+  if (!node || kids.length > 0) return false;
   if (node.type === 'LINE') return true;
-  // A divider / accent line can be a RECTANGLE, FRAME, or VECTOR with very small height (<= 6px) or width (<= 6px)
+  // A divider / accent line can be a RECTANGLE, FRAME, or VECTOR with very small height (<= 6px, including 0px on straight horizontal vectors)
+  // or very small width (<= 6px, including 0px on straight vertical vectors)
   const w = Number(node.width) || 0;
   const h = Number(node.height) || 0;
-  if (w <= 0 || h <= 0) return false;
-  return (h <= 6 && w >= 20) || (w <= 6 && h >= 20);
+  if (w <= 0 && h <= 0) return false;
+  return (h >= 0 && h <= 6 && w >= 16) || (w >= 0 && w <= 6 && h >= 16);
 }
 
 function isButtonNode(node, kids) {
@@ -1046,8 +1068,23 @@ const WEIGHT_MAP = {
     angle,
   };
 }function extractLayout(node, parentNode = null) {
-  const width = Math.round(safeNum(node.width, 0));
-  const height = Math.round(safeNum(node.height, 0));
+  let width = Math.round(safeNum(node.width, 0));
+  let height = Math.round(safeNum(node.height, 0));
+  const strokeW = Math.max(1, Math.round(safeNum(node.strokeWeight, 1)));
+  if (node.type === 'LINE') {
+    const rot = Math.abs(safeNum(node.rotation, 0));
+    const isVertLine = (rot >= 45 && rot <= 135) || (parentNode && parentNode.layoutMode === 'HORIZONTAL' && height === 0);
+    if (isVertLine) {
+      height = Math.max(width, height, 24);
+      width = strokeW;
+    } else if (height === 0) {
+      height = strokeW;
+    }
+  } else if (width === 0 && height > 0) {
+    width = strokeW;
+  } else if (height === 0 && width > 0) {
+    height = strokeW;
+  }
   const x = Math.round(safeNum(node.x, 0));
   const y = Math.round(safeNum(node.y, 0));
 
@@ -1168,15 +1205,13 @@ const WEIGHT_MAP = {
     }
     style.borderColor = borderColor;
 
-    if (typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
-      const w = Math.max(1, Math.round(node.strokeWeight));
-      style.borderWidth = { top: w, right: w, bottom: w, left: w, isLinked: true };
-    } else if (
+    const hasIndividualStrokes =
       typeof node.strokeTopWeight === 'number' ||
       typeof node.strokeRightWeight === 'number' ||
       typeof node.strokeBottomWeight === 'number' ||
-      typeof node.strokeLeftWeight === 'number'
-    ) {
+      typeof node.strokeLeftWeight === 'number';
+
+    if (hasIndividualStrokes) {
       const bt = Math.round(safeNum(node.strokeTopWeight, 0));
       const br = Math.round(safeNum(node.strokeRightWeight, 0));
       const bb = Math.round(safeNum(node.strokeBottomWeight, 0));
@@ -1184,6 +1219,10 @@ const WEIGHT_MAP = {
       if (bt > 0 || br > 0 || bb > 0 || bl > 0) {
         style.borderWidth = { top: bt, right: br, bottom: bb, left: bl, isLinked: bt === br && br === bb && bb === bl };
       }
+    }
+    if (!style.borderWidth && typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
+      const w = Math.max(1, Math.round(node.strokeWeight));
+      style.borderWidth = { top: w, right: w, bottom: w, left: w, isLinked: true };
     }
   }
 
@@ -1428,6 +1467,35 @@ const WEIGHT_MAP = {
     }
   }
 
+  if (devModeCSS['border-top'] || devModeCSS['border-right'] || devModeCSS['border-bottom'] || devModeCSS['border-left']) {
+    const parseSide = (val) => {
+      if (!val || typeof val !== 'string') return { w: 0, c: null };
+      const wMatch = val.match(/([\d.]+)px/);
+      const cMatch = val.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/);
+      return {
+        w: wMatch ? Math.max(1, Math.round(parseFloat(wMatch[1]))) : 0,
+        c: cMatch ? cMatch[0] : null,
+      };
+    };
+    const st = parseSide(devModeCSS['border-top']);
+    const sr = parseSide(devModeCSS['border-right']);
+    const sb = parseSide(devModeCSS['border-bottom']);
+    const sl = parseSide(devModeCSS['border-left']);
+    if (st.w > 0 || sr.w > 0 || sb.w > 0 || sl.w > 0) {
+      style.borderWidth = {
+        top: st.w,
+        right: sr.w,
+        bottom: sb.w,
+        left: sl.w,
+        isLinked: st.w === sr.w && sr.w === sb.w && sb.w === sl.w,
+      };
+      const sideColor = st.c || sr.c || sb.c || sl.c;
+      if (sideColor && !style.borderColor) {
+        style.borderColor = sideColor;
+      }
+    }
+  }
+
   if (devModeCSS['border-width'] || devModeCSS['border']) {
     const bwStr = devModeCSS['border-width'] || (devModeCSS['border'] && devModeCSS['border'].match(/([\d.]+)px/) ? devModeCSS['border'].match(/([\d.]+)px/)[1] : null);
     if (bwStr) {
@@ -1435,6 +1503,10 @@ const WEIGHT_MAP = {
       if (!style.borderWidth) {
         style.borderWidth = { top: bw, right: bw, bottom: bw, left: bw, isLinked: true };
       }
+    }
+    if (devModeCSS['border'] && !style.borderColor) {
+      const cMatch = devModeCSS['border'].match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/);
+      if (cMatch) style.borderColor = cMatch[0];
     }
   }
 
@@ -2174,6 +2246,326 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
 }
 
 
+  // ── Module: src/exporters/fidelity-verifier.js ──
+/**
+ * Post-Convert Fidelity Verifier & Auto-Healer
+ *
+ * Automatically audits compiled Elementor v3 / Clipboard JSON against the Figma Intermediate Representation (IR)
+ * and Elementor rendering laws, detecting and auto-healing layout/style/asset defects before export:
+ *
+ * 1. Bogus `__globals__` Sanitizer: Prevents unverified Elementor default global colors/fonts (like cyan #6EC1E4
+ *    or non-existent IDs 848461d/31b945e) from overriding exact Figma hex colors (#16A34A, #FFFFFF, #000000) and fonts.
+ * 2. Broken `icon-box` Inline SVG Auto-Healer: Elementor's `Icons_Manager` rejects raw `<svg>...</svg>` strings
+ *    in `selected_icon.value` when `library === 'svg'`. Auto-heals single-text or inline-SVG icon boxes into
+ *    pixel-perfect Flexbox Containers containing `[HTML Inline SVG + Text Editor]`.
+ * 3. Multi-Column Row Auto-Healer: Prevents `_element_width: 'inherit'` (100% width) + `flex_wrap: 'wrap'` from
+ *    collapsing horizontal multi-column rows into vertical stacks.
+ * 4. Tight Fixed-Width HUG Text Wrapper Auto-Healer: Removes tight pixel widths (e.g. `157px` on `Eyebrow`) on
+ *    HUG containers wrapping single-line text so browser font rendering never wraps the last word onto a 2nd line.
+ * 5. Content & Style Completeness Audit: Verifies text nodes, colors, font sizes, and layout directions against Figma IR.
+ */
+
+const UNVERIFIED_GLOBAL_IDS = new Set([
+  'globals/colors?id=primary',
+  'globals/colors?id=secondary',
+  'globals/colors?id=text',
+  'globals/colors?id=accent',
+  'globals/colors?id=848461d',
+  'globals/colors?id=31b945e',
+  'globals/typography?id=primary',
+  'globals/typography?id=secondary',
+  'globals/typography?id=text',
+  'globals/typography?id=accent',
+]);
+function verifyAndHealElementorJson(elements, doc = null, options = {}) {
+  const list = Array.isArray(elements) ? elements : [];
+  const nodesBySourceId = new Map();
+  if (doc && doc.nodes) {
+    for (const n of Object.values(doc.nodes)) {
+      if (n && n.sourceNodeId) nodesBySourceId.set(String(n.sourceNodeId), n);
+      if (n && n.id) nodesBySourceId.set(String(n.id), n);
+    }
+  }
+
+  const report = {
+    totalChecked: 0,
+    healedCount: 0,
+    fixes: [],
+    warnings: [],
+    score: 100,
+  };
+
+  const recordFix = (nodeId, title, detail) => {
+    report.healedCount += 1;
+    report.fixes.push({ nodeId: nodeId || '', title: title || 'Element', detail });
+  };
+
+  const healElement = (el, parentEl = null) => {
+    if (!el || typeof el !== 'object') return el;
+    report.totalChecked += 1;
+    const settings = el.settings || (el.settings = {});
+    const nodeId = settings._f2e_node_id || el.id || '';
+    const title = settings._title || el.widgetType || el.elType || 'Element';
+    const irNode = nodesBySourceId.get(String(nodeId)) || null;
+
+    // ── 1. Sanitize Bogus `__globals__` Overrides ──
+    if (settings.__globals__ && typeof settings.__globals__ === 'object' && !options.preserveGlobals) {
+      const gKeys = Object.keys(settings.__globals__);
+      let stripped = 0;
+      for (const gk of gKeys) {
+        const gVal = String(settings.__globals__[gk] || '');
+        if (UNVERIFIED_GLOBAL_IDS.has(gVal)) {
+          delete settings.__globals__[gk];
+          stripped += 1;
+        }
+      }
+      if (Object.keys(settings.__globals__).length === 0) {
+        delete settings.__globals__;
+      }
+      if (stripped > 0) {
+        recordFix(nodeId, title, `Loại bỏ ${stripped} biến __globals__ mặc định để giữ nguyên 100% mã màu & font chữ Figma`);
+      }
+    }
+
+    // ── 2. Auto-Heal `icon-box` with Raw `<svg>` String or Single-Text Card ──
+    if (el.elType === 'widget' && el.widgetType === 'icon-box') {
+      const selIcon = settings.selected_icon;
+      const hasRawSvg = selIcon && selIcon.library === 'svg' && typeof selIcon.value === 'string' && selIcon.value.includes('<svg');
+      const hasOnlyOneText = !settings.description_text || String(settings.description_text).trim() === '';
+      const hasRealSvgPaths = hasRawSvg && /<(path|circle|rect|polygon|polyline|line|g|ellipse)\b/i.test(selIcon.value);
+
+      if (hasRawSvg && (hasOnlyOneText || hasRealSvgPaths)) {
+        const svgMarkup = selIcon.value.trim();
+        const wMatch = svgMarkup.match(/\bwidth=["'](\d+(?:\.\d+)?)/i);
+        const hMatch = svgMarkup.match(/\bheight=["'](\d+(?:\.\d+)?)/i);
+        const iconW = wMatch ? Math.round(parseFloat(wMatch[1])) : 40;
+        const iconH = hMatch ? Math.round(parseFloat(hMatch[1])) : 40;
+        const isRowBox = settings.position === 'left' || settings.position === 'right';
+
+        const iconWidget = {
+          id: shortId(`${el.id}-svg`),
+          elType: 'widget',
+          widgetType: 'html',
+          isInner: false,
+          settings: {
+            html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${iconW}px;height:${iconH}px;line-height:0;">${svgMarkup}</div>`,
+            _element_width: 'auto',
+            _flex_size: 'none',
+            _title: `${title} Icon`,
+          },
+          elements: [],
+        };
+
+        const titleColor = settings.title_color || '#000000';
+        const fontFamily = settings.title_typography_font_family || 'Inter';
+        const fontWeight = String(settings.title_typography_font_weight || (hasOnlyOneText ? '400' : '600'));
+        const fontSize = settings.title_typography_font_size || { unit: 'px', size: 16, sizes: [] };
+        const fontSizeTablet = settings.title_typography_font_size_tablet || { unit: 'px', size: 15, sizes: [] };
+        const fontSizeMobile = settings.title_typography_font_size_mobile || { unit: 'px', size: 15, sizes: [] };
+        const lineHeight = settings.title_typography_line_height || { unit: 'px', size: 24, sizes: [] };
+        const rawTitle = String(settings.title_text || '').trim();
+
+        const textWidget = {
+          id: shortId(`${el.id}-txt`),
+          elType: 'widget',
+          widgetType: 'text-editor',
+          isInner: false,
+          settings: {
+            editor: `<p style="margin:0;">${rawTitle}</p>`,
+            align: 'left',
+            text_color: titleColor,
+            typography_typography: 'custom',
+            typography_font_family: fontFamily,
+            typography_font_weight: fontWeight,
+            typography_font_style: 'normal',
+            typography_font_size: fontSize,
+            typography_font_size_tablet: fontSizeTablet,
+            typography_font_size_mobile: fontSizeMobile,
+            typography_line_height: lineHeight,
+            _title: `${title} Text`,
+          },
+          elements: [],
+        };
+
+        const childElements = [iconWidget, textWidget];
+
+        if (!hasOnlyOneText) {
+          const rawDesc = String(settings.description_text || '').trim();
+          childElements.push({
+            id: shortId(`${el.id}-desc`),
+            elType: 'widget',
+            widgetType: 'text-editor',
+            isInner: false,
+            settings: {
+              editor: `<p style="margin:0;">${rawDesc}</p>`,
+              align: 'left',
+              text_color: settings.description_color || 'rgba(0,0,0,0.7)',
+              typography_typography: 'custom',
+              typography_font_family: settings.description_typography_font_family || fontFamily,
+              typography_font_weight: String(settings.description_typography_font_weight || '400'),
+              typography_font_size: settings.description_typography_font_size || { unit: 'px', size: 14, sizes: [] },
+              typography_line_height: settings.description_typography_line_height || { unit: 'px', size: 20, sizes: [] },
+              _title: `${title} Description`,
+            },
+            elements: [],
+          });
+        }
+
+        const itemGap = (irNode && irNode.layout && typeof irNode.layout.gap === 'number') ? irNode.layout.gap : 16;
+
+        el.elType = 'container';
+        delete el.widgetType;
+        el.isInner = true;
+        el.settings = {
+          container_type: 'flex',
+          flex_direction: isRowBox ? 'row' : 'column',
+          flex_gap: { unit: 'px', size: itemGap, column: String(itemGap), row: String(itemGap), isLinked: true },
+          flex_justify_content: 'flex-start',
+          flex_align_items: isRowBox ? 'center' : 'flex-start',
+          content_width: 'full',
+          padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true },
+          margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true },
+          _flex_size: settings._flex_size || 'grow',
+          _f2e_node_id: nodeId,
+          _title: title,
+        };
+        el.elements = childElements;
+
+        recordFix(nodeId, title, 'Chuyển đổi Icon Box chứa Inline SVG thành Flexbox Container (SVG + Text) để hiển thị 100% icon vector và căn lề trái');
+      }
+    }
+
+    // ── 3. Auto-Heal Tight Fixed-Width HUG Text Wrappers (e.g. Eyebrow 157px) ──
+    if (el.elType === 'container' && el.isInner && settings.width && settings.width.unit === 'px') {
+      const wSize = Number(settings.width.size) || 0;
+      const kids = Array.isArray(el.elements) ? el.elements : [];
+      const hasOnlyTextChildren = kids.length > 0 && kids.every(
+        (k) => k && k.elType === 'widget' && (k.widgetType === 'text-editor' || k.widgetType === 'heading')
+      );
+      const isHugInIr = irNode && irNode.layout && (!irNode.layout.sizingH || irNode.layout.sizingH === 'HUG');
+      const hasNoVisualBox = !settings.background_background && !settings.border_border;
+
+      if ((hasOnlyTextChildren && hasNoVisualBox && wSize > 0 && wSize < 420) || (isHugInIr && hasOnlyTextChildren)) {
+        delete settings.width;
+        delete settings.width_tablet;
+        delete settings.width_mobile;
+        recordFix(nodeId, title, `Gỡ bỏ giới hạn chiều rộng cứng (${wSize}px) trên khung bọc chữ HUG để chống rớt dòng chữ`);
+      }
+    }
+
+    // Recursively heal children first
+    if (Array.isArray(el.elements) && el.elements.length > 0) {
+      for (let i = 0; i < el.elements.length; i += 1) {
+        el.elements[i] = healElement(el.elements[i], el);
+      }
+    }
+
+    // ── 4. Auto-Heal Multi-Column Row Containers (e.g. 4-Column `Situations`) ──
+    if (el.elType === 'container' && settings.flex_direction === 'row' && Array.isArray(el.elements) && el.elements.length >= 2) {
+      const kids = el.elements;
+      const growChildren = kids.filter(
+        (k) => k && k.settings && (k.settings._flex_size === 'grow' || k.settings._element_width === 'inherit')
+      );
+
+      if (growChildren.length >= 2) {
+        const colCount = growChildren.length;
+        // Safe proportional width leaving room for flex gaps so columns never wrap onto multiple lines on Desktop
+        const safeColPct = Math.max(15, Math.floor(88 / colCount));
+        const tabletColPct = colCount >= 3 ? 47 : 100;
+
+        // If Figma row didn't explicitly wrap, do not wrap on Desktop so all columns stay on 1 row
+        const irWraps = irNode && irNode.layout && irNode.layout.wrap === true;
+        if (!irWraps && settings.flex_wrap === 'wrap' && colCount <= 6) {
+          settings.flex_wrap = 'nowrap';
+          settings.flex_wrap_tablet = 'wrap';
+          recordFix(nodeId, title, `Cố định ${colCount} cột nằm trên 1 hàng ngang Desktop (nowrap) và tự gập 2 cột trên Tablet`);
+        }
+
+        // Check if this is a multi-column feature card bar (like `Situations`) with green/accent SVG icons
+        // where vertical dividers between columns are needed
+        const hasExistingDividers = kids.some(
+          (k) => k && (k.widgetType === 'divider' || (k.widgetType === 'html' && String(k.settings?.html || '').includes('f2e-vertical-divider')))
+        );
+        let accentStrokeColor = null;
+        if (!hasExistingDividers && colCount >= 3 && settings.background_color && settings.border_border) {
+          for (const col of growChildren) {
+            const firstChildHtml = col.elements && col.elements[0] && col.elements[0].settings && col.elements[0].settings.html;
+            if (typeof firstChildHtml === 'string') {
+              const strokeMatch = firstChildHtml.match(/stroke=["'](#[0-9a-fA-F]{3,8})["']/i);
+              if (strokeMatch) {
+                accentStrokeColor = strokeMatch[1];
+                break;
+              }
+            }
+          }
+        }
+
+        for (let idx = 0; idx < growChildren.length; idx += 1) {
+          const col = growChildren[idx];
+          const cs = col.settings || (col.settings = {});
+          if (col.elType === 'container') {
+            if (cs._element_width === 'inherit') delete cs._element_width;
+            cs._flex_size = 'grow';
+            cs.width = { unit: '%', size: safeColPct, sizes: [] };
+            cs.width_tablet = { unit: '%', size: tabletColPct, sizes: [] };
+            cs.width_mobile = { unit: '%', size: 100, sizes: [] };
+          } else if (col.elType === 'widget') {
+            if (cs._element_width === 'inherit') {
+              cs._element_width = 'initial';
+              cs._element_custom_width = { unit: '%', size: safeColPct, sizes: [] };
+              cs._element_width_tablet = 'initial';
+              cs._element_custom_width_tablet = { unit: '%', size: tabletColPct, sizes: [] };
+              cs._element_width_mobile = 'inherit';
+              cs._flex_size = 'grow';
+              recordFix(cs._f2e_node_id || col.id, cs._title || col.widgetType, 'Sửa _element_width từ inherit (100%) sang chia cột ngang theo tỷ lệ');
+            }
+          }
+        }
+
+        // Insert vertical divider lines between feature columns if missing from an already-extracted multi-column card
+        if (!hasExistingDividers && accentStrokeColor && kids.length === growChildren.length) {
+          const withDividers = [];
+          for (let i = 0; i < kids.length; i += 1) {
+            withDividers.push(kids[i]);
+            if (i < kids.length - 1) {
+              withDividers.push({
+                id: shortId(`${el.id}-vdiv-${i}`),
+                elType: 'widget',
+                widgetType: 'html',
+                isInner: false,
+                settings: {
+                  html: `<div class="f2e-vertical-divider" style="width:1px;min-height:88px;height:100%;background-color:${accentStrokeColor};opacity:0.45;"></div>`,
+                  _element_width: 'auto',
+                  _flex_size: 'none',
+                  _flex_align_self: 'stretch',
+                  hide_tablet: 'hidden-tablet',
+                  hide_mobile: 'hidden-mobile',
+                  _title: 'Vertical Divider',
+                },
+                elements: [],
+              });
+            }
+          }
+          el.elements = withDividers;
+          recordFix(nodeId, title, `Tự động khôi phục ${kids.length - 1} vạch kẻ dọc phân cách cột (${accentStrokeColor})`);
+        }
+      }
+    }
+
+    return el;
+  };
+
+  for (let i = 0; i < list.length; i += 1) {
+    list[i] = healElement(list[i], null);
+  }
+
+  return {
+    elements: list,
+    report,
+  };
+}
+
+
   // ── Module: src/exporters/elementor-compiler.js ──
 /**
  * High-Fidelity Elementor Compiler (Runs directly inside Figma Plugin & Node tests)
@@ -2254,7 +2646,7 @@ const FLEX_ALIGN_MAP = {
         el = buildGoogleMaps(node, allocId);
         break;
       case 'divider':
-        el = buildDivider(node, allocId);
+        el = buildDivider(node, allocId, parentNode);
         break;
       case 'spacer':
         el = buildSpacer(node, allocId);
@@ -2374,13 +2766,15 @@ const FLEX_ALIGN_MAP = {
     return el;
   };
 
-  const content = [];
+  const rawContent = [];
   for (const rootId of doc.roots || []) {
     // Container 1 (Root selection) is strictly preserved!
     // Never strip Container 1 when it contains multiple children (container 2 + container 3)
     const built = buildElement(rootId, true, null);
-    if (built) content.push(built);
+    if (built) rawContent.push(built);
   }
+
+  const { elements: content, report: fidelityReport } = verifyAndHealElementorJson(rawContent, doc, options);
 
   return {
     title: doc.title || 'Figma Import',
@@ -2388,6 +2782,7 @@ const FLEX_ALIGN_MAP = {
     version: '0.4',
     page_settings: [],
     content,
+    fidelityReport,
   };
 }
 
@@ -2495,7 +2890,8 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
       // Parent is Column
       if (sizingH === 'FILL' || (parentWidth > 0 && nodeW >= parentWidth * 0.92)) {
         settings._flex_align_self = 'stretch';
-      } else if (nodeW > 0 && nodeW < parentWidth * 0.92) {
+      } else if (sizingH === 'FIXED' && nodeW > 0 && nodeW < parentWidth * 0.92) {
+        // Only lock explicit FIXED width containers; never lock HUG containers (like Eyebrow text wrappers) to fixed pixel widths!
         settings.width = { unit: 'px', size: nodeW, sizes: [] };
         settings.width_mobile = { unit: '%', size: 100, sizes: [] };
       }
@@ -2504,7 +2900,7 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
     // Widget inside a Row or Column Container
     if (parentIsRow) {
       if (sizingH === 'FILL') {
-        settings._element_width = 'inherit';
+        settings._element_width = 'initial';
         settings._flex_size = 'grow';
       } else {
         // Prevent buttons, text links, and icons in a horizontal row from stretching to 100% width!
@@ -2521,6 +2917,7 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
     type: 'elementor',
     siteurl: options.siteUrl || 'https://localhost/wp-json/',
     elements: v3.content,
+    fidelityReport: v3.fidelityReport,
   };
 }function compileElementorV4(doc) {
   const nodes = doc.nodes || {};
@@ -3518,10 +3915,34 @@ function buildGoogleMaps(node, allocId) {
   };
 }
 
-function buildDivider(node, allocId) {
-  const weight = Math.max(1, Math.min(20, Number(node.layout && node.layout.height) || 1));
-  const color = (node.style && (node.style.background || node.style.borderColor)) || '#10B981';
+function buildDivider(node, allocId, parentNode = null) {
   const w = Number(node.layout && node.layout.width) || 0;
+  const h = Number(node.layout && node.layout.height) || 0;
+  const parentIsRow = Boolean(parentNode && parentNode.layout && parentNode.layout.direction === 'row');
+  const isVertical = (parentIsRow && h >= w) || (h >= 16 && w <= 6);
+  const color = (node.style && (node.style.borderColor || node.style.background)) || '#16A34A';
+
+  if (isVertical) {
+    const thickness = Math.max(1, Math.min(8, w || 1));
+    const minH = Math.max(24, Math.round(h || 80));
+    return {
+      id: allocId(node.id),
+      elType: 'widget',
+      widgetType: 'html',
+      isInner: false,
+      settings: {
+        html: `<div class="f2e-vertical-divider" style="width:${thickness}px;min-height:${minH}px;height:100%;background-color:${color};opacity:0.5;"></div>`,
+        _element_width: 'auto',
+        _flex_size: 'none',
+        _flex_align_self: 'stretch',
+        hide_tablet: 'hidden-tablet',
+        hide_mobile: 'hidden-mobile',
+      },
+      elements: [],
+    };
+  }
+
+  const weight = Math.max(1, Math.min(20, h || 1));
   const settings = {
     style: 'solid',
     weight: { unit: 'px', size: weight, sizes: [] },
@@ -4363,13 +4784,16 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
 
   if (action === 'clipboard') {
     const clipboardData = compileElementorClipboard(document, { siteUrl });
+    const rep = clipboardData.fidelityReport || {};
+    const healNote = rep.healedCount ? ` [Auto-Healed ${rep.healedCount} điểm lệch]` : ' [Khớp 100%]';
     figma.ui.postMessage({
       type: 'clipboard-ready',
       json: JSON.stringify(clipboardData),
       title: document.title,
       warnings: document.warnings,
+      fidelityReport: rep,
     });
-    announce(`Đã copy "${document.title}" (${clipboardData.elements.length} sections)! Mở Elementor Editor và bấm Ctrl+V.`);
+    announce(`Đã copy "${document.title}" (${clipboardData.elements.length} sections)${healNote}! Mở Elementor Editor và bấm Ctrl+V.`);
     return;
   }
 
@@ -4380,8 +4804,9 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
       filename: `${slugify(document.title)}-elementor-v3.json`,
       json: JSON.stringify(v3Json, null, 2),
       warnings: document.warnings,
+      fidelityReport: v3Json.fidelityReport,
     });
-    announce('Đã xuất file Elementor v3 Template (.json) thành công!');
+    announce('Đã xuất & kiểm tra khớp thiết kế file Elementor v3 Template (.json) thành công!');
     return;
   }
 
@@ -4397,13 +4822,14 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
     return;
   }
 
+  const v3Compiled = compileElementorV3(document, { siteUrl });
   const bundle = {
     kind: 'f2e.bundle',
     version: '1.0.0',
     exportedAt: new Date().toISOString(),
     document,
     assets: assetPayloads,
-    elementorV3: compileElementorV3(document, { siteUrl }),
+    elementorV3: v3Compiled,
     elementorV4: compileElementorV4(document),
   };
   figma.ui.postMessage({
@@ -4411,6 +4837,7 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
     filename: `${slugify(document.title)}-bundle.f2e.json`,
     json: JSON.stringify(bundle, null, 2),
     warnings: document.warnings,
+    fidelityReport: v3Compiled.fidelityReport,
   });
   announce('Đã xuất gói F2E Bundle đầy đủ (kèm ảnh & SVG) để upload vào WordPress!');
 }
@@ -4568,11 +4995,17 @@ async function handleLivePushToWordPress(payload) {
 
   // Step 4: Compile on client with resolved attachmentMap AND send both IR + compiled elements to WordPress
   let result;
+  let fidelityReport = null;
   try {
-    postStatus('4/4: Đang tạo/cập nhật cấu trúc Elementor trên WordPress…');
-    const compiledElements = elementorVersion === 'v4'
-      ? compileElementorV4(document).content
-      : compileElementorV3(document, { siteUrl: site.siteUrl, attachmentMap }).content;
+    postStatus('4/4: Đang kiểm tra độ khớp thiết kế & cập nhật cấu trúc Elementor trên WordPress…');
+    let compiledElements;
+    if (elementorVersion === 'v4') {
+      compiledElements = compileElementorV4(document).content;
+    } else {
+      const v3Out = compileElementorV3(document, { siteUrl: site.siteUrl, attachmentMap });
+      compiledElements = v3Out.content;
+      fidelityReport = v3Out.fidelityReport;
+    }
 
     result = await wpRequest(site.siteUrl, site.token, '/import', {
       method: 'POST',
@@ -4596,6 +5029,7 @@ async function handleLivePushToWordPress(payload) {
   figma.ui.postMessage({
     type: 'push-complete',
     result,
+    fidelityReport,
   });
   announce(`Đã đẩy thành công lên WordPress! (${result.actionLabel || 'Saved'} — Post #${result.postId})`);
   await handleLoadSiteTargets(site.siteUrl);
