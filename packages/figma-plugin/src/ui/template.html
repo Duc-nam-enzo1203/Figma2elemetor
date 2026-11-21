@@ -1036,6 +1036,186 @@
       font-size: 10px;
       color: var(--text-secondary);
     }
+
+    /* Live Figma Dev Mode CSS Inspector */
+    .outline-item.is-inspected {
+      background: rgba(37, 99, 235, 0.14);
+      border-left: 2px solid #3b82f6;
+    }
+
+    .layer-info {
+      cursor: pointer;
+    }
+
+    .layer-info:hover .layer-name {
+      color: #60a5fa;
+    }
+
+    .btn-inspect-css {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 3px 6px;
+      font-size: 9.5px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+      font-weight: 600;
+      color: #93c5fd;
+      background: rgba(37, 99, 235, 0.12);
+      border: 1px solid rgba(37, 99, 235, 0.3);
+      border-radius: 4px;
+      cursor: pointer;
+      flex-shrink: 0;
+      transition: all 0.12s ease;
+    }
+
+    .btn-inspect-css:hover,
+    .outline-item.is-inspected .btn-inspect-css {
+      background: #2563eb;
+      color: #ffffff;
+      border-color: #3b82f6;
+    }
+
+    .devcss-card {
+      background: #141418;
+      border: 1px solid rgba(59, 130, 246, 0.35);
+      border-radius: var(--radius);
+      margin-top: 10px;
+      overflow: hidden;
+    }
+
+    .devcss-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 8px 10px;
+      background: rgba(37, 99, 235, 0.1);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      gap: 6px;
+    }
+
+    .devcss-title {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      font-size: 11px;
+      font-weight: 600;
+      color: #e2e8f0;
+    }
+
+    .devcss-meta-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 6px 10px;
+      background: #18181c;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      font-size: 10.5px;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .devcss-tabs {
+      display: flex;
+      align-items: center;
+      background: #121215;
+      border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+      padding: 0 6px;
+      gap: 2px;
+    }
+
+    .devcss-tab {
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      font-size: 10.5px;
+      font-weight: 500;
+      padding: 6px 8px;
+      cursor: pointer;
+      font-family: inherit;
+      transition: all 0.12s ease;
+    }
+
+    .devcss-tab:hover {
+      color: var(--text-secondary);
+    }
+
+    .devcss-tab.active {
+      color: #60a5fa;
+      border-bottom-color: #3b82f6;
+      font-weight: 600;
+    }
+
+    .devcss-code-box {
+      padding: 9px 11px;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      font-size: 10.5px;
+      line-height: 1.55;
+      color: #e2e8f0;
+      background: #0d0d10;
+      max-height: 210px;
+      overflow-y: auto;
+      white-space: pre-wrap;
+      word-break: break-word;
+    }
+
+    .devcss-line {
+      display: block;
+      padding: 1px 0;
+    }
+
+    .devcss-prop {
+      color: #7dd3fc;
+    }
+
+    .devcss-val {
+      color: #fcd34d;
+    }
+
+    .devcss-var {
+      color: #c084fc;
+    }
+
+    .devcss-comment {
+      color: #64748b;
+      font-style: italic;
+    }
+
+    .devcss-inline-swatch {
+      display: inline-block;
+      width: 9px;
+      height: 9px;
+      border-radius: 2px;
+      border: 1px solid rgba(255, 255, 255, 0.3);
+      vertical-align: middle;
+      margin: 0 3px;
+    }
+
+    .devcss-pills-wrap {
+      padding: 8px 10px;
+      background: #16161a;
+      border-top: 1px solid rgba(255, 255, 255, 0.06);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+    }
+
+    .devcss-map-pill {
+      display: inline-flex;
+      align-items: center;
+      gap: 4px;
+      padding: 2px 6px;
+      background: rgba(255, 255, 255, 0.05);
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 4px;
+      font-size: 10px;
+      color: var(--text-secondary);
+    }
+
+    .devcss-map-pill strong {
+      color: #93c5fd;
+      font-weight: 600;
+    }
   </style>
 </head>
 
@@ -1091,8 +1271,12 @@
   </nav>
 
   <div class="selection-bar">
-    <span>Đang chọn: <strong id="sel-summary">Chưa chọn Frame nào</strong></span>
-    <div style="display:flex;gap:4px;">
+    <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Đang chọn: <strong id="sel-summary">Chưa chọn Frame nào</strong></span>
+    <div style="display:flex;gap:4px;flex-shrink:0;">
+      <button class="btn btn-secondary btn-sm" id="btn-jump-devcss" title="Xem trực tiếp Figma Dev Mode CSS (node.getCSSAsync)" style="color:#93c5fd;border-color:rgba(59,130,246,0.35);background:rgba(37,99,235,0.12);">
+        <span style="font-family:monospace;font-weight:700;">{ }</span>
+        <span id="devcss-top-badge">Dev CSS</span>
+      </button>
       <button class="btn btn-secondary btn-sm" id="btn-reset-tags">Đặt lại thẻ</button>
       <button class="btn btn-secondary btn-sm" id="btn-refresh">Làm mới</button>
     </div>
@@ -1271,6 +1455,51 @@
           <div id="outline-container" class="outline-list">
             <div style="padding: 16px; text-align: center; color: var(--muted);">
               Chọn một Frame trên Figma để xem cây Layer và gắn thẻ Widget.
+            </div>
+          </div>
+
+          <!-- LIVE FIGMA DEV MODE CSS INSPECTOR (node.getCSSAsync) -->
+          <div class="devcss-card" id="devmode-inspector-card">
+            <div class="devcss-header">
+              <div class="devcss-title">
+                <span class="btn-icon" data-ui-icon="code" style="color:#60a5fa;"></span>
+                <span>Figma Dev Mode CSS</span>
+                <span class="badge" id="devcss-count-badge" style="background:rgba(16,185,129,0.16);color:#34d399;border-color:rgba(16,185,129,0.35);font-size:9.5px;">getCSSAsync()</span>
+              </div>
+              <div style="display:flex;gap:4px;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-devcss-subtree" title="Trích xuất CSS của cả cụm layer con (Subtree)" style="padding:3px 7px;font-size:10px;">
+                  <span>Cả cụm</span>
+                </button>
+                <button type="button" class="btn btn-primary btn-sm" id="btn-copy-devcss" title="Copy đoạn mã CSS đang hiển thị" style="padding:3px 8px;font-size:10px;">
+                  <span>Copy CSS</span>
+                </button>
+              </div>
+            </div>
+
+            <div class="devcss-meta-bar">
+              <div style="display:flex;align-items:center;gap:5px;min-width:0;">
+                <span class="tag-pill" id="devcss-node-type">FRAME</span>
+                <strong id="devcss-node-name" style="color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;">Chưa chọn layer</strong>
+                <span id="devcss-node-size" style="color:var(--muted);font-family:monospace;font-size:9.5px;"></span>
+              </div>
+              <div style="display:flex;align-items:center;gap:4px;">
+                <span style="color:var(--muted);font-size:10px;">Widget:</span>
+                <span class="badge badge-accent" id="devcss-node-widget" style="font-size:9.5px;">container</span>
+              </div>
+            </div>
+
+            <div class="devcss-tabs">
+              <button type="button" class="devcss-tab active" data-devtab="raw">Dev Mode Gốc (var)</button>
+              <button type="button" class="devcss-tab" data-devtab="resolved">Đã giải biến (Resolved)</button>
+              <button type="button" class="devcss-tab" data-devtab="subtree">Toàn bộ nhánh con</button>
+            </div>
+
+            <div class="devcss-code-box" id="devcss-code-view">
+              <span class="devcss-comment">/* Bấm vào bất kỳ layer nào ở cây bên trên hoặc chọn trên Figma để xem mã CSS thật từ Figma Dev Mode (await node.getCSSAsync()) */</span>
+            </div>
+
+            <div class="devcss-pills-wrap" id="devcss-mapping-pills">
+              <span style="font-size:10px;color:var(--muted);">Thông số ánh xạ sang Elementor sẽ hiển thị tại đây.</span>
             </div>
           </div>
         </div>
@@ -2016,6 +2245,141 @@
       renderPickerGrid(e.target.value);
     });
 
+    let activeInspectedNodeId = null;
+    let currentDevCssData = null;
+    let activeDevCssTab = 'raw';
+
+    function inspectLayerCss(nodeId, includeSubtree = false, focusCanvas = false) {
+      activeInspectedNodeId = nodeId || activeInspectedNodeId;
+      document.querySelectorAll('.outline-item').forEach((el) => {
+        el.classList.toggle('is-inspected', el.dataset.nodeId === activeInspectedNodeId);
+      });
+      postToPlugin('inspect-node-css', {
+        nodeId: activeInspectedNodeId,
+        includeSubtree: Boolean(includeSubtree || activeDevCssTab === 'subtree'),
+        focusCanvas: Boolean(focusCanvas),
+      });
+    }
+
+    function escapeHtml(str) {
+      return String(str || '')
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;');
+    }
+
+    function formatCssValueWithHighlight(valStr) {
+      let html = escapeHtml(valStr);
+      // Highlight CSS comments
+      html = html.replace(/(\/\*[\s\S]*?\*\/)/g, '<span class="devcss-comment">$1</span>');
+      // Highlight var(--token)
+      html = html.replace(/(var\(\s*--[a-zA-Z0-9_-]+)/g, '<span class="devcss-var">$1</span>');
+      // Add inline color swatches next to hex or rgba() colors
+      html = html.replace(/(#[0-9a-fA-F]{3,8}\b|rgba?\([^)]+\))/g, (match) => {
+        return `<span class="devcss-inline-swatch" style="background:${match};"></span><span class="devcss-val">${match}</span>`;
+      });
+      return html;
+    }
+
+    function renderDevModeInspector(data) {
+      currentDevCssData = data || null;
+      const topBadge = document.getElementById('devcss-top-badge');
+      const countBadge = document.getElementById('devcss-count-badge');
+      const typeEl = document.getElementById('devcss-node-type');
+      const nameEl = document.getElementById('devcss-node-name');
+      const sizeEl = document.getElementById('devcss-node-size');
+      const widgetEl = document.getElementById('devcss-node-widget');
+      const codeView = document.getElementById('devcss-code-view');
+      const pillsWrap = document.getElementById('devcss-mapping-pills');
+
+      if (!data) {
+        if (topBadge) topBadge.textContent = 'Dev CSS';
+        if (countBadge) countBadge.textContent = '0 rules';
+        if (nameEl) nameEl.textContent = 'Chưa chọn layer';
+        if (sizeEl) sizeEl.textContent = '';
+        if (codeView) {
+          codeView.innerHTML = '<span class="devcss-comment">/* Chọn một Frame hoặc Layer trên Figma để trích xuất trực tiếp mã CSS từ Figma Dev Mode (await node.getCSSAsync()) */</span>';
+        }
+        if (pillsWrap) {
+          pillsWrap.innerHTML = '<span style="font-size:10px;color:var(--muted);">Thông số ánh xạ sang Elementor sẽ hiển thị tại đây.</span>';
+        }
+        return;
+      }
+
+      activeInspectedNodeId = data.nodeId;
+      document.querySelectorAll('.outline-item').forEach((el) => {
+        el.classList.toggle('is-inspected', el.dataset.nodeId === activeInspectedNodeId);
+      });
+
+      const ruleCount = data.propertyCount || 0;
+      if (topBadge) topBadge.textContent = `Dev CSS (${ruleCount})`;
+      if (countBadge) {
+        countBadge.textContent = data.hasNativeApi
+          ? `${ruleCount} CSS rules • getCSSAsync()`
+          : `${ruleCount} rules`;
+      }
+      if (typeEl) typeEl.textContent = (data.type || 'FRAME').slice(0, 7);
+      if (nameEl) {
+        nameEl.textContent = data.name || 'Unnamed';
+        nameEl.title = `${data.name} (ID: ${data.nodeId})`;
+      }
+      if (sizeEl) sizeEl.textContent = `${data.width || 0}×${data.height || 0}`;
+      if (widgetEl) {
+        const wInfo = getWidgetInfo(data.widget);
+        widgetEl.textContent = wInfo ? wInfo.label : (data.widget || 'container');
+      }
+
+      if (codeView) {
+        if (activeDevCssTab === 'subtree') {
+          const rawBlock = data.subtreeCssBlock || data.cssBlock || '';
+          codeView.innerHTML = rawBlock
+            .split('\n')
+            .map((line) => {
+              const trimmed = line.trim();
+              if (trimmed.startsWith('/*')) {
+                return `<div class="devcss-comment">${escapeHtml(line)}</div>`;
+              }
+              const colonIdx = line.indexOf(':');
+              if (colonIdx > -1 && !trimmed.endsWith('{')) {
+                const prop = escapeHtml(line.slice(0, colonIdx));
+                const val = line.slice(colonIdx + 1);
+                return `<div class="devcss-line"><span class="devcss-prop">${prop}</span>:<span>${formatCssValueWithHighlight(val)}</span></div>`;
+              }
+              return `<div>${escapeHtml(line)}</div>`;
+            })
+            .join('');
+        } else {
+          const cssMap = activeDevCssTab === 'resolved' ? (data.resolvedCss || {}) : (data.rawCss || {});
+          const entries = Object.entries(cssMap);
+          const headerLine = `<div class="devcss-comment">/* Layer: "${escapeHtml(data.name)}" (${escapeHtml(data.nodeId)}) — ${activeDevCssTab === 'resolved' ? 'Resolved CSS' : 'Raw Figma Dev Mode getCSSAsync()'} */</div>`;
+          if (entries.length === 0) {
+            codeView.innerHTML = `${headerLine}<div class="devcss-comment">/* Layer này không có thuộc tính CSS trực tiếp từ node.getCSSAsync() (ví dụ Group rỗng). Bấm "Cả cụm" để xem toàn bộ CSS của các layer con bên trong! */</div>`;
+          } else {
+            const propLines = entries.map(([k, v]) => {
+              return `<div class="devcss-line"><span class="devcss-prop">  ${escapeHtml(k)}</span>: <span>${formatCssValueWithHighlight(String(v))};</span></div>`;
+            });
+            codeView.innerHTML = `${headerLine}<div>.f2e-layer {</div>${propLines.join('')}<div>}</div>`;
+          }
+        }
+      }
+
+      if (pillsWrap) {
+        const pills = Array.isArray(data.mappingPills) ? data.mappingPills : [];
+        const vars = Array.isArray(data.cssVariables) ? data.cssVariables : [];
+        const pillHtml = pills.map((p) => {
+          const swatch = p.color ? `<span class="devcss-inline-swatch" style="background:${escapeHtml(p.color)};"></span>` : '';
+          return `<span class="devcss-map-pill"><strong>${escapeHtml(p.label)}:</strong> ${swatch}${escapeHtml(p.value)}</span>`;
+        });
+        for (const vName of vars.slice(0, 6)) {
+          pillHtml.push(`<span class="devcss-map-pill" style="border-color:rgba(192,132,252,0.3);"><strong style="color:#c084fc;">Token:</strong> ${escapeHtml(vName)}</span>`);
+        }
+        pillsWrap.innerHTML = pillHtml.length > 0
+          ? pillHtml.join('')
+          : '<span style="font-size:10px;color:var(--muted);">Chưa có thuộc tính layout/style ánh xạ.</span>';
+      }
+    }
+
     function renderOutline(items) {
       const container = document.getElementById('outline-container');
       if (!items || items.length === 0) {
@@ -2023,13 +2387,19 @@
         return;
       }
       container.innerHTML = '';
+      if (!activeInspectedNodeId && items[0]) {
+        activeInspectedNodeId = items[0].nodeId;
+      }
       for (const item of items) {
         const row = document.createElement('div');
-        row.className = 'outline-item';
+        row.className = 'outline-item' + (item.nodeId === activeInspectedNodeId ? ' is-inspected' : '');
+        row.dataset.nodeId = item.nodeId;
 
         const info = document.createElement('div');
         info.className = 'layer-info';
         info.style.paddingLeft = `${Math.min(item.depth * 10, 64)}px`;
+        info.title = `Bấm để xem Figma Dev Mode CSS của "${item.name}"`;
+        info.addEventListener('click', () => inspectLayerCss(item.nodeId, activeDevCssTab === 'subtree', false));
 
         const pill = document.createElement('span');
         pill.className = `tag-pill ${item.source}`;
@@ -2038,10 +2408,19 @@
         const nameSpan = document.createElement('span');
         nameSpan.className = 'layer-name';
         nameSpan.textContent = item.name;
-        nameSpan.title = `${item.name} (${item.type})`;
 
         info.appendChild(pill);
         info.appendChild(nameSpan);
+
+        const cssBtn = document.createElement('button');
+        cssBtn.type = 'button';
+        cssBtn.className = 'btn-inspect-css';
+        cssBtn.textContent = '{ }';
+        cssBtn.title = `Xem mã Figma Dev Mode CSS (getCSSAsync) của "${item.name}"`;
+        cssBtn.addEventListener('click', (e) => {
+          e.stopPropagation();
+          inspectLayerCss(item.nodeId, activeDevCssTab === 'subtree', true);
+        });
 
         const wInfo = getWidgetInfo(item.widget);
         const isUnwrap = item.widget === 'unwrap';
@@ -2057,6 +2436,7 @@
         triggerBtn.addEventListener('click', () => openWidgetPicker(item));
 
         row.appendChild(info);
+        row.appendChild(cssBtn);
         row.appendChild(triggerBtn);
         container.appendChild(row);
       }
@@ -2681,6 +3061,8 @@ HÃY TRẢ VỀ DUY NHẤT MỘT MẢNG JSON HỢP LỆ (KHÔNG KÈM TEXT GIẢI
         currentPages = msg.pages || [];
         currentTemplates = msg.templates || [];
         refreshTargetPostDropdown();
+      } else if (msg.type === 'dev-mode-css') {
+        renderDevModeInspector(msg.data);
       } else if (msg.type === 'design-system-preview') {
         renderDesignSystemPreview(msg.tokens);
       } else if (msg.type === 'clipboard-ready') {
@@ -2698,6 +3080,53 @@ HÃY TRẢ VỀ DUY NHẤT MỘT MẢNG JSON HỢP LỆ (KHÔNG KÈM TEXT GIẢI
           (msg.result.viewUrl ? `<a href="${msg.result.viewUrl}" target="_blank" style="color: #34d399; text-decoration:none;">Xem trang thực tế ↗</a>` : '');
       }
     };
+
+    // Dev Mode CSS Inspector Event Listeners
+    document.querySelectorAll('.devcss-tab').forEach((tabBtn) => {
+      tabBtn.addEventListener('click', () => {
+        activeDevCssTab = tabBtn.dataset.devtab || 'raw';
+        document.querySelectorAll('.devcss-tab').forEach((b) => {
+          b.classList.toggle('active', b.dataset.devtab === activeDevCssTab);
+        });
+        if (activeDevCssTab === 'subtree' && (!currentDevCssData || !currentDevCssData.subtreeCssBlock)) {
+          inspectLayerCss(activeInspectedNodeId, true, false);
+        } else {
+          renderDevModeInspector(currentDevCssData);
+        }
+      });
+    });
+
+    document.getElementById('btn-devcss-subtree')?.addEventListener('click', () => {
+      activeDevCssTab = 'subtree';
+      document.querySelectorAll('.devcss-tab').forEach((b) => {
+        b.classList.toggle('active', b.dataset.devtab === 'subtree');
+      });
+      inspectLayerCss(activeInspectedNodeId, true, false);
+    });
+
+    document.getElementById('btn-copy-devcss')?.addEventListener('click', () => {
+      if (!currentDevCssData) {
+        setStatus('Hãy chọn một Layer trên Figma trước khi Copy CSS.', true, false);
+        return;
+      }
+      let cssToCopy = currentDevCssData.cssBlock || '';
+      if (activeDevCssTab === 'resolved') {
+        cssToCopy = currentDevCssData.resolvedCssBlock || cssToCopy;
+      } else if (activeDevCssTab === 'subtree') {
+        cssToCopy = currentDevCssData.subtreeCssBlock || cssToCopy;
+      }
+      copyTextToClipboard(cssToCopy);
+      setStatus(`Đã copy mã Figma Dev Mode CSS của "${currentDevCssData.name}" vào Clipboard!`, false, true);
+    });
+
+    document.getElementById('btn-jump-devcss')?.addEventListener('click', () => {
+      switchStep('step-2');
+      setTimeout(() => {
+        const card = document.getElementById('devmode-inspector-card');
+        if (card) card.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+        inspectLayerCss(activeInspectedNodeId, activeDevCssTab === 'subtree', false);
+      }, 120);
+    });
 
     // Initialize icons on DOM ready as well
     document.addEventListener('DOMContentLoaded', initStaticIcons);

@@ -340,6 +340,8 @@ export function extractTypography(node) {
 
   if (fontName && safeStr(fontName.style).toLowerCase().includes('italic')) {
     text.fontStyle = 'italic';
+  } else {
+    text.fontStyle = 'normal';
   }
 
   if (lineHeightObj && lineHeightObj.unit !== 'AUTO') {
@@ -367,8 +369,17 @@ export function extractTypography(node) {
   if (node.textDecoration === 'UNDERLINE') text.decoration = 'underline';
   else if (node.textDecoration === 'STRIKETHROUGH') text.decoration = 'line-through';
 
-  // Extract solid color considering both fill opacity and node opacity (e.g. 30% opacity on text)
+  // Extract solid color OR gradient fill on TEXT nodes (e.g. background-clip: text)
   let color = extractSolidColor(fillsArr);
+  const textGradient = extractGradient(fillsArr);
+  if (textGradient) {
+    text.gradient = textGradient;
+    text.gradientCss = `linear-gradient(${textGradient.angle}deg, ${textGradient.color1} ${textGradient.stop1}%, ${textGradient.color2} ${textGradient.stop2}%)`;
+    text.backgroundClipText = true;
+    if (!color) {
+      color = textGradient.color2 || textGradient.color1;
+    }
+  }
   const nodeOpacity = typeof node.opacity === 'number' ? node.opacity : 1;
   if (color && nodeOpacity < 1 && !color.startsWith('rgba')) {
     // Convert hex to rgba with node opacity
@@ -652,26 +663,58 @@ export function applyDevModeCSSToNode(entry, devModeCSS) {
     if (c) style.borderColor = c;
   }
 
-  // 2. Authoritative Dev Mode Background & Gradient
+  // 2. Authoritative Dev Mode Background & Gradient (including background-clip: text on TEXT layers)
   const devBg = resolveCssVars(devModeCSS['background'] || devModeCSS['background-color'] || '');
+  const isTextClip = Boolean(
+    entry.type === 'text' ||
+    (devModeCSS['background-clip'] && String(devModeCSS['background-clip']).includes('text')) ||
+    (devModeCSS['-webkit-background-clip'] && String(devModeCSS['-webkit-background-clip']).includes('text')) ||
+    (devModeCSS['-webkit-text-fill-color'] && String(devModeCSS['-webkit-text-fill-color']).includes('transparent'))
+  );
+
   if (devBg) {
-    if (devBg.includes('linear-gradient')) {
+    if (devBg.includes('gradient')) {
       const angleMatch = devBg.match(/([\d.]+)deg/);
       const angle = angleMatch ? parseInt(angleMatch[1], 10) : 180;
       const colors = (devBg.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/g) || []).map((c) => normalizeCssColor(c) || c);
-      if (colors.length >= 2) {
-        style.gradient = {
-          type: 'linear',
-          angle,
-          color1: colors[0],
-          stop1: 0,
-          color2: colors[colors.length - 1],
-          stop2: 100,
-        };
+      const parsedGrad = colors.length >= 2
+        ? {
+            type: devBg.includes('radial-gradient') ? 'radial' : 'linear',
+            angle,
+            color1: colors[0],
+            stop1: 0,
+            color2: colors[colors.length - 1],
+            stop2: 100,
+          }
+        : null;
+
+      if (isTextClip) {
+        const text = entry.text || (entry.text = {});
+        text.gradientCss = devBg;
+        text.backgroundClipText = true;
+        if (parsedGrad) {
+          text.gradient = parsedGrad;
+          if (!text.color) {
+            text.color = parsedGrad.color2 || parsedGrad.color1;
+          }
+        }
+        if (entry.type === 'text') {
+          delete style.gradient;
+          delete style.background;
+        }
+      } else if (parsedGrad) {
+        style.gradient = parsedGrad;
       }
     } else {
       const solidBg = normalizeCssColor(devBg);
-      if (solidBg) style.background = solidBg;
+      if (solidBg) {
+        if (entry.type === 'text') {
+          const text = entry.text || (entry.text = {});
+          if (!text.color) text.color = solidBg;
+        } else {
+          style.background = solidBg;
+        }
+      }
     }
   }
 
@@ -795,6 +838,13 @@ export function applyDevModeCSSToNode(entry, devModeCSS) {
       } else if (lhClean.includes('%')) {
         text.lineHeight = Math.round((parseFloat(lhClean) / 100) * 100) / 100;
         text.lineHeightUnit = 'em';
+      } else if (lhClean === 'normal') {
+        text.lineHeightRaw = 'normal';
+        text.lineHeight = 1.2;
+        text.lineHeightUnit = 'em';
+      } else if (/^[\d.]+$/.test(lhClean)) {
+        text.lineHeight = Math.round(parseFloat(lhClean) * 100) / 100;
+        text.lineHeightUnit = 'em';
       }
     }
     if (devModeCSS['color']) {
@@ -815,6 +865,198 @@ export function applyDevModeCSSToNode(entry, devModeCSS) {
       text.fontStyle = resolveCssVars(devModeCSS['font-style']);
     }
   }
+}
+
+/**
+ * Live Inspector for Figma Dev Mode CSS (`await node.getCSSAsync()`).
+ * Extracts raw Dev Mode CSS, unwraps `var(--token, fallback)` values, identifies CSS variables
+ * and color swatches, and computes the exact Elementor widget & control mapping for display in the Plugin UI.
+ */
+export async function inspectNodeDevMode(node, options = {}) {
+  if (!node) return null;
+  const { includeSubtree = false, maxSubtreeNodes = 20 } = options;
+
+  const inspectSingle = async (target, depth = 0, parent = null) => {
+    let rawCss = {};
+    let hasNativeApi = false;
+    if (typeof target.getCSSAsync === 'function') {
+      hasNativeApi = true;
+      try {
+        const res = await target.getCSSAsync();
+        if (res && typeof res === 'object') {
+          rawCss = { ...res };
+        }
+      } catch (e) { }
+    }
+
+    const choice = resolveWidget(target);
+    const entry = {
+      id: target.id,
+      name: safeStr(target.name, 'Unnamed'),
+      type: target.type === 'TEXT' ? 'text' : safeStr(target.type, 'FRAME').toLowerCase(),
+      rawType: safeStr(target.type, 'FRAME'),
+      widget: choice.widget,
+      widgetSource: choice.source,
+      layout: extractLayout(target, parent),
+      style: extractStyle(target),
+      text: target.type === 'TEXT' ? extractTypography(target) : null,
+    };
+
+    if (Object.keys(rawCss).length > 0) {
+      applyDevModeCSSToNode(entry, rawCss);
+    }
+
+    const resolvedCss = {};
+    const cssVariables = [];
+    const lines = [];
+    const resolvedLines = [];
+
+    for (const [prop, val] of Object.entries(rawCss)) {
+      const strVal = String(val);
+      const unwrapped = resolveCssVars(strVal);
+      resolvedCss[prop] = unwrapped;
+      lines.push(`  ${prop}: ${strVal};`);
+      resolvedLines.push(`  ${prop}: ${unwrapped};`);
+
+      const varMatches = strVal.match(/--[a-zA-Z0-9_-]+/g);
+      if (varMatches) {
+        for (const vm of varMatches) {
+          if (!cssVariables.includes(vm)) cssVariables.push(vm);
+        }
+      }
+    }
+
+    // Build selector slug from layer name
+    const slug = safeStr(target.name, 'layer')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'layer';
+    const selector = `.f2e-${slug}`;
+
+    const headerComment = `/* Layer: "${entry.name}" (${target.id}) | Type: ${entry.rawType} | Elementor: ${entry.widget} */`;
+    const cssBlock = lines.length > 0
+      ? `${headerComment}\n${selector} {\n${lines.join('\n')}\n}`
+      : `${headerComment}\n${selector} {\n  /* Node không có thuộc tính CSS trực tiếp từ getCSSAsync() */\n}`;
+
+    const resolvedCssBlock = resolvedLines.length > 0
+      ? `${headerComment}\n${selector} {\n${resolvedLines.join('\n')}\n}`
+      : cssBlock;
+
+    // Build human-readable Elementor Mapping Summary pills
+    const mappingPills = [];
+    const L = entry.layout || {};
+    const S = entry.style || {};
+    const T = entry.text || null;
+
+    if (L.width || L.height) {
+      const hMode = L.sizingH ? ` (${L.sizingH})` : '';
+      const vMode = L.sizingV ? ` (${L.sizingV})` : '';
+      mappingPills.push({ label: 'Size', value: `${L.width || 0}px${hMode} × ${L.height || 0}px${vMode}` });
+    }
+    if (L.mode === 'flex') {
+      mappingPills.push({
+        label: 'Flex',
+        value: `${L.direction || 'row'}${L.wrap ? ' wrap' : ''} • align: ${L.align || 'MIN'} / ${L.justify || 'MIN'}`,
+      });
+    } else if (L.mode === 'grid') {
+      mappingPills.push({ label: 'Grid', value: `${L.columns || 2} cols` });
+    }
+    if (typeof L.gap === 'number' && L.gap > 0) {
+      mappingPills.push({ label: 'Gap', value: `${L.gap}px` });
+    }
+    if (L.padding && (L.padding.top || L.padding.right || L.padding.bottom || L.padding.left)) {
+      mappingPills.push({
+        label: 'Padding',
+        value: `${L.padding.top}px ${L.padding.right}px ${L.padding.bottom}px ${L.padding.left}px`,
+      });
+    }
+    if (S.background) {
+      mappingPills.push({ label: 'BG', value: S.background, color: S.background });
+    } else if (S.gradient) {
+      mappingPills.push({ label: 'Gradient', value: `${S.gradient.angle}deg (${S.gradient.color1} → ${S.gradient.color2})`, color: S.gradient.color1 });
+    }
+    if (S.borderWidth && (S.borderWidth.top || S.borderWidth.right || S.borderWidth.bottom || S.borderWidth.left)) {
+      const bw = S.borderWidth;
+      const bwStr = bw.isLinked ? `${bw.top}px` : `${bw.top}px ${bw.right}px ${bw.bottom}px ${bw.left}px`;
+      mappingPills.push({
+        label: 'Border',
+        value: `${bwStr} solid ${S.borderColor || '#000000'}`,
+        color: S.borderColor || null,
+      });
+    }
+    if (S.radius && (S.radius.top || S.radius.right || S.radius.bottom || S.radius.left)) {
+      const r = S.radius;
+      const rStr = r.isLinked ? `${r.top}px` : `${r.top}px ${r.right}px ${r.bottom}px ${r.left}px`;
+      mappingPills.push({ label: 'Radius', value: rStr });
+    }
+    if (T) {
+      mappingPills.push({
+        label: 'Font',
+        value: `${T.fontFamily} ${T.fontWeight} • ${T.fontSize}px/${T.lineHeight || ''}${T.lineHeightUnit || 'px'}`,
+        color: T.color || null,
+      });
+      if (T.gradientCss || T.gradient) {
+        const gLabel = T.gradient
+          ? `${T.gradient.angle}deg (${T.gradient.color1} → ${T.gradient.color2})`
+          : T.gradientCss;
+        mappingPills.push({
+          label: 'Text Gradient',
+          value: gLabel,
+          color: (T.gradient && T.gradient.color1) || T.color || null,
+        });
+      }
+    }
+
+    return {
+      nodeId: target.id,
+      name: entry.name,
+      type: entry.rawType,
+      depth,
+      width: L.width || 0,
+      height: L.height || 0,
+      widget: entry.widget,
+      widgetSource: entry.widgetSource,
+      hasNativeApi,
+      propertyCount: Object.keys(rawCss).length,
+      rawCss,
+      resolvedCss,
+      cssVariables,
+      cssBlock,
+      resolvedCssBlock,
+      mappingPills,
+    };
+  };
+
+  const rootResult = await inspectSingle(node, 0, node.parent || null);
+
+  if (includeSubtree) {
+    const subtreeBlocks = [rootResult.cssBlock];
+    const subtreeResolvedBlocks = [rootResult.resolvedCssBlock];
+    const subtreeNodes = [];
+    let visited = 0;
+
+    const walkKids = async (curr, depth) => {
+      const kids = visibleChildren(curr);
+      for (const child of kids) {
+        if (visited >= maxSubtreeNodes) return;
+        visited += 1;
+        const childInfo = await inspectSingle(child, depth, curr);
+        subtreeNodes.push(childInfo);
+        if (childInfo.propertyCount > 0) {
+          subtreeBlocks.push(childInfo.cssBlock);
+          subtreeResolvedBlocks.push(childInfo.resolvedCssBlock);
+        }
+        await walkKids(child, depth + 1);
+      }
+    };
+
+    await walkKids(node, 1);
+    rootResult.subtreeCount = subtreeNodes.length;
+    rootResult.subtreeCssBlock = subtreeBlocks.join('\n\n');
+    rootResult.subtreeResolvedCssBlock = subtreeResolvedBlocks.join('\n\n');
+  }
+
+  return rootResult;
 }
 
 /**
@@ -930,6 +1172,21 @@ export async function extractDesignSelection(selection, options = {}) {
       }
     }
 
+    const extractTextWithDevMode = async (tn) => {
+      if (!tn) return null;
+      const typo = extractTypography(tn);
+      if (!typo) return null;
+      if (typeof tn.getCSSAsync === 'function') {
+        try {
+          const tCss = await tn.getCSSAsync();
+          if (tCss && Object.keys(tCss).length > 0) {
+            applyDevModeCSSToNode({ type: 'text', text: typo, style: {}, layout: {} }, tCss);
+          }
+        } catch (e) { }
+      }
+      return typo;
+    };
+
     const link = extractLink(node);
     if (link) entry.link = link;
 
@@ -938,103 +1195,150 @@ export async function extractDesignSelection(selection, options = {}) {
       entry.content.characters = entry.text.characters;
     }
 
-    if (choice.widget === 'button') {
-      const bIcon = extractButtonIcon(node);
-      if (bIcon) entry.buttonIcon = bIcon;
-      if (node.type === 'TEXT') {
-        entry.text = extractTypography(node);
-        entry.content.characters = entry.text.characters;
-      } else {
-        const textNodes = collectTextDescendants(node);
-        if (textNodes.length > 0) {
-          entry.text = extractTypography(textNodes[0]);
-          entry.content.characters = entry.text.characters;
-          if (typeof textNodes[0].getCSSAsync === 'function') {
-            try {
-              const btnTxtDevCSS = await textNodes[0].getCSSAsync();
-              if (btnTxtDevCSS) applyDevModeCSSToNode({ text: entry.text }, btnTxtDevCSS);
-            } catch (e) { }
-          }
-        } else {
-          entry.content.characters = entry.content.name || 'Button';
-        }
-      }
-    }
-
+    // Apply outer node's Dev Mode CSS first so FRAME box styles do not overwrite child text typography
     if (devModeCSS) {
       applyDevModeCSSToNode(entry, devModeCSS);
     }
 
-    if (choice.widget === 'nav-menu' || choice.widget === 'mega-menu') {
+    if (node.type === 'TEXT' && entry.text) {
+      entry.extractedTexts = [entry.text];
+    } else if (isLeafWidget) {
+      // For any atomic leaf widget wrapping child TEXT nodes (e.g. Frame tagged as heading, text-editor,
+      // button, counter, icon-box, image-box, icon-list, nav-menu, price-table, call-to-action, testimonial,
+      // flip-box, progress, alert, blockquote, etc.), extract every descendant TEXT node with its full Dev Mode CSS!
       const textNodes = collectTextDescendants(node);
-      const menuItems = textNodes
-        .map((tn) => ({
-          name: safeStr(tn.characters || tn.name).trim(),
-          link: extractLink(tn) || '#',
+      if (textNodes.length > 0) {
+        const extractedList = [];
+        for (const tn of textNodes) {
+          const tObj = await extractTextWithDevMode(tn);
+          if (tObj && safeStr(tObj.characters).trim().length > 0) {
+            tObj.nodeName = safeStr(tn.name, '');
+            tObj.link = extractLink(tn) || '';
+            extractedList.push(tObj);
+          }
+        }
+        if (extractedList.length > 0) {
+          entry.extractedTexts = extractedList;
+          if (!entry.text) {
+            entry.text = extractedList[0];
+          }
+          if (!entry.content.characters) {
+            entry.content.characters = extractedList[0].characters;
+          }
+        }
+      }
+    }
+
+    if (choice.widget === 'button') {
+      const bIcon = extractButtonIcon(node);
+      if (bIcon) entry.buttonIcon = bIcon;
+      if (!entry.content.characters) {
+        entry.content.characters = (entry.text && entry.text.characters) || entry.content.name || 'Button';
+      }
+    }
+
+    if (choice.widget === 'nav-menu' || choice.widget === 'mega-menu') {
+      const extractedList = entry.extractedTexts || [];
+      const menuItems = extractedList
+        .map((t) => ({
+          name: safeStr(t.characters || t.nodeName).trim(),
+          link: t.link || '#',
         }))
         .filter((item) => item.name.length > 0);
 
       entry.content.menuItems = menuItems;
-      if (textNodes.length > 0) {
-        entry.text = extractTypography(textNodes[0]);
-      }
     }
 
     if (choice.widget === 'icon-list') {
-      const textNodes = collectTextDescendants(node);
-      const listItems = textNodes
-        .map((tn, idx) => {
-          let text = safeStr(tn.characters || tn.name).trim();
+      const extractedList = entry.extractedTexts || [];
+      const listItems = extractedList
+        .map((t, idx) => {
+          let text = safeStr(t.characters || t.nodeName).trim();
           text = text.replace(/^[\u2713\u2714\u2022\u00b7\u25cf\u25cb\u2013\u2014\-*]\s*/, '');
           return {
             id: `item_${idx + 1}`,
             text,
-            link: extractLink(tn) || '',
+            link: t.link || '',
+            color: t.color || null,
           };
         })
         .filter((item) => item.text.length > 0);
 
       entry.content.iconList = listItems;
-      if (textNodes.length > 0) {
-        entry.text = extractTypography(textNodes[0]);
+      const visualNode = findFirstVisualDescendant(node);
+      if (visualNode) {
+        entry.content.iconColor = extractSolidColor(visualNode.fills) || extractSolidColor(visualNode.strokes) || null;
+        entry.content.iconSize = Math.round(safeNum(visualNode.width, 0)) || null;
       }
     }
 
     if (choice.widget === 'icon-box' || choice.widget === 'image-box') {
-      const textNodes = collectTextDescendants(node);
-      if (textNodes.length > 0) {
-        entry.content.title_text = safeStr(textNodes[0].characters || textNodes[0].name).trim();
-        entry.text = extractTypography(textNodes[0]);
+      const extractedList = entry.extractedTexts || [];
+      if (extractedList.length > 0) {
+        entry.content.title_text = safeStr(extractedList[0].characters).trim();
+        entry.content.titleTypography = extractedList[0];
+        entry.text = extractedList[0];
       }
-      if (textNodes.length > 1) {
-        entry.content.description_text = textNodes
+      if (extractedList.length > 1) {
+        entry.content.description_text = extractedList
           .slice(1)
-          .map((tn) => safeStr(tn.characters || tn.name).trim())
+          .map((t) => safeStr(t.characters).trim())
           .filter(Boolean)
           .join('\n');
+        entry.content.descriptionTypography = extractedList[1];
       }
       entry.content.position = (layout.direction === 'row') ? 'left' : 'top';
 
       const visualNode = findFirstVisualDescendant(node);
-      if (visualNode && typeof visualNode.exportAsync === 'function') {
-        if (hasImageFill(visualNode)) {
-          pendingExports.push({ kind: 'raster', node: visualNode, id });
-        } else {
-          pendingExports.push({ kind: 'svg', node: visualNode, id });
+      if (visualNode) {
+        entry.content.iconSize = Math.round(safeNum(visualNode.width, 40)) || 40;
+        entry.content.iconColor = extractSolidColor(visualNode.fills) || extractSolidColor(visualNode.strokes) || null;
+        if (typeof visualNode.exportAsync === 'function') {
+          if (hasImageFill(visualNode)) {
+            pendingExports.push({ kind: 'raster', node: visualNode, id });
+          } else {
+            pendingExports.push({ kind: 'svg', node: visualNode, id });
+          }
         }
       }
     }
 
-    if (choice.widget === 'counter') {
-      const textNodes = collectTextDescendants(node);
-      for (const tn of textNodes) {
-        const str = safeStr(tn.characters || '').trim();
-        if (/\d/.test(str)) {
-          entry.content.counterNumber = str;
-        } else if (!entry.content.counterTitle) {
-          entry.content.counterTitle = str;
-        }
+    if (choice.widget === 'counter' || choice.widget === 'countdown') {
+      const extractedList = entry.extractedTexts || (entry.text ? [entry.text] : []);
+      const numItem = extractedList.find((t) => /\d/.test(safeStr(t.characters))) || extractedList[0] || null;
+      const titleItem = extractedList.find((t) => t !== numItem) || null;
+      if (numItem) {
+        entry.content.counterNumber = safeStr(numItem.characters).trim();
+        entry.content.numberTypography = numItem;
       }
+      if (titleItem) {
+        entry.content.counterTitle = safeStr(titleItem.characters).trim();
+        entry.content.titleTypography = titleItem;
+      }
+    }
+
+    if (choice.widget === 'social-icons' || choice.widget === 'share-buttons') {
+      const socialItems = [];
+      for (const child of rawKids) {
+        const cStyle = extractStyle(child);
+        const cLayout = extractLayout(child, node);
+        if (typeof child.getCSSAsync === 'function') {
+          try {
+            const cCss = await child.getCSSAsync();
+            if (cCss) applyDevModeCSSToNode({ style: cStyle, layout: cLayout }, cCss);
+          } catch (e) { }
+        }
+        socialItems.push({
+          id: child.id,
+          name: safeStr(child.name, 'social'),
+          link: extractLink(child) || '#',
+          background: cStyle.background || null,
+          borderColor: cStyle.borderColor || null,
+          radius: cStyle.radius || null,
+          width: cLayout.width || 40,
+        });
+      }
+      entry.content.socialItems = socialItems;
     }
 
     if (['accordion', 'nested-accordion', 'toggle', 'tabs', 'nested-tabs'].includes(choice.widget)) {
@@ -1046,25 +1350,13 @@ export async function extractDesignSelection(selection, options = {}) {
         const bodyNodes = textNodes.slice(1);
 
         const titleText = safeStr(titleNode.characters || titleNode.name).trim();
-        const titleTypography = extractTypography(titleNode);
-        if (typeof titleNode.getCSSAsync === 'function') {
-          try {
-            const tCss = await titleNode.getCSSAsync();
-            if (tCss) applyDevModeCSSToNode({ text: titleTypography }, tCss);
-          } catch (e) { }
-        }
+        const titleTypography = await extractTextWithDevMode(titleNode);
 
         let bodyText = '';
         let bodyTypography = null;
         if (bodyNodes.length > 0) {
           bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
-          bodyTypography = extractTypography(bodyNodes[0]);
-          if (typeof bodyNodes[0].getCSSAsync === 'function') {
-            try {
-              const bCss = await bodyNodes[0].getCSSAsync();
-              if (bCss) applyDevModeCSSToNode({ text: bodyTypography }, bCss);
-            } catch (e) { }
-          }
+          bodyTypography = await extractTextWithDevMode(bodyNodes[0]);
         }
 
         const itemEntry = {
@@ -1099,11 +1391,25 @@ export async function extractDesignSelection(selection, options = {}) {
       let submitLabel = 'Send Message';
       for (const child of rawKids) {
         const lower = safeStr(child.name).toLowerCase();
+        const cEntry = {
+          layout: extractLayout(child, node),
+          style: extractStyle(child),
+        };
+        if (typeof child.getCSSAsync === 'function') {
+          try {
+            const cCss = await child.getCSSAsync();
+            if (cCss) applyDevModeCSSToNode(cEntry, cCss);
+          } catch (e) { }
+        }
+
         if (lower.includes('btn') || lower.includes('button') || lower.includes('submit')) {
           const btnTexts = collectTextDescendants(child);
           if (btnTexts.length > 0) {
             submitLabel = safeStr(btnTexts[0].characters || btnTexts[0].name).trim();
+            entry.content.buttonTypography = await extractTextWithDevMode(btnTexts[0]);
           }
+          entry.content.buttonStyle = cEntry.style;
+          entry.content.buttonPadding = cEntry.layout.padding;
           continue;
         }
         let fieldType = 'text';
@@ -1111,7 +1417,14 @@ export async function extractDesignSelection(selection, options = {}) {
         else if (lower.includes('phone') || lower.includes('tel') || lower.includes('số điện thoại')) fieldType = 'tel';
         else if (lower.includes('message') || lower.includes('comment') || lower.includes('nội dung') || (Number(child.height) || 0) >= 90) fieldType = 'textarea';
 
-        const texts = collectTextDescendants(child).map((t) => safeStr(t.characters || t.name).trim()).filter(Boolean);
+        const childTextNodes = collectTextDescendants(child);
+        const texts = childTextNodes.map((t) => safeStr(t.characters || t.name).trim()).filter(Boolean);
+        if (!entry.content.fieldTypography && childTextNodes.length > 0) {
+          entry.content.fieldTypography = await extractTextWithDevMode(childTextNodes[0]);
+        }
+        if (!entry.content.fieldStyle && (cEntry.style.background || cEntry.style.borderColor || cEntry.style.radius)) {
+          entry.content.fieldStyle = cEntry.style;
+        }
         const label = texts[0] || safeStr(child.name, `Field ${formFields.length + 1}`);
         formFields.push({
           id: `field_${formFields.length + 1}`,

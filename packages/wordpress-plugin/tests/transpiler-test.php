@@ -46,12 +46,16 @@ function assertTrue(bool $condition, string $label): void
 
 echo "Running F2E Bridge WordPress Plugin Test Suite...\n\n";
 
-// 1. Test SVG Sanitizer
-$dirtySvg = '<svg viewBox="0 0 24 24" onclick="alert(1)"><script>evil()</script><path d="M0 0h24v24H0z"/></svg>';
+// 1. Test Hardened DOM + Regex SVG Sanitizer
+$dirtySvg = '<svg viewBox="0 0 24 24" onclick="alert(1)"><script>evil()</script><animate attributeName="href" values="javascript:alert(1)"/><use href="https://evil.example/payload.svg#icon"/><use href="#local-icon"/><a xlink:href="&#x6a;avascript:evil()"><path id="local-icon" d="M0 0h24v24H0z"/></a><style>@import url("https://evil.example/x.css"); .cls{fill:url(#grad1);background:url("https://evil.example/bg.png")}</style></svg>';
 $cleanSvg = AssetStore::sanitizeSvg($dirtySvg);
 assertTrue(!str_contains($cleanSvg, '<script'), 'SVG Sanitizer strips <script> tags');
 assertTrue(!str_contains($cleanSvg, 'onclick'), 'SVG Sanitizer strips inline event handlers');
-assertTrue(str_contains($cleanSvg, '<path d="M0 0h24v24H0z"/>'), 'SVG Sanitizer preserves valid vector paths');
+assertTrue(!str_contains($cleanSvg, '<animate'), 'SVG Sanitizer strips SMIL <animate> XSS vectors');
+assertTrue(!str_contains($cleanSvg, 'evil.example'), 'SVG Sanitizer strips external hrefs and CSS @import / external url()');
+assertTrue(!str_contains(strtolower($cleanSvg), 'javascript:'), 'SVG Sanitizer strips entity-encoded javascript: URIs');
+assertTrue(str_contains($cleanSvg, 'href="#local-icon"'), 'SVG Sanitizer preserves safe local #fragment hrefs');
+assertTrue(str_contains($cleanSvg, 'd="M0 0h24v24H0z"'), 'SVG Sanitizer preserves valid vector paths');
 
 // 2. Test TranspilerV3 (Container + Heading + Pro Price Table + Pro Form + Responsive)
 $sampleIr = [
@@ -140,7 +144,7 @@ $elementsV4 = $v4->transpile($sampleIr);
 assertTrue($elementsV4[0]['widgetType'] === 'e-flexbox', 'TranspilerV4 outputs e-flexbox root');
 assertTrue($elementsV4[0]['elements'][0]['widgetType'] === 'e-heading', 'TranspilerV4 maps heading to e-heading');
 
-// 4. Test DocumentWriter Incremental Re-sync (Preserving existing page widgets & IDs)
+// 4. Test DocumentWriter Deep Recursive Incremental Re-sync (Preserving nested child IDs, links, custom_css, dynamic tags & manual WP children)
 $writer = new DocumentWriter();
 $existingPageTree = [
     [
@@ -157,7 +161,30 @@ $existingPageTree = [
             '_f2e_node_id' => '100:1',
             'custom_css' => 'selector { border: 1px solid red; }',
         ],
-        'elements' => [],
+        'elements' => [
+            [
+                'id' => 'child_h1_orig',
+                'elType' => 'widget',
+                'widgetType' => 'heading',
+                'settings' => [
+                    '_f2e_node_id' => '100:2',
+                    'title' => 'Old Title',
+                    'custom_css' => 'selector h1 { text-shadow: 0 2px 4px #000; }',
+                    '__dynamic__' => ['title' => '[elementor-tag id="1"]'],
+                    'link' => ['url' => 'https://example.com/special-offer', 'is_external' => true],
+                ],
+                'elements' => [],
+            ],
+            [
+                'id' => 'manual_wp_shortcode',
+                'elType' => 'widget',
+                'widgetType' => 'shortcode',
+                'settings' => [
+                    'shortcode' => '[contact-form-7 id="99"]',
+                ],
+                'elements' => [],
+            ],
+        ],
     ],
 ];
 
@@ -167,6 +194,26 @@ assertTrue(count($mergedTree) === 2, 'Incremental Re-sync preserves unmapped Wor
 assertTrue($mergedTree[0]['id'] === 'keep123', 'Unmapped section remains untouched');
 assertTrue($mergedTree[1]['id'] === 'orig777', 'Re-synced section keeps its original Elementor ID orig777');
 assertTrue($mergedTree[1]['settings']['custom_css'] === 'selector { border: 1px solid red; }', 'Re-synced section preserves user custom_css');
+
+// Verify deep recursive child reconciliation
+$resyncedChildren = $mergedTree[1]['elements'];
+assertTrue($resyncedChildren[0]['id'] === 'child_h1_orig', 'Deep Re-sync preserves nested child widget original Elementor ID (child_h1_orig)');
+assertTrue($resyncedChildren[0]['settings']['title'] === 'Welcome to F2E Bridge', 'Deep Re-sync updates nested child widget text from Figma');
+assertTrue(($resyncedChildren[0]['settings']['custom_css'] ?? '') === 'selector h1 { text-shadow: 0 2px 4px #000; }', 'Deep Re-sync preserves nested child custom_css');
+assertTrue(($resyncedChildren[0]['settings']['__dynamic__']['title'] ?? '') === '[elementor-tag id="1"]', 'Deep Re-sync preserves nested child Elementor Pro __dynamic__ tags');
+assertTrue(($resyncedChildren[0]['settings']['link']['url'] ?? '') === 'https://example.com/special-offer', 'Deep Re-sync preserves user-configured real link URL on child widget');
+assertTrue(count($resyncedChildren) === 3 && $resyncedChildren[2]['id'] === 'manual_wp_shortcode', 'Deep Re-sync preserves manually added non-Figma WordPress widgets inside container');
+
+// 5. Test Server-Side GlobalStyles::bindGlobalsToElements on compiled Elementor v3 elements
+$globalsHelper = new GlobalStyles();
+$boundElements = $globalsHelper->bindGlobalsToElements(
+    $elementsV3,
+    ['#0F172A' => 'branddark', '#FFFFFF' => 'purewhite'],
+    ['inter|48|700' => 'heroh1']
+);
+assertTrue(($boundElements[0]['settings']['__globals__']['background_color'] ?? '') === 'globals/colors?id=branddark', 'GlobalStyles binds verified Active Kit color ID to container background_color');
+assertTrue(($boundElements[0]['elements'][0]['settings']['__globals__']['title_color'] ?? '') === 'globals/colors?id=purewhite', 'GlobalStyles binds verified Active Kit color ID to heading title_color');
+assertTrue(($boundElements[0]['elements'][0]['settings']['__globals__']['typography_typography'] ?? '') === 'globals/typography?id=heroh1', 'GlobalStyles binds verified Active Kit typography ID to heading typography');
 
 echo "\nSummary: {$passed} passed, {$failed} failed.\n";
 exit($failed > 0 ? 1 : 0);

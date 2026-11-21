@@ -62,10 +62,28 @@ final class Plugin
             add_action('admin_post_f2e_upload_bundle', [$this, 'handleManualUpload']);
         }
 
-        // Allow SVG uploads for administrators & F2E authenticated requests
+        // Allow SVG uploads for authorized editors/administrators & automatically sanitize via AssetStore::sanitizeSvg
         add_filter('upload_mimes', static function (array $mimes): array {
-            $mimes['svg'] = 'image/svg+xml';
+            if (!function_exists('current_user_can') || current_user_can('upload_files') || current_user_can('manage_options')) {
+                $mimes['svg'] = 'image/svg+xml';
+            }
             return $mimes;
+        });
+
+        add_filter('wp_handle_upload_prefilter', static function (array $file): array {
+            $name = strtolower((string) ($file['name'] ?? ''));
+            $type = strtolower((string) ($file['type'] ?? ''));
+            $tmpName = (string) ($file['tmp_name'] ?? '');
+            if (($type === 'image/svg+xml' || str_ends_with($name, '.svg')) && $tmpName !== '' && is_file($tmpName)) {
+                $raw = @file_get_contents($tmpName);
+                $sanitized = is_string($raw) ? Media\AssetStore::sanitizeSvg($raw) : '';
+                if ($sanitized === '') {
+                    $file['error'] = 'Invalid or unsafe SVG file rejected by F2E Bridge SVG Sanitizer.';
+                    return $file;
+                }
+                @file_put_contents($tmpName, $sanitized);
+            }
+            return $file;
         });
 
         // Enqueue Elementor Editor integration script

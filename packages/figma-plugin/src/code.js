@@ -18,6 +18,7 @@ import {
   extractDesignSelection,
   extractLocalDesignSystem,
   captureResponsiveTree,
+  inspectNodeDevMode,
 } from './extraction/extractor.js';
 import {
   compileElementorV3,
@@ -152,6 +153,61 @@ function sendOutlineToUi() {
       mobile: responsiveState.mobile ? responsiveState.mobile.name : null,
     },
   });
+
+  if (selection.length > 0) {
+    inspectNodeDevMode(selection[0], { includeSubtree: false })
+      .then((data) => {
+        if (data) {
+          figma.ui.postMessage({ type: 'dev-mode-css', data });
+        }
+      })
+      .catch(() => { });
+  } else {
+    figma.ui.postMessage({ type: 'dev-mode-css', data: null });
+  }
+}
+
+async function handleInspectNodeDevMode(msg = {}) {
+  const { nodeId, includeSubtree = false, focusCanvas = false } = msg;
+  const selection = figma.currentPage.selection || [];
+  let target = null;
+
+  if (nodeId) {
+    if (typeof figma.getNodeByIdAsync === 'function') {
+      try {
+        target = await figma.getNodeByIdAsync(nodeId);
+      } catch (e) { }
+    }
+    if (!target) {
+      const findInTree = (list) => {
+        for (const n of list || []) {
+          if (!n) continue;
+          if (n.id === nodeId) return n;
+          if (Array.isArray(n.children)) {
+            const found = findInTree(n.children);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      target = findInTree(selection);
+    }
+  } else if (selection.length > 0) {
+    target = selection[0];
+  }
+
+  if (!target) {
+    throw new Error('Hãy chọn một Layer hoặc Frame trên Figma để xem Dev Mode CSS.');
+  }
+
+  if (focusCanvas && figma.viewport && typeof figma.viewport.scrollAndZoomIntoView === 'function') {
+    try {
+      figma.viewport.scrollAndZoomIntoView([target]);
+    } catch (e) { }
+  }
+
+  const data = await inspectNodeDevMode(target, { includeSubtree: Boolean(includeSubtree) });
+  figma.ui.postMessage({ type: 'dev-mode-css', data });
 }
 
 async function setLayerWidgetOverride(nodeId, widget) {
@@ -423,27 +479,42 @@ async function handleLivePushToWordPress(payload) {
     throw new Error(`Lỗi ở bước 1B (Extract Node): ${extErr && extErr.message ? extErr.message : extErr}`);
   }
 
-  // Step 2: Upload deduplicated assets (SHA-256)
+  // Step 2: Upload deduplicated assets (SHA-256) with bounded concurrency (4 parallel workers)
   const attachmentMap = {};
   try {
     if (assetPayloads.length > 0) {
-      for (let i = 0; i < assetPayloads.length; i += 1) {
-        const asset = assetPayloads[i];
-        postStatus(`2/4: Đang đồng bộ tài nguyên ${i + 1}/${assetPayloads.length} (SHA-256: ${asset.sha256.slice(0, 8)})…`);
-        const uploaded = await wpRequest(site.siteUrl, site.token, '/assets', {
-          method: 'POST',
-          body: JSON.stringify({
-            sha256: asset.sha256,
-            mime: asset.mime,
-            kind: asset.kind,
-            base64: asset.base64,
-            name: document.title,
-          }),
-        });
-        if (uploaded && uploaded.id) {
-          attachmentMap[asset.sha256] = { id: uploaded.id, url: uploaded.url };
+      const CONCURRENCY = Math.min(4, assetPayloads.length);
+      let cursor = 0;
+      let completed = 0;
+
+      const uploadWorker = async () => {
+        while (cursor < assetPayloads.length) {
+          const idx = cursor;
+          cursor += 1;
+          const asset = assetPayloads[idx];
+          postStatus(`2/4: Đang đồng bộ tài nguyên ${completed + 1}/${assetPayloads.length} (SHA-256: ${asset.sha256.slice(0, 8)})…`);
+          const uploaded = await wpRequest(site.siteUrl, site.token, '/assets', {
+            method: 'POST',
+            body: JSON.stringify({
+              sha256: asset.sha256,
+              mime: asset.mime,
+              kind: asset.kind,
+              base64: asset.base64,
+              name: document.title,
+            }),
+          });
+          if (uploaded && uploaded.id) {
+            attachmentMap[asset.sha256] = { id: uploaded.id, url: uploaded.url };
+          }
+          completed += 1;
         }
+      };
+
+      const workers = [];
+      for (let w = 0; w < CONCURRENCY; w += 1) {
+        workers.push(uploadWorker());
       }
+      await Promise.all(workers);
     }
   } catch (assetErr) {
     throw new Error(`Lỗi ở bước 2 (Upload Asset): ${assetErr && assetErr.message ? assetErr.message : assetErr}`);
@@ -462,7 +533,7 @@ async function handleLivePushToWordPress(payload) {
     throw new Error(`Lỗi ở bước 3 (Sync Globals): ${dsErr && dsErr.message ? dsErr.message : dsErr}`);
   }
 
-  // Step 4: Compile on client with resolved attachmentMap AND send both IR + compiled elements to WordPress
+  // Step 4: Compile on client with resolved attachmentMap & send compiled elements to WordPress
   let result;
   let fidelityReport = null;
   try {
@@ -488,7 +559,6 @@ async function handleLivePushToWordPress(payload) {
         elementorVersion,
         attachmentMap,
         content: compiledElements,
-        document,
       }),
     });
   } catch (impErr) {
@@ -685,6 +755,9 @@ figma.ui.onmessage = async (msg) => {
     switch (msg.type) {
       case 'get-outline':
         sendOutlineToUi();
+        break;
+      case 'inspect-node-css':
+        await handleInspectNodeDevMode(msg);
         break;
       case 'set-widget':
         await setLayerWidgetOverride(msg.nodeId, msg.widget);

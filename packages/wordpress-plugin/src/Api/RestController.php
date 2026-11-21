@@ -44,6 +44,12 @@ final class RestController
             'permission_callback' => [$this, 'authorizeRequest'],
         ]);
 
+        register_rest_route(self::NAMESPACE, '/assets/batch', [
+            'methods' => 'POST',
+            'callback' => [$this, 'handleUploadAssetsBatch'],
+            'permission_callback' => [$this, 'authorizeRequest'],
+        ]);
+
         register_rest_route(self::NAMESPACE, '/design-system', [
             'methods' => 'POST',
             'callback' => [$this, 'handleSyncDesignSystem'],
@@ -76,12 +82,34 @@ final class RestController
     {
         $pages = [];
         $templates = [];
+        $search = method_exists($request, 'get_param') ? trim((string) ($request->get_param('search') ?? '')) : '';
 
         if (function_exists('get_posts')) {
-            foreach (get_posts(['post_type' => 'page', 'post_status' => ['publish', 'draft'], 'numberposts' => 50]) as $p) {
+            $pageQuery = [
+                'post_type' => 'page',
+                'post_status' => ['publish', 'draft', 'private'],
+                'numberposts' => 250,
+                'orderby' => 'modified',
+                'order' => 'DESC',
+            ];
+            if ($search !== '') {
+                $pageQuery['s'] = $search;
+            }
+            foreach (get_posts($pageQuery) as $p) {
                 $pages[] = ['id' => (int) $p->ID, 'title' => (string) $p->post_title, 'status' => (string) $p->post_status];
             }
-            foreach (get_posts(['post_type' => 'elementor_library', 'post_status' => ['publish', 'draft'], 'numberposts' => 50]) as $t) {
+
+            $tplQuery = [
+                'post_type' => 'elementor_library',
+                'post_status' => ['publish', 'draft', 'private'],
+                'numberposts' => 250,
+                'orderby' => 'modified',
+                'order' => 'DESC',
+            ];
+            if ($search !== '') {
+                $tplQuery['s'] = $search;
+            }
+            foreach (get_posts($tplQuery) as $t) {
                 $templates[] = ['id' => (int) $t->ID, 'title' => (string) $t->post_title, 'status' => (string) $t->post_status];
             }
         }
@@ -119,6 +147,35 @@ final class RestController
         return rest_ensure_response([
             'success' => true,
             'data' => $stored,
+        ]);
+    }
+
+    public function handleUploadAssetsBatch($request)
+    {
+        $params = method_exists($request, 'get_json_params') ? (array) $request->get_json_params() : [];
+        $items = is_array($params['assets'] ?? null) ? $params['assets'] : [];
+        $defaultName = (string) ($params['name'] ?? 'Figma Asset');
+        $attachmentMap = [];
+
+        foreach ($items as $item) {
+            if (!is_array($item) || empty($item['base64'])) {
+                continue;
+            }
+            $sha256 = (string) ($item['sha256'] ?? '');
+            $mime = (string) ($item['mime'] ?? 'image/png');
+            $name = (string) ($item['name'] ?? $defaultName);
+            $stored = $this->assets->storeBase64Asset($sha256, (string) $item['base64'], $mime, $name);
+            if ($stored !== null && $sha256 !== '') {
+                $attachmentMap[$sha256] = $stored;
+            }
+        }
+
+        return rest_ensure_response([
+            'success' => true,
+            'data' => [
+                'attachmentMap' => $attachmentMap,
+                'count' => count($attachmentMap),
+            ],
         ]);
     }
 
@@ -188,22 +245,36 @@ final class RestController
         $elVersion = (string) ($options['elementorVersion'] ?? $payload['elementorVersion'] ?? 'v3');
         $title = (string) ($options['title'] ?? $payload['title'] ?? $payload['document']['title'] ?? 'Figma Import');
 
-        // 3. Prefer client-compiled high-fidelity Elementor v3/v4 elements when provided,
-        // or transpile the IR document on the server
+        // 3. Prefer client-compiled high-fidelity Elementor v3/v4 elements when provided
+        // (including `.f2e.json` bundles with `elementorV3.content` / `elementorV4.content`),
+        // or transpile the IR document on the server as fallback.
         if (is_array($payload['content'] ?? null) && $payload['content'] !== []) {
             $elements = $payload['content'];
         } elseif (is_array($payload['elements'] ?? null) && $payload['elements'] !== []) {
             $elements = $payload['elements'];
+        } elseif ($elVersion === 'v4' && is_array($payload['elementorV4']['content'] ?? null) && $payload['elementorV4']['content'] !== []) {
+            $elements = $payload['elementorV4']['content'];
+        } elseif ($elVersion !== 'v4' && is_array($payload['elementorV3']['content'] ?? null) && $payload['elementorV3']['content'] !== []) {
+            $elements = $payload['elementorV3']['content'];
         } elseif (is_array($payload['document'] ?? null) && isset($payload['document']['nodes'])) {
             if ($elVersion === 'v4') {
                 $transpiler = new TranspilerV4();
                 $elements = $transpiler->transpile($payload['document'], $attachmentMap);
             } else {
-                $transpiler = new TranspilerV3(new GlobalStyles(), $this->assets);
+                $transpiler = new TranspilerV3($this->globalStyles, $this->assets);
                 $elements = $transpiler->transpile($payload['document'], $attachmentMap);
             }
         } else {
             $elements = [];
+        }
+
+        // 4. Hydrate any remaining inline Data-URI images into real WP Media Library attachments
+        // and bind verified Active Kit Global Colors & Fonts (`__globals__`) on v3 elements
+        if ($elements !== []) {
+            $elements = $this->hydrateCompiledElementAssets($elements, $title);
+            if ($elVersion !== 'v4') {
+                $elements = $this->globalStyles->bindGlobalsToElements($elements);
+            }
         }
 
         return $this->writer->saveOrSync($elements, [
@@ -214,5 +285,40 @@ final class RestController
             'postStatus' => $options['postStatus'] ?? $payload['postStatus'] ?? 'draft',
             'importMode' => $options['importMode'] ?? $payload['importMode'] ?? 'resync',
         ]);
+    }
+
+    /**
+     * Walks compiled Elementor elements and converts any embedded `data:image/...;base64,...`
+     * URLs into deduplicated WordPress Media Library `{id, url}` attachments.
+     *
+     * @param list<array<string,mixed>> $elements
+     * @return list<array<string,mixed>>
+     */
+    private function hydrateCompiledElementAssets(array $elements, string $defaultTitle = 'Figma Asset'): array
+    {
+        foreach ($elements as $i => $el) {
+            if (!is_array($el)) {
+                continue;
+            }
+            $settings = is_array($el['settings'] ?? null) ? $el['settings'] : [];
+            $elTitle = (string) ($settings['_title'] ?? $defaultTitle);
+
+            foreach (['image', 'background_image'] as $mediaKey) {
+                $url = is_array($settings[$mediaKey] ?? null) ? (string) ($settings[$mediaKey]['url'] ?? '') : '';
+                if (str_starts_with($url, 'data:image/') && preg_match('/^data:(image\/[a-z0-9.+-]+);base64,(.+)$/is', $url, $m) === 1) {
+                    $stored = $this->assets->storeBase64Asset('', $m[2], strtolower($m[1]), $elTitle);
+                    if ($stored !== null && $stored['id'] > 0) {
+                        $settings[$mediaKey] = ['id' => $stored['id'], 'url' => $stored['url']];
+                    }
+                }
+            }
+
+            $el['settings'] = $settings;
+            if (!empty($el['elements']) && is_array($el['elements'])) {
+                $el['elements'] = $this->hydrateCompiledElementAssets($el['elements'], $defaultTitle);
+            }
+            $elements[$i] = $el;
+        }
+        return $elements;
     }
 }

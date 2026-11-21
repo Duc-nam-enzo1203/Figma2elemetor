@@ -197,6 +197,7 @@ export function compileElementorV3(doc, options = {}) {
 
     if (el && el.settings) {
       applyChildFlexAndPositionSettings(el, node, parentNode, isRoot);
+      applyWidgetWrapperBoxStyles(el, node);
       el.settings._f2e_node_id = node.sourceNodeId || node.id;
       el.settings._title = node.content && node.content.name ? node.content.name : wType;
     }
@@ -346,6 +347,77 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
       }
     } else if (sizingH === 'FILL') {
       settings._element_width = 'inherit';
+    }
+  }
+}
+
+const SELF_STYLED_WIDGETS = new Set([
+  'button',
+  'divider',
+  'spacer',
+  'icon',
+  'image',
+  'html',
+  'theme-site-logo',
+  'site-logo',
+  'nested-accordion',
+  'accordion',
+  'toggle',
+  'nested-tabs',
+  'tabs',
+]);
+
+/**
+ * Preserves Frame-level box styles (padding, background, gradient, border, border-radius, box-shadow)
+ * on Elementor Widgets using Elementor's Advanced wrapper controls (`_padding`, `_background_*`, `_border_*`).
+ */
+function applyWidgetWrapperBoxStyles(el, node) {
+  if (!el || el.elType !== 'widget' || !node) return;
+  if (node.type === 'text' || node.type === 'vector') return;
+  if (SELF_STYLED_WIDGETS.has(el.widgetType)) return;
+
+  const settings = el.settings;
+  const style = node.style || {};
+  const layout = node.layout || {};
+
+  if (
+    layout.padding &&
+    !settings._padding &&
+    (layout.padding.top || layout.padding.right || layout.padding.bottom || layout.padding.left)
+  ) {
+    settings._padding = boxValue(layout.padding);
+  }
+
+  if (!settings._background_background && !settings.background_color) {
+    if (style.gradient) {
+      settings._background_background = 'gradient';
+      settings._background_gradient_type = style.gradient.type || 'linear';
+      settings._background_color = style.gradient.color1;
+      settings._background_color_stop = { unit: '%', size: style.gradient.stop1 ?? 0, sizes: [] };
+      settings._background_color_b = style.gradient.color2;
+      settings._background_color_b_stop = { unit: '%', size: style.gradient.stop2 ?? 100, sizes: [] };
+      settings._background_gradient_angle = { unit: 'deg', size: style.gradient.angle ?? 180, sizes: [] };
+    } else if (style.background) {
+      settings._background_background = 'classic';
+      settings._background_color = style.background;
+    }
+  }
+
+  if (style.borderWidth && style.borderColor && !settings._border_border) {
+    settings._border_border = 'solid';
+    settings._border_width = boxValue(style.borderWidth);
+    settings._border_color = style.borderColor;
+  }
+
+  if (style.radius && !settings._border_radius && !settings.border_radius) {
+    settings._border_radius = boxValue(style.radius);
+  }
+
+  if (style.boxShadow && !settings._box_shadow_box_shadow) {
+    settings._box_shadow_box_shadow_type = 'yes';
+    settings._box_shadow_box_shadow = style.boxShadow;
+    if (style.boxShadow.position === 'inset') {
+      settings._box_shadow_box_shadow_position = 'inset';
     }
   }
 }
@@ -528,28 +600,9 @@ function flexGapValue(layout) {
   };
 }
 
-function applyGlobalColor(settings, key, colorHex) {
-  if (!colorHex || typeof colorHex !== 'string') return;
-  const hex = colorHex.trim().toUpperCase();
-  let gId = null;
-  if (['#64A14F', '#15803D', '#16A34A', '#2563EB', '#3B82F6'].includes(hex)) {
-    gId = 'globals/colors?id=primary';
-  } else if (['#038132', '#14532D', '#1E40AF', '#1D4ED8'].includes(hex)) {
-    gId = 'globals/colors?id=secondary';
-  } else if (['#FFCC00', '#F59E0B', '#FBBF24', '#EC4899', '#DB2777'].includes(hex)) {
-    gId = 'globals/colors?id=accent';
-  } else if (['#FFFFFF', '#F8FAFC'].includes(hex)) {
-    gId = 'globals/colors?id=848461d';
-  } else if (['#E2E8F0', '#CBD5E1', '#E5E7EB', '#334155'].includes(hex)) {
-    gId = 'globals/colors?id=31b945e';
-  } else if (['#0F172A', '#1E293B', '#111827', '#000000'].includes(hex)) {
-    gId = 'globals/colors?id=text';
-  }
-
-  if (gId) {
-    if (!settings.__globals__) settings.__globals__ = {};
-    settings.__globals__[key] = gId;
-  }
+function applyGlobalColor() {
+  // Exact Figma hex colors are preserved directly on Elementor controls.
+  // Verified Active Kit `__globals__` IDs are bound server-side by WordPress `GlobalStyles::bindGlobalsToElements()`.
 }
 
 function applyCommonBoxStyle(settings, style = {}, resolveMedia) {
@@ -564,7 +617,6 @@ function applyCommonBoxStyle(settings, style = {}, resolveMedia) {
   } else if (style.background) {
     settings.background_background = 'classic';
     settings.background_color = style.background;
-    applyGlobalColor(settings, 'background_color', style.background);
   }
 
   if (style.backgroundImage && resolveMedia) {
@@ -582,36 +634,47 @@ function applyCommonBoxStyle(settings, style = {}, resolveMedia) {
     settings.border_radius = boxValue(style.radius);
   }
 
-  if (style.borderWidth && style.borderColor) {
+  const bt = Math.round(Number(style.borderWidth && style.borderWidth.top) || 0);
+  const br = Math.round(Number(style.borderWidth && style.borderWidth.right) || 0);
+  const bb = Math.round(Number(style.borderWidth && style.borderWidth.bottom) || 0);
+  const bl = Math.round(Number(style.borderWidth && style.borderWidth.left) || 0);
+  const hasAnyBorderWidth = bt > 0 || br > 0 || bb > 0 || bl > 0;
+  const isVerticalDividerOnly = bt === 0 && bb === 0 && (br > 0 || bl > 0);
+
+  if (hasAnyBorderWidth && style.borderColor) {
     settings.border_border = 'solid';
     settings.border_width = boxValue(style.borderWidth);
     settings.border_color = style.borderColor;
-    applyGlobalColor(settings, 'border_color', style.borderColor);
+    // When a column divider border is right-only or left-only on Desktop, clear it on Mobile where columns stack vertically
+    if (isVerticalDividerOnly) {
+      settings.border_width_mobile = boxValue({ top: 0, right: 0, bottom: 0, left: 0 }, true);
+    }
   }
 
   // Linear Gradient Border Solution:
   // Elementor does not natively support linear-gradient on border-color.
-  // We automatically inject custom_css for pixel-perfect gradient borders,
-  // while keeping settings.border_color as a close fallback for Elementor Free!
-  if (style.borderGradient && style.borderWidth) {
-    const bw = Math.max(1, Number(style.borderWidth.top) || 1);
+  // Preserve EXACT per-side border widths (`border-width: T R B L !important;`) so 1-sided borders
+  // (e.g. `border-right: 1px solid`) NEVER turn into 4-sided full box borders!
+  if (style.borderGradient && hasAnyBorderWidth) {
     const g = style.borderGradient;
     const gradCss = style.devModeBorderImage && style.devModeBorderImage.startsWith('linear-gradient')
       ? style.devModeBorderImage
       : `linear-gradient(${g.angle}deg, ${g.color1} ${g.stop1}%, ${g.color2} ${g.stop2}%)`;
     const bgSolid = style.background || '#ffffff';
-    // For CSS background dual-clipping to be valid according to W3C CSS spec,
-    // the first layer CANNOT be a bare color (#ffffff) — it must be a gradient image!
     const bgLayer = style.gradient
       ? `linear-gradient(${style.gradient.angle}deg, ${style.gradient.color1} ${style.gradient.stop1}%, ${style.gradient.color2} ${style.gradient.stop2}%)`
       : `linear-gradient(${bgSolid}, ${bgSolid})`;
+    const bwCss = (bt === br && br === bb && bb === bl) ? `${bt}px` : `${bt}px ${br}px ${bb}px ${bl}px`;
+    const allFourSides = bt > 0 && br > 0 && bb > 0 && bl > 0;
 
     let borderSnippet = '';
-    if (style.radius) {
-      // Valid dual-background clipping with background-origin and background-clip
-      borderSnippet = `selector {\n  border: ${bw}px solid transparent !important;\n  background-image: ${bgLayer}, ${gradCss} !important;\n  background-origin: border-box !important;\n  background-clip: padding-box, border-box !important;\n}`;
+    if (style.radius && allFourSides) {
+      borderSnippet = `selector {\n  border-style: solid !important;\n  border-color: transparent !important;\n  border-width: ${bwCss} !important;\n  background-image: ${bgLayer}, ${gradCss} !important;\n  background-origin: border-box !important;\n  background-clip: padding-box, border-box !important;\n}`;
     } else {
-      borderSnippet = `selector {\n  border: ${bw}px solid !important;\n  border-image: ${gradCss} 1 !important;\n}`;
+      borderSnippet = `selector {\n  border-style: solid !important;\n  border-width: ${bwCss} !important;\n  border-image: ${gradCss} 1 !important;\n}`;
+      if (isVerticalDividerOnly) {
+        borderSnippet += `\n@media (max-width: 767px) {\n  selector { border-width: 0 !important; }\n}`;
+      }
     }
     settings.custom_css = (settings.custom_css ? settings.custom_css + '\n' : '') + borderSnippet;
   }
@@ -685,27 +748,6 @@ function applyTypographySettings(settings, prefix, text = {}, responsive = {}) {
       sizes: [],
     };
   }
-
-  // Global Typography Token binding (only bind when explicitly matches standard typographic scales)
-  // If the designer used custom display sizes (e.g. 40px stats, decorative numbers, custom weights),
-  // preserve custom typography so Elementor does not override it with theme defaults!
-  let gId = null;
-  const isDisplayOrCustom = size > 36 || (text.fontWeight && text.fontWeight !== '400' && text.fontWeight !== '600' && text.fontWeight !== '700');
-  if (!isDisplayOrCustom) {
-    if (size >= 30) {
-      gId = 'globals/typography?id=primary';
-    } else if (size >= 20) {
-      gId = 'globals/typography?id=secondary';
-    } else if (size >= 14 && size <= 18) {
-      gId = 'globals/typography?id=text';
-    } else if (size < 14) {
-      gId = 'globals/typography?id=accent';
-    }
-  }
-  if (gId) {
-    if (!settings.__globals__) settings.__globals__ = {};
-    settings.__globals__[`${prefix}_typography`] = gId;
-  }
 }
 
 function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, resolveMedia) {
@@ -770,24 +812,22 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     const padR = Number(layout.padding && layout.padding.right) || 0;
     if (padL >= 40 && padR >= 40 && (Number(layout.width) || 0) >= 1100) {
       const innerContentW = Math.max(960, Math.min(1320, (Number(layout.width) || 1440) - padL - padR));
+      const padT = Number(layout.padding && layout.padding.top) || 64;
+      const padB = Number(layout.padding && layout.padding.bottom) || 64;
       settings.content_width = 'boxed';
       settings.boxed_width = { unit: 'px', size: innerContentW, sizes: [] };
       settings.boxed_width_tablet = { unit: 'px', size: 768, sizes: [] };
       settings.boxed_width_mobile = { unit: 'px', size: 360, sizes: [] };
-      settings.padding = boxValue({
-        top: (layout.padding && layout.padding.top) || 64,
-        right: 24,
-        bottom: (layout.padding && layout.padding.bottom) || 64,
-        left: 24,
-      });
-      settings.padding_tablet = boxValue({ top: 50, right: 24, bottom: 50, left: 24 });
-      settings.padding_mobile = boxValue({ top: 30, right: 16, bottom: 30, left: 16 });
+      settings.padding = boxValue({ top: padT, right: 24, bottom: padB, left: 24 });
+      settings.padding_tablet = boxValue({ top: Math.min(padT, 50), right: 24, bottom: Math.min(padB, 50), left: 24 });
+      settings.padding_mobile = boxValue({ top: Math.min(padT, 30), right: 16, bottom: Math.min(padB, 30), left: 16 });
       settings.margin = boxValue({ top: 0, right: 0, bottom: 0, left: 0 });
     } else {
+      const basePad = layout.padding || { top: 60, right: 24, bottom: 60, left: 24 };
       settings.content_width = 'full';
-      settings.padding = boxValue(layout.padding || { top: 60, right: 24, bottom: 60, left: 24 });
-      settings.padding_tablet = boxValue({ top: 40, right: 20, bottom: 40, left: 20 });
-      settings.padding_mobile = boxValue({ top: 24, right: 16, bottom: 24, left: 16 });
+      settings.padding = boxValue(basePad);
+      settings.padding_tablet = boxValue((node.responsive && node.responsive.tablet && node.responsive.tablet.padding) || scaleBox(basePad, 0.85, 40));
+      settings.padding_mobile = boxValue((node.responsive && node.responsive.mobile && node.responsive.mobile.padding) || scaleBox(basePad, 0.65, 24));
       settings.margin = boxValue({ top: 0, right: 0, bottom: 0, left: 0 });
     }
   } else {
@@ -1051,18 +1091,41 @@ function inferHeadingTag(node) {
   return 'h5';
 }
 
+function getTextGradientCss(text) {
+  if (!text) return null;
+  if (typeof text.gradientCss === 'string' && text.gradientCss.includes('gradient')) {
+    return text.gradientCss.trim();
+  }
+  if (text.gradient && text.gradient.color1 && text.gradient.color2) {
+    const g = text.gradient;
+    return `linear-gradient(${g.angle ?? 180}deg, ${g.color1} ${g.stop1 ?? 0}%, ${g.color2} ${g.stop2 ?? 100}%)`;
+  }
+  return null;
+}
+
+function buildTextClipRule(selectorTarget, gradCss) {
+  return `${selectorTarget} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+}
+
 function buildHeading(node, allocId) {
   const text = node.text || {};
+  const gradCss = getTextGradientCss(text);
   const settings = {
     title: text.characters || (node.content && node.content.name) || 'Heading',
     header_size: inferHeadingTag(node),
     align: text.align === 'justified' ? 'justify' : (text.align || 'left'),
   };
-  if (text.color) {
-    settings.title_color = text.color;
-    applyGlobalColor(settings, 'title_color', text.color);
+  const fallbackColor = text.color || (text.gradient && (text.gradient.color2 || text.gradient.color1)) || null;
+  if (fallbackColor) {
+    settings.title_color = fallbackColor;
+    if (!gradCss) {
+      applyGlobalColor(settings, 'title_color', fallbackColor);
+    }
   }
   applyTypographySettings(settings, 'typography', text, node.responsive);
+  if (gradCss) {
+    settings.custom_css = buildTextClipRule('selector .elementor-heading-title', gradCss);
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
@@ -1075,17 +1138,30 @@ function buildHeading(node, allocId) {
 
 function buildTextEditor(node, allocId) {
   const text = node.text || {};
+  const gradCss = getTextGradientCss(text);
   const raw = String(text.characters || '').trim();
-  const paragraphs = raw.split(/\n+/).map((line) => `<p style="margin:0;">${escapeHtml(line)}</p>`).join('');
+  const inlineGradStyle = gradCss
+    ? `background:${gradCss};-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;`
+    : '';
+  const paragraphs = raw
+    .split(/\n+/)
+    .map((line) => `<p style="margin:0;${inlineGradStyle}">${escapeHtml(line)}</p>`)
+    .join('');
   const settings = {
     editor: paragraphs || '<p style="margin:0;"></p>',
     align: text.align === 'justified' ? 'justify' : (text.align || 'left'),
   };
-  if (text.color) {
-    settings.text_color = text.color;
-    applyGlobalColor(settings, 'text_color', text.color);
+  const fallbackColor = text.color || (text.gradient && (text.gradient.color2 || text.gradient.color1)) || null;
+  if (fallbackColor) {
+    settings.text_color = fallbackColor;
+    if (!gradCss) {
+      applyGlobalColor(settings, 'text_color', fallbackColor);
+    }
   }
   applyTypographySettings(settings, 'typography', text, node.responsive);
+  if (gradCss) {
+    settings.custom_css = buildTextClipRule('selector', gradCss);
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
@@ -1135,9 +1211,10 @@ function buildButton(node, allocId) {
   if (node.link) {
     settings.link = { url: node.link, is_external: '', nofollow: '' };
   }
-  if (text.color) {
-    settings.button_text_color = text.color;
-    applyGlobalColor(settings, 'button_text_color', text.color);
+  const btnTextColor = text.color || (text.gradient && (text.gradient.color2 || text.gradient.color1)) || null;
+  if (btnTextColor) {
+    settings.button_text_color = btnTextColor;
+    applyGlobalColor(settings, 'button_text_color', btnTextColor);
   }
   applyTypographySettings(settings, 'typography', text, node.responsive);
   if (style.radius) settings.border_radius = boxValue(style.radius);
@@ -1147,8 +1224,19 @@ function buildButton(node, allocId) {
     settings.border_color = style.borderColor;
     applyGlobalColor(settings, 'border_color', style.borderColor);
   }
-  if (layout.padding && (layout.padding.top || layout.padding.left)) {
+  if (style.boxShadow) {
+    settings.button_box_shadow_box_shadow_type = 'yes';
+    settings.button_box_shadow_box_shadow = style.boxShadow;
+    if (style.boxShadow.position === 'inset') {
+      settings.button_box_shadow_box_shadow_position = 'inset';
+    }
+  }
+  if (layout.padding && (layout.padding.top || layout.padding.right || layout.padding.bottom || layout.padding.left)) {
     settings.text_padding = boxValue(layout.padding);
+  }
+  const btnTextGrad = getTextGradientCss(text);
+  if (btnTextGrad) {
+    settings.custom_css = buildTextClipRule('selector .elementor-button-text', btnTextGrad);
   }
   return {
     id: allocId(node.id),
@@ -1285,13 +1373,17 @@ function buildIconOrInlineSvg(node, allocId, resolveMedia) {
     }
 
     // Render exact inline SVG inside a clean flex wrapper via Elementor HTML widget
+    const svgWMatch = node.svg.markup.match(/\bwidth=["'](\d+(?:\.\d+)?)/i);
+    const svgHMatch = node.svg.markup.match(/\bheight=["'](\d+(?:\.\d+)?)/i);
+    const boxW = Math.max(w, svgWMatch ? Math.round(parseFloat(svgWMatch[1])) : w);
+    const boxH = Math.max(h, svgHMatch ? Math.round(parseFloat(svgHMatch[1])) : h);
     return {
       id: allocId(node.id),
       elType: 'widget',
       widgetType: 'html',
       isInner: false,
       settings: {
-        html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${w}px;height:${h}px;line-height:0;">${node.svg.markup}</div>`,
+        html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${boxW}px;height:${boxH}px;flex-shrink:0;line-height:0;">${node.svg.markup}</div>`,
       },
       elements: [],
     };
@@ -1418,6 +1510,14 @@ function buildSpacer(node, allocId) {
 }
 
 function collectSubtreeTexts(node, nodes) {
+  if (!node) return [];
+  if (Array.isArray(node.extractedTexts) && node.extractedTexts.length > 0 && (!node.children || node.children.length === 0)) {
+    return node.extractedTexts.map((t, idx) => ({
+      id: `${node.id}-txt-${idx}`,
+      text: t,
+      responsive: node.responsive,
+    }));
+  }
   const out = [];
   const walk = (n) => {
     if (!n) return;
@@ -1447,9 +1547,12 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
   const titleNode = texts[0];
   const descNode = texts[1];
 
+  const titleTypo = content.titleTypography || (titleNode && titleNode.text) || node.text || null;
+  const descTypo = content.descriptionTypography || (descNode && descNode.text) || null;
+
   if (!title) {
-    title = (titleNode && titleNode.text && titleNode.text.characters) || content.name || 'Feature Title';
-    desc = (descNode && descNode.text && descNode.text.characters) || '';
+    title = (titleTypo && titleTypo.characters) || content.name || 'Feature Title';
+    desc = (descTypo && descTypo.characters) || '';
   }
 
   const pos = content.position || ((node.layout && node.layout.direction === 'row') ? 'left' : 'top');
@@ -1458,19 +1561,38 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
     description_text: desc,
     position: pos,
   };
-  if (titleNode && titleNode.text && titleNode.text.color) {
-    settings.title_color = titleNode.text.color;
-    applyGlobalColor(settings, 'title_color', titleNode.text.color);
+
+  if (titleTypo && titleTypo.align) {
+    settings.text_align = titleTypo.align === 'justified' ? 'justify' : titleTypo.align;
   }
-  if (titleNode && titleNode.text) {
-    applyTypographySettings(settings, 'title_typography', titleNode.text, node.responsive);
+
+  const titleGrad = getTextGradientCss(titleTypo);
+  const titleColor = (titleTypo && (titleTypo.color || (titleTypo.gradient && titleTypo.gradient.color2))) || null;
+  if (titleColor) {
+    settings.title_color = titleColor;
+    if (!titleGrad) {
+      applyGlobalColor(settings, 'title_color', titleColor);
+    }
   }
-  if (descNode && descNode.text && descNode.text.color) {
-    settings.description_color = descNode.text.color;
-    applyGlobalColor(settings, 'description_color', descNode.text.color);
+  if (titleTypo) {
+    applyTypographySettings(settings, 'title_typography', titleTypo, node.responsive);
   }
-  if (descNode && descNode.text) {
-    applyTypographySettings(settings, 'description_typography', descNode.text, node.responsive);
+  if (titleGrad) {
+    settings.custom_css = buildTextClipRule('selector .elementor-icon-box-title, selector .elementor-image-box-title', titleGrad);
+  }
+
+  const descColor = (descTypo && (descTypo.color || (descTypo.gradient && descTypo.gradient.color2))) || null;
+  if (descColor) {
+    settings.description_color = descColor;
+    applyGlobalColor(settings, 'description_color', descColor);
+  }
+  if (descTypo) {
+    applyTypographySettings(settings, 'description_typography', descTypo, node.responsive);
+  }
+
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    const spaceKey = wType === 'image-box' ? 'image_space' : 'icon_space';
+    settings[spaceKey] = { unit: 'px', size: node.layout.gap, sizes: [] };
   }
 
   const sha = (node.raster && node.raster.sha256) || (node.image && node.image.sha256) || (node.svg && node.svg.sha256) || '';
@@ -1492,7 +1614,10 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
     } else {
       settings.selected_icon = { value: 'fas fa-bolt', library: 'fa-solid' };
     }
-    settings.primary_color = '#2563EB';
+    settings.primary_color = content.iconColor || (node.svg && node.svg.color) || '#2563EB';
+    if (content.iconSize && Number(content.iconSize) > 0) {
+      settings.icon_size = { unit: 'px', size: Number(content.iconSize), sizes: [] };
+    }
   }
 
   return {
@@ -1507,6 +1632,7 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
 
 function buildIconList(node, nodes, allocId) {
   const items = (node.content && node.content.iconList) || [];
+  const texts = collectSubtreeTexts(node, nodes);
   let listData = [];
   if (items.length > 0) {
     listData = items.map((it, idx) => ({
@@ -1516,37 +1642,45 @@ function buildIconList(node, nodes, allocId) {
       link: it.link ? { url: it.link } : undefined,
     }));
   } else {
-    const texts = collectSubtreeTexts(node, nodes).filter((t) => t.text.characters.trim().length > 1);
-    listData = texts.map((t, idx) => ({
+    const validTexts = texts.filter((t) => t.text && t.text.characters && t.text.characters.trim().length > 1);
+    listData = validTexts.map((t, idx) => ({
       _id: shortId(`il-${idx}`),
       text: t.text.characters.replace(/^[\u2713\u2714\u2022\u00b7\u25cf\u25cb\u2013\u2014\-*]\s*/, ''),
       selected_icon: { value: 'fas fa-circle', library: 'fa-solid' },
     }));
   }
 
+  const firstTypo = node.text || (texts[0] && texts[0].text) || null;
   const isRow = (node.layout && node.layout.direction === 'row') || (Number(node.layout && node.layout.width) || 0) > 600;
   const gap = Math.max(12, Number(node.layout && node.layout.gap) || 24);
-  const color = (node.text && node.text.color) || '#FFFFFF';
+  const textColor = (firstTypo && (firstTypo.color || (firstTypo.gradient && firstTypo.gradient.color2))) || '#FFFFFF';
+  const iconColor = (node.content && node.content.iconColor) || textColor;
+  const iconSize = (node.content && node.content.iconSize && node.content.iconSize <= 32) ? node.content.iconSize : 6;
 
   const settings = {
     icon_list: listData,
     view: isRow ? 'inline' : 'traditional',
     space_between: { unit: 'px', size: gap, sizes: [] },
-    icon_size: { unit: 'px', size: 6, sizes: [] },
-    icon_color: color,
-    text_color: color,
+    icon_size: { unit: 'px', size: iconSize, sizes: [] },
+    icon_color: iconColor,
+    text_color: textColor,
   };
 
-  if (color) {
-    applyGlobalColor(settings, 'text_color', color);
-    applyGlobalColor(settings, 'icon_color', color);
+  if (textColor) {
+    applyGlobalColor(settings, 'text_color', textColor);
+  }
+  if (iconColor) {
+    applyGlobalColor(settings, 'icon_color', iconColor);
   }
 
-  if (node.text) {
-    applyTypographySettings(settings, 'icon_typography', node.text, node.responsive);
-    // Fallback for older elementor skins that use generic typography prefix
-    if (node.text.fontSize) {
-      settings.typography_font_size = { unit: 'px', size: node.text.fontSize, sizes: [] };
+  if (firstTypo) {
+    applyTypographySettings(settings, 'icon_typography', firstTypo, node.responsive);
+    if (firstTypo.fontSize) {
+      settings.typography_font_size = { unit: 'px', size: firstTypo.fontSize, sizes: [] };
+    }
+    const listGrad = getTextGradientCss(firstTypo);
+    if (listGrad) {
+      settings.custom_css = buildTextClipRule('selector .elementor-icon-list-text', listGrad);
     }
   }
 
@@ -1562,30 +1696,58 @@ function buildIconList(node, nodes, allocId) {
 
 function buildProgress(node, nodes, allocId) {
   const texts = collectSubtreeTexts(node, nodes);
+  const titleTypo = (texts[0] && texts[0].text) || node.text || null;
+  const pctNode = texts.find((t) => /%/.test((t.text && t.text.characters) || ''));
+  const pctVal = pctNode ? (parseInt(pctNode.text.characters.replace(/[^0-9]/g, ''), 10) || 85) : 85;
+  const settings = {
+    title: (titleTypo && titleTypo.characters) || (node.content && node.content.name) || 'Skill',
+    percent: { unit: '%', size: Math.min(100, Math.max(0, pctVal)), sizes: [] },
+  };
+  if (titleTypo) {
+    if (titleTypo.color) settings.title_color = titleTypo.color;
+    applyTypographySettings(settings, 'typography', titleTypo, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.bar_color = node.style.background;
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'progress',
     isInner: false,
-    settings: {
-      title: (texts[0] && texts[0].text.characters) || (node.content && node.content.name) || 'Skill',
-      percent: { unit: '%', size: 85, sizes: [] },
-    },
+    settings,
     elements: [],
   };
 }
 
 function buildAlert(node, nodes, allocId) {
   const texts = collectSubtreeTexts(node, nodes);
+  const titleTypo = (texts[0] && texts[0].text) || node.text || null;
+  const descTypo = (texts[1] && texts[1].text) || null;
+  const settings = {
+    alert_title: (titleTypo && titleTypo.characters) || (node.content && node.content.name) || 'Notice',
+    alert_description: (descTypo && descTypo.characters) || '',
+  };
+  if (titleTypo) {
+    if (titleTypo.color) settings.title_color = titleTypo.color;
+    applyTypographySettings(settings, 'typography_title', titleTypo, node.responsive);
+  }
+  if (descTypo) {
+    if (descTypo.color) settings.description_color = descTypo.color;
+    applyTypographySettings(settings, 'typography_description', descTypo, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.background_color = node.style.background;
+  }
+  if (node.style && node.style.borderColor) {
+    settings.border_color = node.style.borderColor;
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'alert',
     isInner: false,
-    settings: {
-      alert_title: (texts[0] && texts[0].text.characters) || (node.content && node.content.name) || 'Notice',
-      alert_description: (texts[1] && texts[1].text.characters) || '',
-    },
+    settings,
     elements: [],
   };
 }
@@ -1880,20 +2042,40 @@ function buildGalleryOrCarousel(node, nodes, wType, allocId, resolveMedia) {
 }
 
 function buildTestimonial(node, nodes, allocId, resolveMedia) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+  const textItems = collectSubtreeTexts(node, nodes);
   const imgs = collectSubtreeImages(node, nodes);
-  const sorted = [...texts].sort((a, b) => b.length - a.length);
+  const sortedNodes = [...textItems].sort((a, b) => ((b.text && b.text.characters) || '').length - ((a.text && a.text.characters) || '').length);
+
+  const contentNode = sortedNodes[0] || null;
+  const nameNode = sortedNodes[1] || null;
+  const jobNode = sortedNodes[2] || null;
+
+  const settings = {
+    testimonial_content: (contentNode && contentNode.text && contentNode.text.characters) || 'Great experience working with this team.',
+    testimonial_name: (nameNode && nameNode.text && nameNode.text.characters) || (node.content && node.content.name) || 'Client Name',
+    testimonial_job: (jobNode && jobNode.text && jobNode.text.characters) || 'Customer',
+    testimonial_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
+  };
+
+  if (contentNode && contentNode.text) {
+    if (contentNode.text.color) settings.content_content_color = contentNode.text.color;
+    applyTypographySettings(settings, 'content_typography', contentNode.text, node.responsive);
+  }
+  if (nameNode && nameNode.text) {
+    if (nameNode.text.color) settings.name_text_color = nameNode.text.color;
+    applyTypographySettings(settings, 'name_typography', nameNode.text, node.responsive);
+  }
+  if (jobNode && jobNode.text) {
+    if (jobNode.text.color) settings.job_text_color = jobNode.text.color;
+    applyTypographySettings(settings, 'job_typography', jobNode.text, node.responsive);
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'testimonial',
     isInner: false,
-    settings: {
-      testimonial_content: sorted[0] || 'Great experience working with this team.',
-      testimonial_name: sorted[1] || (node.content && node.content.name) || 'Client Name',
-      testimonial_job: sorted[2] || 'Customer',
-      testimonial_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
-    },
+    settings,
     elements: [],
   };
 }
@@ -1916,46 +2098,117 @@ function buildStarRating(node, allocId) {
 function buildSocialIcons(node, nodes, allocId) {
   const platforms = ['facebook', 'twitter', 'x', 'instagram', 'linkedin', 'youtube', 'tiktok', 'github', 'telegram', 'whatsapp'];
   const list = [];
-  for (const cid of node.children || []) {
-    const child = nodes[cid];
-    if (!child) continue;
-    const name = String((child.content && child.content.name) || '').toLowerCase();
-    const matched = platforms.find((p) => name.includes(p)) || 'link';
-    const iconVal = matched === 'x' || matched === 'twitter'
-      ? 'fab fa-x-twitter'
-      : (matched === 'link' ? 'fas fa-share-alt' : `fab fa-${matched}`);
-    list.push({
-      _id: shortId(cid),
-      social_icon: { value: iconVal, library: matched === 'link' ? 'fa-solid' : 'fa-brands' },
-      link: { url: child.link || '#', is_external: 'true', nofollow: '' },
-    });
+  const extractedSocials = (node.content && Array.isArray(node.content.socialItems)) ? node.content.socialItems : [];
+
+  if (extractedSocials.length > 0) {
+    for (const sItem of extractedSocials) {
+      const name = String(sItem.name || '').toLowerCase();
+      const matched = platforms.find((p) => name.includes(p)) || 'link';
+      const iconVal = matched === 'x' || matched === 'twitter'
+        ? 'fab fa-x-twitter'
+        : (matched === 'link' ? 'fas fa-share-alt' : `fab fa-${matched}`);
+      list.push({
+        _id: shortId(sItem.id || name),
+        social_icon: { value: iconVal, library: matched === 'link' ? 'fa-solid' : 'fa-brands' },
+        link: { url: sItem.link || '#', is_external: 'true', nofollow: '' },
+      });
+    }
+  } else {
+    for (const cid of node.children || []) {
+      const child = nodes[cid];
+      if (!child) continue;
+      const name = String((child.content && child.content.name) || '').toLowerCase();
+      const matched = platforms.find((p) => name.includes(p)) || 'link';
+      const iconVal = matched === 'x' || matched === 'twitter'
+        ? 'fab fa-x-twitter'
+        : (matched === 'link' ? 'fas fa-share-alt' : `fab fa-${matched}`);
+      list.push({
+        _id: shortId(cid),
+        social_icon: { value: iconVal, library: matched === 'link' ? 'fa-solid' : 'fa-brands' },
+        link: { url: child.link || '#', is_external: 'true', nofollow: '' },
+      });
+    }
+  }
+
+  const settings = { social_icon_list: list };
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.icon_spacing = { unit: 'px', size: node.layout.gap, sizes: [] };
   }
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'social-icons',
     isInner: false,
-    settings: { social_icon_list: list },
+    settings,
     elements: [],
   };
 }
 
 function buildCounter(node, nodes, allocId) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
-  const numText = texts.find((t) => /\d/.test(t)) || '100';
-  const labelText = texts.find((t) => t !== numText) || (node.content && node.content.name) || 'Stats';
-  const numMatch = /([0-9.,]+)(.*)/.exec(numText.trim());
+  const textNodes = collectSubtreeTexts(node, nodes);
+  const numNode = textNodes.find((n) => /\d/.test((n.text && n.text.characters) || '')) || (node.text ? node : textNodes[0]);
+  const labelNode = textNodes.find((n) => n !== numNode) || null;
+
+  const numTypo = (numNode && numNode.text) || node.text || {};
+  const numText = String(numTypo.characters || '100').trim();
+  const labelText = (labelNode && labelNode.text && labelNode.text.characters) ? String(labelNode.text.characters).trim() : '';
+
+  const numMatch = /^([^0-9+-]*?)([0-9.,]+)(.*)$/.exec(numText);
+  let prefix = (numMatch && numMatch[1]) || '';
+  const rawDigits = ((numMatch && numMatch[2]) || '100').replace(/,/g, '');
+  const suffix = (numMatch && numMatch[3]) || '';
+
+  // Preserve leading zero(s) such as "08" -> prefix: "0", ending_number: 8
+  const leadZeroMatch = /^(0+)(?=\d)/.exec(rawDigits);
+  if (leadZeroMatch) {
+    prefix += leadZeroMatch[1];
+  }
+  const endingNumber = Number(rawDigits);
+
+  const settings = {
+    starting_number: 0,
+    ending_number: Number.isFinite(endingNumber) ? endingNumber : 100,
+    prefix,
+    suffix,
+    title: labelText,
+  };
+
+  const gradCss = getTextGradientCss(numTypo);
+  const numColor = numTypo.color || (numTypo.gradient && (numTypo.gradient.color2 || numTypo.gradient.color1)) || null;
+  if (numColor) {
+    settings.number_color = numColor;
+    if (!gradCss) {
+      applyGlobalColor(settings, 'number_color', numColor);
+    }
+  }
+
+  if (numTypo.fontFamily || numTypo.fontSize || numTypo.fontWeight) {
+    applyTypographySettings(settings, 'typography_number', numTypo, (numNode && numNode.responsive) || node.responsive);
+  }
+
+  if (labelNode && labelNode.text) {
+    const lblTypo = labelNode.text;
+    const lblColor = lblTypo.color || (lblTypo.gradient && (lblTypo.gradient.color2 || lblTypo.gradient.color1)) || null;
+    if (lblColor) {
+      settings.title_color = lblColor;
+      applyGlobalColor(settings, 'title_color', lblColor);
+    }
+    applyTypographySettings(settings, 'typography_title', lblTypo, labelNode.responsive || node.responsive);
+  }
+
+  if (gradCss) {
+    settings.custom_css = buildTextClipRule(
+      'selector .elementor-counter-number-wrapper, selector .elementor-counter-number',
+      gradCss
+    );
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'counter',
     isInner: false,
-    settings: {
-      starting_number: 0,
-      ending_number: Number(((numMatch && numMatch[1]) || '100').replace(/,/g, '')) || 100,
-      suffix: (numMatch && numMatch[2]) || '',
-      title: labelText,
-    },
+    settings,
     elements: [],
   };
 }
@@ -1964,10 +2217,11 @@ function buildCounter(node, nodes, allocId) {
 
 function buildProForm(node, nodes, allocId) {
   const formFields = [];
-  let submitLabel = (node.content && node.content.submitLabel) || 'Send Message';
+  const content = node.content || {};
+  let submitLabel = content.submitLabel || 'Send Message';
 
-  if (node.content && Array.isArray(node.content.formFields) && node.content.formFields.length > 0) {
-    for (const [idx, f] of node.content.formFields.entries()) {
+  if (Array.isArray(content.formFields) && content.formFields.length > 0) {
+    for (const [idx, f] of content.formFields.entries()) {
       formFields.push({
         _id: shortId(`${node.id}-fld-${idx}`),
         custom_id: `field_${idx + 1}`,
@@ -2015,26 +2269,56 @@ function buildProForm(node, nodes, allocId) {
     );
   }
 
+  const settings = {
+    form_name: content.name || 'Figma Form',
+    form_fields: formFields,
+    button_text: submitLabel,
+    button_size: 'md',
+  };
+
+  if (node.layout && typeof node.layout.gap === 'number') {
+    settings.row_gap = { unit: 'px', size: node.layout.gap, sizes: [] };
+  }
+  const fieldTypo = content.fieldTypography || node.text || null;
+  if (fieldTypo) {
+    if (fieldTypo.color) settings.field_text_color = fieldTypo.color;
+    applyTypographySettings(settings, 'field_typography', fieldTypo, node.responsive);
+  }
+  if (content.fieldStyle) {
+    if (content.fieldStyle.background) settings.field_background_color = content.fieldStyle.background;
+    if (content.fieldStyle.borderColor) settings.field_border_color = content.fieldStyle.borderColor;
+    if (content.fieldStyle.borderWidth) settings.field_border_width = boxValue(content.fieldStyle.borderWidth);
+    if (content.fieldStyle.radius) settings.field_border_radius = boxValue(content.fieldStyle.radius);
+  }
+  if (content.buttonTypography) {
+    if (content.buttonTypography.color) settings.button_text_color = content.buttonTypography.color;
+    applyTypographySettings(settings, 'button_typography', content.buttonTypography, node.responsive);
+  }
+  if (content.buttonStyle) {
+    if (content.buttonStyle.background) settings.button_background_color = content.buttonStyle.background;
+    else if (content.buttonStyle.gradient) settings.button_background_color = content.buttonStyle.gradient.color1;
+    if (content.buttonStyle.radius) settings.button_border_radius = boxValue(content.buttonStyle.radius);
+  }
+  if (content.buttonPadding) {
+    settings.button_text_padding = boxValue(content.buttonPadding);
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'form',
     isInner: false,
-    settings: {
-      form_name: (node.content && node.content.name) || 'Figma Form',
-      form_fields: formFields,
-      button_text: submitLabel,
-      button_size: 'md',
-    },
+    settings,
     elements: [],
   };
 }
 
 function buildProNavMenu(node, nodes, allocId) {
   const menuItems = (node.content && node.content.menuItems) || [];
+  const textItems = collectSubtreeTexts(node, nodes);
   let items = menuItems.map((m) => (typeof m === 'string' ? m : m.name));
   if (items.length === 0) {
-    items = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+    items = textItems.map((t) => t.text.characters);
   }
   if (items.length === 0) {
     items = ['Trang chủ', 'Dịch vụ', 'Giới thiệu', 'Liên hệ'];
@@ -2047,18 +2331,15 @@ function buildProNavMenu(node, nodes, allocId) {
     _f2e_menu_items: items,
   };
 
-  if (node.text) {
-    if (node.text.fontSize) {
-      settings.typography_font_size = { unit: 'px', size: node.text.fontSize, sizes: [] };
-    }
-    if (node.text.fontFamily) {
-      settings.typography_font_family = node.text.fontFamily;
-    }
-    if (node.text.fontWeight) {
-      settings.typography_font_weight = node.text.fontWeight;
-    }
-    if (node.text.color) {
-      settings.color_menu_item = node.text.color;
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.padding_horizontal_menu_item = { unit: 'px', size: Math.round(node.layout.gap / 2), sizes: [] };
+  }
+
+  const navTypo = node.text || (textItems[0] && textItems[0].text) || null;
+  if (navTypo) {
+    applyTypographySettings(settings, 'typography', navTypo, node.responsive);
+    if (navTypo.color) {
+      settings.color_menu_item = navTypo.color;
     }
   }
 
@@ -2073,67 +2354,118 @@ function buildProNavMenu(node, nodes, allocId) {
 }
 
 function buildProCta(node, nodes, allocId, resolveMedia) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
   const imgs = collectSubtreeImages(node, nodes);
+  const settings = {
+    skin: 'classic',
+    title: texts[0] || (node.content && node.content.name) || 'Call to Action',
+    description: texts[1] || '',
+    button: texts[2] || 'Learn More',
+    bg_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
+  };
+
+  if (textItems[0] && textItems[0].text) {
+    if (textItems[0].text.color) settings.title_color = textItems[0].text.color;
+    applyTypographySettings(settings, 'title_typography', textItems[0].text, node.responsive);
+  }
+  if (textItems[1] && textItems[1].text) {
+    if (textItems[1].text.color) settings.description_color = textItems[1].text.color;
+    applyTypographySettings(settings, 'description_typography', textItems[1].text, node.responsive);
+  }
+  if (textItems[2] && textItems[2].text) {
+    if (textItems[2].text.color) settings.button_text_color = textItems[2].text.color;
+    applyTypographySettings(settings, 'button_typography', textItems[2].text, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.content_bg_color = node.style.background;
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'call-to-action',
     isInner: false,
-    settings: {
-      skin: 'classic',
-      title: texts[0] || (node.content && node.content.name) || 'Call to Action',
-      description: texts[1] || '',
-      button: texts[2] || 'Learn More',
-      bg_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
-    },
+    settings,
     elements: [],
   };
 }
 
 function buildProPriceTable(node, nodes, allocId) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
-  const priceText = texts.find((t) => /[$€£₫¥]|\d+\s*\/\s*(mo|yr|tháng|năm)/i.test(t) || /^\$?\d+$/.test(t.trim())) || '49';
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const priceNode = textItems.find((t) => /[$€£₫¥]|\d+\s*\/\s*(mo|yr|tháng|năm)/i.test(t.text.characters) || /^\$?\d+$/.test(t.text.characters.trim()));
+  const priceText = (priceNode && priceNode.text.characters) || '49';
   const numericPrice = priceText.replace(/[^0-9.]/g, '') || '49';
-  const heading = texts[0] || (node.content && node.content.name) || 'Pro Plan';
+  const headingNode = textItems[0] || null;
+  const heading = (headingNode && headingNode.text.characters) || (node.content && node.content.name) || 'Pro Plan';
   const features = texts.slice(2).map((ft, idx) => ({
     _id: shortId(`feat-${idx}`),
     item_text: ft,
     selected_icon: { value: 'fas fa-check', library: 'fa-solid' },
   }));
 
+  const settings = {
+    heading,
+    sub_heading: texts[1] && texts[1] !== priceText ? texts[1] : 'Monthly Plan',
+    price: numericPrice,
+    currency_symbol: 'dollar',
+    period: 'Monthly',
+    features_list: features,
+    button_text: texts[texts.length - 1] || 'Get Started',
+  };
+
+  if (headingNode && headingNode.text) {
+    if (headingNode.text.color) settings.heading_color = headingNode.text.color;
+    applyTypographySettings(settings, 'heading_typography', headingNode.text, node.responsive);
+  }
+  if (priceNode && priceNode.text) {
+    if (priceNode.text.color) settings.price_color = priceNode.text.color;
+    applyTypographySettings(settings, 'price_typography', priceNode.text, node.responsive);
+  }
+  if (textItems[2] && textItems[2].text) {
+    if (textItems[2].text.color) settings.features_color = textItems[2].text.color;
+    applyTypographySettings(settings, 'features_typography', textItems[2].text, node.responsive);
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'price-table',
     isInner: false,
-    settings: {
-      heading,
-      sub_heading: texts[1] && texts[1] !== priceText ? texts[1] : 'Monthly Plan',
-      price: numericPrice,
-      currency_symbol: 'dollar',
-      period: 'Monthly',
-      features_list: features,
-      button_text: texts[texts.length - 1] || 'Get Started',
-    },
+    settings,
     elements: [],
   };
 }
 
 function buildProFlipBox(node, nodes, allocId) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const settings = {
+    title_text_a: texts[0] || (node.content && node.content.name) || 'Front Title',
+    description_text_a: texts[1] || '',
+    title_text_b: texts[2] || texts[0] || 'Back Title',
+    description_text_b: texts[3] || texts[1] || '',
+    button_text: texts[4] || 'Read More',
+  };
+  if (textItems[0] && textItems[0].text) {
+    if (textItems[0].text.color) settings.title_color_a = textItems[0].text.color;
+    applyTypographySettings(settings, 'title_typography_a', textItems[0].text, node.responsive);
+  }
+  if (textItems[1] && textItems[1].text) {
+    if (textItems[1].text.color) settings.description_color_a = textItems[1].text.color;
+    applyTypographySettings(settings, 'description_typography_a', textItems[1].text, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.background_a_background = 'classic';
+    settings.background_a_color = node.style.background;
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'flip-box',
     isInner: false,
-    settings: {
-      title_text_a: texts[0] || (node.content && node.content.name) || 'Front Title',
-      description_text_a: texts[1] || '',
-      title_text_b: texts[2] || texts[0] || 'Back Title',
-      description_text_b: texts[3] || texts[1] || '',
-      button_text: texts[4] || 'Read More',
-    },
+    settings,
     elements: [],
   };
 }
@@ -2186,14 +2518,28 @@ function buildProLoopGrid(node, allocId, wType = 'loop-grid') {
 }
 
 function buildGenericProWidget(node, nodes, wType, allocId) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const firstTypo = node.text || (textItems[0] && textItems[0].text) || null;
   const settings = {};
   if (wType === 'blockquote') {
     settings.blockquote_content = texts[0] || (node.content && node.content.name) || '';
+    settings.author_name = texts[1] || '';
     settings.tweet_button_Label = 'Tweet';
+    if (firstTypo) {
+      if (firstTypo.color) settings.content_text_color = firstTypo.color;
+      applyTypographySettings(settings, 'content_typography', firstTypo, node.responsive);
+    }
   } else if (wType === 'animated-headline') {
     settings.before_text = texts[0] || '';
     settings.highlighted_text = texts[1] || (node.content && node.content.name) || '';
+    if (firstTypo) {
+      if (firstTypo.color) settings.title_color = firstTypo.color;
+      applyTypographySettings(settings, 'title_typography', firstTypo, node.responsive);
+    }
+  } else if (firstTypo) {
+    if (firstTypo.color) settings.title_color = firstTypo.color;
+    applyTypographySettings(settings, 'typography', firstTypo, node.responsive);
   }
   return {
     id: allocId(node.id),

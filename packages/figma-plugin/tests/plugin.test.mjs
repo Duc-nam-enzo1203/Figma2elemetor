@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { sha256, utf8Bytes, utf8Decode, bytesToBase64 } from '../src/utils/crypto.js';
 import { resolveWidget, isAtomicLeafWidget } from '../src/tagging/widget-resolver.js';
 import { inferVirtualLayout, fixAndOptimizeCanvasSelection } from '../src/optimizer/auto-layout-fixer.js';
-import { extractDesignSelection } from '../src/extraction/extractor.js';
+import { extractDesignSelection, inspectNodeDevMode } from '../src/extraction/extractor.js';
 import { compileElementorV3, compileElementorV4, compileElementorClipboard } from '../src/exporters/elementor-compiler.js';
 
 test('Crypto: SHA-256, UTF-8, and Base64 match standard vectors', async () => {
@@ -1427,6 +1427,348 @@ test('Accordion (Classic & Nested): Pinned "accordion" extracts all 7 child Feat
   assert.equal(el.settings.normal_title_color, '#000000');
   assert.equal(el.settings.accordion_border_normal_color, '#E2E8F0');
   assert.ok(el.settings.custom_css.includes('.e-n-accordion-item:nth-child(1)'));
+});
+
+test('Live Figma Dev Mode CSS Inspector: Extracts raw getCSSAsync, resolves CSS vars, and builds subtree stylesheet', async () => {
+  const mockCardNode = {
+    id: '88:100',
+    name: 'Hero Feature Card',
+    type: 'FRAME',
+    visible: true,
+    width: 420,
+    height: 260,
+    layoutMode: 'VERTICAL',
+    getCSSAsync: async () => ({
+      display: 'flex',
+      'flex-direction': 'column',
+      padding: 'var(--Space-6, 24px)',
+      gap: 'var(--Space-4, 16px)',
+      'border-radius': 'var(--Radius-Lg, 12px)',
+      border: '1px solid var(--Border-Subtle, #E2E8F0)',
+      background: 'var(--Surface-Dark, #0F172A)',
+    }),
+    children: [
+      {
+        id: '88:101',
+        name: 'Card Title',
+        type: 'TEXT',
+        visible: true,
+        width: 372,
+        height: 32,
+        characters: 'Giám sát lộ trình 24/7',
+        fontSize: 24,
+        fontName: { family: 'Inter', style: 'Bold' },
+        getCSSAsync: async () => ({
+          color: 'var(--Text-White, #FFFFFF)',
+          'font-family': 'Inter',
+          'font-size': '24px',
+          'font-weight': '700',
+          'line-height': '32px /* 133.3% */',
+        }),
+      },
+    ],
+  };
+
+  const info = await inspectNodeDevMode(mockCardNode, { includeSubtree: true });
+
+  assert.equal(info.nodeId, '88:100');
+  assert.equal(info.hasNativeApi, true);
+  assert.equal(info.propertyCount, 7);
+  assert.equal(info.rawCss.padding, 'var(--Space-6, 24px)');
+  assert.equal(info.resolvedCss.padding, '24px');
+  assert.equal(info.resolvedCss.background, '#0F172A');
+  assert.ok(info.cssVariables.includes('--Space-6'));
+  assert.ok(info.cssVariables.includes('--Surface-Dark'));
+  assert.ok(info.cssBlock.includes('.f2e-hero-feature-card'));
+  assert.ok(info.subtreeCssBlock.includes('.f2e-card-title'));
+  assert.ok(info.mappingPills.some((p) => p.label === 'Gap' && p.value === '16px'));
+  assert.ok(info.mappingPills.some((p) => p.label === 'BG' && p.value === '#0F172A'));
+});
+
+test('Counter & Gradient Text (background-clip: text): Layer "08" (47:5737) exports full typography, leading zero prefix, empty duplicate title, and linear-gradient text clip CSS', async () => {
+  const layer08 = {
+    id: '47:5737',
+    name: '08',
+    type: 'TEXT',
+    visible: true,
+    width: 64,
+    height: 58,
+    characters: '08',
+    fontSize: 48,
+    fontName: { family: 'Inter', style: 'Black' },
+    getPluginData: (key) => (key === 'f2e-widget' ? 'counter' : ''),
+    getCSSAsync: async () => ({
+      'font-family': 'Inter',
+      'font-size': '48px',
+      'font-style': 'normal',
+      'font-weight': '900',
+      'line-height': 'normal',
+      background: 'linear-gradient(129deg, #A9C35E 0%, #038132 100%)',
+      'background-clip': 'text',
+      '-webkit-background-clip': 'text',
+      '-webkit-text-fill-color': 'transparent',
+    }),
+  };
+
+  const { document } = await extractDesignSelection([layer08], { fileKey: 'counter-08-test' });
+  const clipboardJson = compileElementorClipboard(document, { siteUrl: 'https://localhost/wp-json/' });
+
+  assert.equal(clipboardJson.elements.length, 1);
+  const counterEl = clipboardJson.elements[0];
+  const s = counterEl.settings;
+
+  assert.equal(counterEl.widgetType, 'counter');
+  assert.equal(s.starting_number, 0);
+  assert.equal(s.ending_number, 8);
+  assert.equal(s.prefix, '0');
+  assert.equal(s.suffix, '');
+  assert.equal(s.title, '');
+  assert.equal(s.typography_number_typography, 'custom');
+  assert.equal(s.typography_number_font_family, 'Inter');
+  assert.equal(s.typography_number_font_weight, '900');
+  assert.equal(s.typography_number_font_style, 'normal');
+  assert.equal(s.typography_number_font_size.size, 48);
+  assert.equal(s.typography_number_line_height.unit, 'em');
+  assert.equal(s.typography_number_line_height.size, 1.2);
+  assert.equal(s.number_color, '#038132');
+  assert.ok(s.custom_css.includes('linear-gradient(129deg, #A9C35E 0%, #038132 100%)'));
+  assert.ok(s.custom_css.includes('background-clip: text'));
+  assert.ok(s.custom_css.includes('-webkit-text-fill-color: transparent'));
+});
+
+test('All Composite Widgets Completeness: Icon-Box, Multi-Child Counter, Nav-Menu, Testimonial & Form preserve child Dev Mode CSS & Wrapper Box Styles', async () => {
+  const iconBoxFrame = {
+    id: '99:1',
+    name: 'Feature Card',
+    type: 'FRAME',
+    visible: true,
+    width: 360,
+    height: 220,
+    layoutMode: 'VERTICAL',
+    itemSpacing: 16,
+    getPluginData: (key) => (key === 'f2e-widget' ? 'icon-box' : ''),
+    getCSSAsync: async () => ({
+      display: 'flex',
+      'flex-direction': 'column',
+      gap: '16px',
+      padding: '24px',
+      background: '#F8FAFC',
+      border: '1px solid #E2E8F0',
+      'border-radius': '16px',
+    }),
+    children: [
+      {
+        id: '99:2',
+        name: 'Icon',
+        type: 'VECTOR',
+        visible: true,
+        width: 44,
+        height: 44,
+        fills: [{ type: 'SOLID', visible: true, color: { r: 0.086, g: 0.639, b: 0.29 } }],
+      },
+      {
+        id: '99:3',
+        name: 'Title',
+        type: 'TEXT',
+        visible: true,
+        characters: 'Cảnh báo tức thời',
+        getCSSAsync: async () => ({
+          'font-family': 'Plus Jakarta Sans',
+          'font-size': '22px',
+          'font-weight': '700',
+          color: '#0F172A',
+        }),
+      },
+      {
+        id: '99:4',
+        name: 'Desc',
+        type: 'TEXT',
+        visible: true,
+        characters: 'Nhận thông báo ngay khi xe vượt tốc độ hoặc ra khỏi vùng an toàn.',
+        getCSSAsync: async () => ({
+          'font-family': 'Inter',
+          'font-size': '15px',
+          'font-weight': '400',
+          'line-height': '24px',
+          color: '#475569',
+        }),
+      },
+    ],
+  };
+
+  const navFrame = {
+    id: '99:10',
+    name: 'Main Nav',
+    type: 'FRAME',
+    visible: true,
+    width: 480,
+    height: 40,
+    layoutMode: 'HORIZONTAL',
+    itemSpacing: 32,
+    getPluginData: (key) => (key === 'f2e-widget' ? 'nav-menu' : ''),
+    children: [
+      {
+        id: '99:11',
+        name: 'Link 1',
+        type: 'TEXT',
+        visible: true,
+        characters: 'Sản phẩm',
+        getCSSAsync: async () => ({
+          'font-family': 'Inter',
+          'font-size': '15px',
+          'font-weight': '600',
+          color: '#1E293B',
+        }),
+      },
+      {
+        id: '99:12',
+        name: 'Link 2',
+        type: 'TEXT',
+        visible: true,
+        characters: 'Bảng giá',
+      },
+    ],
+  };
+
+  const { document } = await extractDesignSelection([iconBoxFrame, navFrame], { fileKey: 'all-widgets-test' });
+  const v3 = compileElementorV3(document);
+
+  const ib = v3.content[0];
+  assert.equal(ib.widgetType, 'icon-box');
+  // Title typography & color from child 99:3 Dev Mode CSS
+  assert.equal(ib.settings.title_typography_typography, 'custom');
+  assert.equal(ib.settings.title_typography_font_family, 'Plus Jakarta Sans');
+  assert.equal(ib.settings.title_typography_font_size.size, 22);
+  assert.equal(ib.settings.title_color, '#0F172A');
+  // Description typography & color from child 99:4 Dev Mode CSS (previously lost!)
+  assert.equal(ib.settings.description_typography_typography, 'custom');
+  assert.equal(ib.settings.description_typography_font_family, 'Inter');
+  assert.equal(ib.settings.description_typography_font_size.size, 15);
+  assert.equal(ib.settings.description_color, '#475569');
+  // Icon size, space & frame wrapper box styles (_padding, _background_color, _border_color, _border_radius)
+  assert.equal(ib.settings.icon_space.size, 16);
+  assert.equal(ib.settings.icon_size.size, 44);
+  assert.equal(ib.settings._padding.top, '24');
+  assert.equal(ib.settings._background_color, '#F8FAFC');
+  assert.equal(ib.settings._border_color, '#E2E8F0');
+  assert.equal(ib.settings._border_radius.top, '16');
+
+  const nav = v3.content[1];
+  assert.equal(nav.widgetType, 'nav-menu');
+  assert.equal(nav.settings.typography_typography, 'custom');
+  assert.equal(nav.settings.typography_font_family, 'Inter');
+  assert.equal(nav.settings.typography_font_weight, '600');
+  assert.equal(nav.settings.color_menu_item, '#1E293B');
+  assert.equal(nav.settings.padding_horizontal_menu_item.size, 16);
+});
+
+test('Situations 4-Column Right-Only Border, Proportional Tablet Padding & Zero Phantom __globals__', async () => {
+  const makeSituation = (id, hasRightBorder) => ({
+    id,
+    name: 'Situation',
+    type: 'FRAME',
+    visible: true,
+    width: 280,
+    height: 120,
+    layoutMode: 'VERTICAL',
+    layoutSizingHorizontal: 'FILL',
+    itemSpacing: 24,
+    paddingRight: 24,
+    strokes: hasRightBorder
+      ? [
+          {
+            type: 'GRADIENT_LINEAR',
+            visible: true,
+            gradientStops: [
+              { position: 0, color: { r: 0.392, g: 0.631, b: 0.31, a: 1 } },
+              { position: 1, color: { r: 0.012, g: 0.506, b: 0.196, a: 1 } },
+            ],
+          },
+        ]
+      : [],
+    strokeTopWeight: 0,
+    strokeRightWeight: hasRightBorder ? 1 : 0,
+    strokeBottomWeight: 0,
+    strokeLeftWeight: 0,
+    getCSSAsync: async () => ({
+      display: 'flex',
+      'padding-right': '24px',
+      'flex-direction': 'column',
+      'align-items': 'flex-start',
+      gap: '24px',
+      flex: '1 0 0',
+      ...(hasRightBorder ? { 'border-right': '1px solid #64A14F' } : {}),
+    }),
+    children: [
+      {
+        id: `${id}_txt`,
+        name: 'Desc',
+        type: 'TEXT',
+        visible: true,
+        characters: 'Không biết xe đang ở đâu',
+        getCSSAsync: async () => ({
+          color: '#000',
+          'font-family': 'Inter',
+          'font-size': '16px',
+          'font-weight': '400',
+          'line-height': '24px',
+        }),
+      },
+    ],
+  });
+
+  const situationsRoot = {
+    id: '47:5897',
+    name: 'Situations',
+    type: 'FRAME',
+    visible: true,
+    width: 1200,
+    height: 180,
+    layoutMode: 'HORIZONTAL',
+    itemSpacing: 24,
+    paddingTop: 24,
+    paddingRight: 24,
+    paddingBottom: 24,
+    paddingLeft: 24,
+    getCSSAsync: async () => ({
+      display: 'flex',
+      padding: '24px',
+      'align-items': 'flex-start',
+      gap: '24px',
+      'border-radius': '20px',
+      border: '1px solid #E2E8F0',
+      background: '#FFF',
+    }),
+    children: [
+      makeSituation('47:5898', true),
+      makeSituation('47:5906', true),
+      makeSituation('47:5913', true),
+      makeSituation('47:5921', false),
+    ],
+  };
+
+  const { document } = await extractDesignSelection([situationsRoot], { fileKey: 'situations-fidelity' });
+  const out = compileElementorClipboard(document);
+  const root = out.elements[0];
+
+  // 1. Root Tablet/Mobile padding must NEVER exceed Desktop padding (24px)
+  assert.equal(root.settings.padding.top, '24');
+  assert.ok(Number(root.settings.padding_tablet.top) <= 24);
+  assert.ok(Number(root.settings.padding_mobile.top) <= 20);
+
+  // 2. Right-only gradient border must use exact per-side width `0px 1px 0px 0px` (NEVER `border: 1px solid !important`)
+  const col1 = root.elements[0];
+  assert.equal(col1.settings.border_width.top, '0');
+  assert.equal(col1.settings.border_width.right, '1');
+  assert.equal(col1.settings.border_width.bottom, '0');
+  assert.equal(col1.settings.border_width.left, '0');
+  assert.equal(col1.settings.border_width_mobile.right, '0');
+  assert.ok(!col1.settings.custom_css.includes('border: 1px solid'));
+  assert.ok(col1.settings.custom_css.includes('border-width: 0px 1px 0px 0px !important;'));
+  assert.ok(col1.settings.custom_css.includes('@media (max-width: 767px)'));
+
+  // 3. No fake __globals__ injected & stripped
+  assert.equal(out.fidelityReport.fixes.filter((f) => f.detail.includes('__globals__')).length, 0);
 });
 
 

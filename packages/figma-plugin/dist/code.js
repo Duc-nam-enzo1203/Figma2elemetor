@@ -1295,6 +1295,8 @@ const WEIGHT_MAP = {
 
   if (fontName && safeStr(fontName.style).toLowerCase().includes('italic')) {
     text.fontStyle = 'italic';
+  } else {
+    text.fontStyle = 'normal';
   }
 
   if (lineHeightObj && lineHeightObj.unit !== 'AUTO') {
@@ -1322,8 +1324,17 @@ const WEIGHT_MAP = {
   if (node.textDecoration === 'UNDERLINE') text.decoration = 'underline';
   else if (node.textDecoration === 'STRIKETHROUGH') text.decoration = 'line-through';
 
-  // Extract solid color considering both fill opacity and node opacity (e.g. 30% opacity on text)
+  // Extract solid color OR gradient fill on TEXT nodes (e.g. background-clip: text)
   let color = extractSolidColor(fillsArr);
+  const textGradient = extractGradient(fillsArr);
+  if (textGradient) {
+    text.gradient = textGradient;
+    text.gradientCss = `linear-gradient(${textGradient.angle}deg, ${textGradient.color1} ${textGradient.stop1}%, ${textGradient.color2} ${textGradient.stop2}%)`;
+    text.backgroundClipText = true;
+    if (!color) {
+      color = textGradient.color2 || textGradient.color1;
+    }
+  }
   const nodeOpacity = typeof node.opacity === 'number' ? node.opacity : 1;
   if (color && nodeOpacity < 1 && !color.startsWith('rgba')) {
     // Convert hex to rgba with node opacity
@@ -1596,26 +1607,58 @@ const WEIGHT_MAP = {
     if (c) style.borderColor = c;
   }
 
-  // 2. Authoritative Dev Mode Background & Gradient
+  // 2. Authoritative Dev Mode Background & Gradient (including background-clip: text on TEXT layers)
   const devBg = resolveCssVars(devModeCSS['background'] || devModeCSS['background-color'] || '');
+  const isTextClip = Boolean(
+    entry.type === 'text' ||
+    (devModeCSS['background-clip'] && String(devModeCSS['background-clip']).includes('text')) ||
+    (devModeCSS['-webkit-background-clip'] && String(devModeCSS['-webkit-background-clip']).includes('text')) ||
+    (devModeCSS['-webkit-text-fill-color'] && String(devModeCSS['-webkit-text-fill-color']).includes('transparent'))
+  );
+
   if (devBg) {
-    if (devBg.includes('linear-gradient')) {
+    if (devBg.includes('gradient')) {
       const angleMatch = devBg.match(/([\d.]+)deg/);
       const angle = angleMatch ? parseInt(angleMatch[1], 10) : 180;
       const colors = (devBg.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/g) || []).map((c) => normalizeCssColor(c) || c);
-      if (colors.length >= 2) {
-        style.gradient = {
-          type: 'linear',
-          angle,
-          color1: colors[0],
-          stop1: 0,
-          color2: colors[colors.length - 1],
-          stop2: 100,
-        };
+      const parsedGrad = colors.length >= 2
+        ? {
+            type: devBg.includes('radial-gradient') ? 'radial' : 'linear',
+            angle,
+            color1: colors[0],
+            stop1: 0,
+            color2: colors[colors.length - 1],
+            stop2: 100,
+          }
+        : null;
+
+      if (isTextClip) {
+        const text = entry.text || (entry.text = {});
+        text.gradientCss = devBg;
+        text.backgroundClipText = true;
+        if (parsedGrad) {
+          text.gradient = parsedGrad;
+          if (!text.color) {
+            text.color = parsedGrad.color2 || parsedGrad.color1;
+          }
+        }
+        if (entry.type === 'text') {
+          delete style.gradient;
+          delete style.background;
+        }
+      } else if (parsedGrad) {
+        style.gradient = parsedGrad;
       }
     } else {
       const solidBg = normalizeCssColor(devBg);
-      if (solidBg) style.background = solidBg;
+      if (solidBg) {
+        if (entry.type === 'text') {
+          const text = entry.text || (entry.text = {});
+          if (!text.color) text.color = solidBg;
+        } else {
+          style.background = solidBg;
+        }
+      }
     }
   }
 
@@ -1739,6 +1782,13 @@ const WEIGHT_MAP = {
       } else if (lhClean.includes('%')) {
         text.lineHeight = Math.round((parseFloat(lhClean) / 100) * 100) / 100;
         text.lineHeightUnit = 'em';
+      } else if (lhClean === 'normal') {
+        text.lineHeightRaw = 'normal';
+        text.lineHeight = 1.2;
+        text.lineHeightUnit = 'em';
+      } else if (/^[\d.]+$/.test(lhClean)) {
+        text.lineHeight = Math.round(parseFloat(lhClean) * 100) / 100;
+        text.lineHeightUnit = 'em';
       }
     }
     if (devModeCSS['color']) {
@@ -1759,6 +1809,197 @@ const WEIGHT_MAP = {
       text.fontStyle = resolveCssVars(devModeCSS['font-style']);
     }
   }
+}
+
+/**
+ * Live Inspector for Figma Dev Mode CSS (`await node.getCSSAsync()`).
+ * Extracts raw Dev Mode CSS, unwraps `var(--token, fallback)` values, identifies CSS variables
+ * and color swatches, and computes the exact Elementor widget & control mapping for display in the Plugin UI.
+ */async function inspectNodeDevMode(node, options = {}) {
+  if (!node) return null;
+  const { includeSubtree = false, maxSubtreeNodes = 20 } = options;
+
+  const inspectSingle = async (target, depth = 0, parent = null) => {
+    let rawCss = {};
+    let hasNativeApi = false;
+    if (typeof target.getCSSAsync === 'function') {
+      hasNativeApi = true;
+      try {
+        const res = await target.getCSSAsync();
+        if (res && typeof res === 'object') {
+          rawCss = { ...res };
+        }
+      } catch (e) { }
+    }
+
+    const choice = resolveWidget(target);
+    const entry = {
+      id: target.id,
+      name: safeStr(target.name, 'Unnamed'),
+      type: target.type === 'TEXT' ? 'text' : safeStr(target.type, 'FRAME').toLowerCase(),
+      rawType: safeStr(target.type, 'FRAME'),
+      widget: choice.widget,
+      widgetSource: choice.source,
+      layout: extractLayout(target, parent),
+      style: extractStyle(target),
+      text: target.type === 'TEXT' ? extractTypography(target) : null,
+    };
+
+    if (Object.keys(rawCss).length > 0) {
+      applyDevModeCSSToNode(entry, rawCss);
+    }
+
+    const resolvedCss = {};
+    const cssVariables = [];
+    const lines = [];
+    const resolvedLines = [];
+
+    for (const [prop, val] of Object.entries(rawCss)) {
+      const strVal = String(val);
+      const unwrapped = resolveCssVars(strVal);
+      resolvedCss[prop] = unwrapped;
+      lines.push(`  ${prop}: ${strVal};`);
+      resolvedLines.push(`  ${prop}: ${unwrapped};`);
+
+      const varMatches = strVal.match(/--[a-zA-Z0-9_-]+/g);
+      if (varMatches) {
+        for (const vm of varMatches) {
+          if (!cssVariables.includes(vm)) cssVariables.push(vm);
+        }
+      }
+    }
+
+    // Build selector slug from layer name
+    const slug = safeStr(target.name, 'layer')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '') || 'layer';
+    const selector = `.f2e-${slug}`;
+
+    const headerComment = `/* Layer: "${entry.name}" (${target.id}) | Type: ${entry.rawType} | Elementor: ${entry.widget} */`;
+    const cssBlock = lines.length > 0
+      ? `${headerComment}\n${selector} {\n${lines.join('\n')}\n}`
+      : `${headerComment}\n${selector} {\n  /* Node không có thuộc tính CSS trực tiếp từ getCSSAsync() */\n}`;
+
+    const resolvedCssBlock = resolvedLines.length > 0
+      ? `${headerComment}\n${selector} {\n${resolvedLines.join('\n')}\n}`
+      : cssBlock;
+
+    // Build human-readable Elementor Mapping Summary pills
+    const mappingPills = [];
+    const L = entry.layout || {};
+    const S = entry.style || {};
+    const T = entry.text || null;
+
+    if (L.width || L.height) {
+      const hMode = L.sizingH ? ` (${L.sizingH})` : '';
+      const vMode = L.sizingV ? ` (${L.sizingV})` : '';
+      mappingPills.push({ label: 'Size', value: `${L.width || 0}px${hMode} × ${L.height || 0}px${vMode}` });
+    }
+    if (L.mode === 'flex') {
+      mappingPills.push({
+        label: 'Flex',
+        value: `${L.direction || 'row'}${L.wrap ? ' wrap' : ''} • align: ${L.align || 'MIN'} / ${L.justify || 'MIN'}`,
+      });
+    } else if (L.mode === 'grid') {
+      mappingPills.push({ label: 'Grid', value: `${L.columns || 2} cols` });
+    }
+    if (typeof L.gap === 'number' && L.gap > 0) {
+      mappingPills.push({ label: 'Gap', value: `${L.gap}px` });
+    }
+    if (L.padding && (L.padding.top || L.padding.right || L.padding.bottom || L.padding.left)) {
+      mappingPills.push({
+        label: 'Padding',
+        value: `${L.padding.top}px ${L.padding.right}px ${L.padding.bottom}px ${L.padding.left}px`,
+      });
+    }
+    if (S.background) {
+      mappingPills.push({ label: 'BG', value: S.background, color: S.background });
+    } else if (S.gradient) {
+      mappingPills.push({ label: 'Gradient', value: `${S.gradient.angle}deg (${S.gradient.color1} → ${S.gradient.color2})`, color: S.gradient.color1 });
+    }
+    if (S.borderWidth && (S.borderWidth.top || S.borderWidth.right || S.borderWidth.bottom || S.borderWidth.left)) {
+      const bw = S.borderWidth;
+      const bwStr = bw.isLinked ? `${bw.top}px` : `${bw.top}px ${bw.right}px ${bw.bottom}px ${bw.left}px`;
+      mappingPills.push({
+        label: 'Border',
+        value: `${bwStr} solid ${S.borderColor || '#000000'}`,
+        color: S.borderColor || null,
+      });
+    }
+    if (S.radius && (S.radius.top || S.radius.right || S.radius.bottom || S.radius.left)) {
+      const r = S.radius;
+      const rStr = r.isLinked ? `${r.top}px` : `${r.top}px ${r.right}px ${r.bottom}px ${r.left}px`;
+      mappingPills.push({ label: 'Radius', value: rStr });
+    }
+    if (T) {
+      mappingPills.push({
+        label: 'Font',
+        value: `${T.fontFamily} ${T.fontWeight} • ${T.fontSize}px/${T.lineHeight || ''}${T.lineHeightUnit || 'px'}`,
+        color: T.color || null,
+      });
+      if (T.gradientCss || T.gradient) {
+        const gLabel = T.gradient
+          ? `${T.gradient.angle}deg (${T.gradient.color1} → ${T.gradient.color2})`
+          : T.gradientCss;
+        mappingPills.push({
+          label: 'Text Gradient',
+          value: gLabel,
+          color: (T.gradient && T.gradient.color1) || T.color || null,
+        });
+      }
+    }
+
+    return {
+      nodeId: target.id,
+      name: entry.name,
+      type: entry.rawType,
+      depth,
+      width: L.width || 0,
+      height: L.height || 0,
+      widget: entry.widget,
+      widgetSource: entry.widgetSource,
+      hasNativeApi,
+      propertyCount: Object.keys(rawCss).length,
+      rawCss,
+      resolvedCss,
+      cssVariables,
+      cssBlock,
+      resolvedCssBlock,
+      mappingPills,
+    };
+  };
+
+  const rootResult = await inspectSingle(node, 0, node.parent || null);
+
+  if (includeSubtree) {
+    const subtreeBlocks = [rootResult.cssBlock];
+    const subtreeResolvedBlocks = [rootResult.resolvedCssBlock];
+    const subtreeNodes = [];
+    let visited = 0;
+
+    const walkKids = async (curr, depth) => {
+      const kids = visibleChildren(curr);
+      for (const child of kids) {
+        if (visited >= maxSubtreeNodes) return;
+        visited += 1;
+        const childInfo = await inspectSingle(child, depth, curr);
+        subtreeNodes.push(childInfo);
+        if (childInfo.propertyCount > 0) {
+          subtreeBlocks.push(childInfo.cssBlock);
+          subtreeResolvedBlocks.push(childInfo.resolvedCssBlock);
+        }
+        await walkKids(child, depth + 1);
+      }
+    };
+
+    await walkKids(node, 1);
+    rootResult.subtreeCount = subtreeNodes.length;
+    rootResult.subtreeCssBlock = subtreeBlocks.join('\n\n');
+    rootResult.subtreeResolvedCssBlock = subtreeResolvedBlocks.join('\n\n');
+  }
+
+  return rootResult;
 }
 
 /**
@@ -1873,6 +2114,21 @@ const WEIGHT_MAP = {
       }
     }
 
+    const extractTextWithDevMode = async (tn) => {
+      if (!tn) return null;
+      const typo = extractTypography(tn);
+      if (!typo) return null;
+      if (typeof tn.getCSSAsync === 'function') {
+        try {
+          const tCss = await tn.getCSSAsync();
+          if (tCss && Object.keys(tCss).length > 0) {
+            applyDevModeCSSToNode({ type: 'text', text: typo, style: {}, layout: {} }, tCss);
+          }
+        } catch (e) { }
+      }
+      return typo;
+    };
+
     const link = extractLink(node);
     if (link) entry.link = link;
 
@@ -1881,103 +2137,150 @@ const WEIGHT_MAP = {
       entry.content.characters = entry.text.characters;
     }
 
-    if (choice.widget === 'button') {
-      const bIcon = extractButtonIcon(node);
-      if (bIcon) entry.buttonIcon = bIcon;
-      if (node.type === 'TEXT') {
-        entry.text = extractTypography(node);
-        entry.content.characters = entry.text.characters;
-      } else {
-        const textNodes = collectTextDescendants(node);
-        if (textNodes.length > 0) {
-          entry.text = extractTypography(textNodes[0]);
-          entry.content.characters = entry.text.characters;
-          if (typeof textNodes[0].getCSSAsync === 'function') {
-            try {
-              const btnTxtDevCSS = await textNodes[0].getCSSAsync();
-              if (btnTxtDevCSS) applyDevModeCSSToNode({ text: entry.text }, btnTxtDevCSS);
-            } catch (e) { }
-          }
-        } else {
-          entry.content.characters = entry.content.name || 'Button';
-        }
-      }
-    }
-
+    // Apply outer node's Dev Mode CSS first so FRAME box styles do not overwrite child text typography
     if (devModeCSS) {
       applyDevModeCSSToNode(entry, devModeCSS);
     }
 
-    if (choice.widget === 'nav-menu' || choice.widget === 'mega-menu') {
+    if (node.type === 'TEXT' && entry.text) {
+      entry.extractedTexts = [entry.text];
+    } else if (isLeafWidget) {
+      // For any atomic leaf widget wrapping child TEXT nodes (e.g. Frame tagged as heading, text-editor,
+      // button, counter, icon-box, image-box, icon-list, nav-menu, price-table, call-to-action, testimonial,
+      // flip-box, progress, alert, blockquote, etc.), extract every descendant TEXT node with its full Dev Mode CSS!
       const textNodes = collectTextDescendants(node);
-      const menuItems = textNodes
-        .map((tn) => ({
-          name: safeStr(tn.characters || tn.name).trim(),
-          link: extractLink(tn) || '#',
+      if (textNodes.length > 0) {
+        const extractedList = [];
+        for (const tn of textNodes) {
+          const tObj = await extractTextWithDevMode(tn);
+          if (tObj && safeStr(tObj.characters).trim().length > 0) {
+            tObj.nodeName = safeStr(tn.name, '');
+            tObj.link = extractLink(tn) || '';
+            extractedList.push(tObj);
+          }
+        }
+        if (extractedList.length > 0) {
+          entry.extractedTexts = extractedList;
+          if (!entry.text) {
+            entry.text = extractedList[0];
+          }
+          if (!entry.content.characters) {
+            entry.content.characters = extractedList[0].characters;
+          }
+        }
+      }
+    }
+
+    if (choice.widget === 'button') {
+      const bIcon = extractButtonIcon(node);
+      if (bIcon) entry.buttonIcon = bIcon;
+      if (!entry.content.characters) {
+        entry.content.characters = (entry.text && entry.text.characters) || entry.content.name || 'Button';
+      }
+    }
+
+    if (choice.widget === 'nav-menu' || choice.widget === 'mega-menu') {
+      const extractedList = entry.extractedTexts || [];
+      const menuItems = extractedList
+        .map((t) => ({
+          name: safeStr(t.characters || t.nodeName).trim(),
+          link: t.link || '#',
         }))
         .filter((item) => item.name.length > 0);
 
       entry.content.menuItems = menuItems;
-      if (textNodes.length > 0) {
-        entry.text = extractTypography(textNodes[0]);
-      }
     }
 
     if (choice.widget === 'icon-list') {
-      const textNodes = collectTextDescendants(node);
-      const listItems = textNodes
-        .map((tn, idx) => {
-          let text = safeStr(tn.characters || tn.name).trim();
+      const extractedList = entry.extractedTexts || [];
+      const listItems = extractedList
+        .map((t, idx) => {
+          let text = safeStr(t.characters || t.nodeName).trim();
           text = text.replace(/^[\u2713\u2714\u2022\u00b7\u25cf\u25cb\u2013\u2014\-*]\s*/, '');
           return {
             id: `item_${idx + 1}`,
             text,
-            link: extractLink(tn) || '',
+            link: t.link || '',
+            color: t.color || null,
           };
         })
         .filter((item) => item.text.length > 0);
 
       entry.content.iconList = listItems;
-      if (textNodes.length > 0) {
-        entry.text = extractTypography(textNodes[0]);
+      const visualNode = findFirstVisualDescendant(node);
+      if (visualNode) {
+        entry.content.iconColor = extractSolidColor(visualNode.fills) || extractSolidColor(visualNode.strokes) || null;
+        entry.content.iconSize = Math.round(safeNum(visualNode.width, 0)) || null;
       }
     }
 
     if (choice.widget === 'icon-box' || choice.widget === 'image-box') {
-      const textNodes = collectTextDescendants(node);
-      if (textNodes.length > 0) {
-        entry.content.title_text = safeStr(textNodes[0].characters || textNodes[0].name).trim();
-        entry.text = extractTypography(textNodes[0]);
+      const extractedList = entry.extractedTexts || [];
+      if (extractedList.length > 0) {
+        entry.content.title_text = safeStr(extractedList[0].characters).trim();
+        entry.content.titleTypography = extractedList[0];
+        entry.text = extractedList[0];
       }
-      if (textNodes.length > 1) {
-        entry.content.description_text = textNodes
+      if (extractedList.length > 1) {
+        entry.content.description_text = extractedList
           .slice(1)
-          .map((tn) => safeStr(tn.characters || tn.name).trim())
+          .map((t) => safeStr(t.characters).trim())
           .filter(Boolean)
           .join('\n');
+        entry.content.descriptionTypography = extractedList[1];
       }
       entry.content.position = (layout.direction === 'row') ? 'left' : 'top';
 
       const visualNode = findFirstVisualDescendant(node);
-      if (visualNode && typeof visualNode.exportAsync === 'function') {
-        if (hasImageFill(visualNode)) {
-          pendingExports.push({ kind: 'raster', node: visualNode, id });
-        } else {
-          pendingExports.push({ kind: 'svg', node: visualNode, id });
+      if (visualNode) {
+        entry.content.iconSize = Math.round(safeNum(visualNode.width, 40)) || 40;
+        entry.content.iconColor = extractSolidColor(visualNode.fills) || extractSolidColor(visualNode.strokes) || null;
+        if (typeof visualNode.exportAsync === 'function') {
+          if (hasImageFill(visualNode)) {
+            pendingExports.push({ kind: 'raster', node: visualNode, id });
+          } else {
+            pendingExports.push({ kind: 'svg', node: visualNode, id });
+          }
         }
       }
     }
 
-    if (choice.widget === 'counter') {
-      const textNodes = collectTextDescendants(node);
-      for (const tn of textNodes) {
-        const str = safeStr(tn.characters || '').trim();
-        if (/\d/.test(str)) {
-          entry.content.counterNumber = str;
-        } else if (!entry.content.counterTitle) {
-          entry.content.counterTitle = str;
-        }
+    if (choice.widget === 'counter' || choice.widget === 'countdown') {
+      const extractedList = entry.extractedTexts || (entry.text ? [entry.text] : []);
+      const numItem = extractedList.find((t) => /\d/.test(safeStr(t.characters))) || extractedList[0] || null;
+      const titleItem = extractedList.find((t) => t !== numItem) || null;
+      if (numItem) {
+        entry.content.counterNumber = safeStr(numItem.characters).trim();
+        entry.content.numberTypography = numItem;
       }
+      if (titleItem) {
+        entry.content.counterTitle = safeStr(titleItem.characters).trim();
+        entry.content.titleTypography = titleItem;
+      }
+    }
+
+    if (choice.widget === 'social-icons' || choice.widget === 'share-buttons') {
+      const socialItems = [];
+      for (const child of rawKids) {
+        const cStyle = extractStyle(child);
+        const cLayout = extractLayout(child, node);
+        if (typeof child.getCSSAsync === 'function') {
+          try {
+            const cCss = await child.getCSSAsync();
+            if (cCss) applyDevModeCSSToNode({ style: cStyle, layout: cLayout }, cCss);
+          } catch (e) { }
+        }
+        socialItems.push({
+          id: child.id,
+          name: safeStr(child.name, 'social'),
+          link: extractLink(child) || '#',
+          background: cStyle.background || null,
+          borderColor: cStyle.borderColor || null,
+          radius: cStyle.radius || null,
+          width: cLayout.width || 40,
+        });
+      }
+      entry.content.socialItems = socialItems;
     }
 
     if (['accordion', 'nested-accordion', 'toggle', 'tabs', 'nested-tabs'].includes(choice.widget)) {
@@ -1989,25 +2292,13 @@ const WEIGHT_MAP = {
         const bodyNodes = textNodes.slice(1);
 
         const titleText = safeStr(titleNode.characters || titleNode.name).trim();
-        const titleTypography = extractTypography(titleNode);
-        if (typeof titleNode.getCSSAsync === 'function') {
-          try {
-            const tCss = await titleNode.getCSSAsync();
-            if (tCss) applyDevModeCSSToNode({ text: titleTypography }, tCss);
-          } catch (e) { }
-        }
+        const titleTypography = await extractTextWithDevMode(titleNode);
 
         let bodyText = '';
         let bodyTypography = null;
         if (bodyNodes.length > 0) {
           bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
-          bodyTypography = extractTypography(bodyNodes[0]);
-          if (typeof bodyNodes[0].getCSSAsync === 'function') {
-            try {
-              const bCss = await bodyNodes[0].getCSSAsync();
-              if (bCss) applyDevModeCSSToNode({ text: bodyTypography }, bCss);
-            } catch (e) { }
-          }
+          bodyTypography = await extractTextWithDevMode(bodyNodes[0]);
         }
 
         const itemEntry = {
@@ -2042,11 +2333,25 @@ const WEIGHT_MAP = {
       let submitLabel = 'Send Message';
       for (const child of rawKids) {
         const lower = safeStr(child.name).toLowerCase();
+        const cEntry = {
+          layout: extractLayout(child, node),
+          style: extractStyle(child),
+        };
+        if (typeof child.getCSSAsync === 'function') {
+          try {
+            const cCss = await child.getCSSAsync();
+            if (cCss) applyDevModeCSSToNode(cEntry, cCss);
+          } catch (e) { }
+        }
+
         if (lower.includes('btn') || lower.includes('button') || lower.includes('submit')) {
           const btnTexts = collectTextDescendants(child);
           if (btnTexts.length > 0) {
             submitLabel = safeStr(btnTexts[0].characters || btnTexts[0].name).trim();
+            entry.content.buttonTypography = await extractTextWithDevMode(btnTexts[0]);
           }
+          entry.content.buttonStyle = cEntry.style;
+          entry.content.buttonPadding = cEntry.layout.padding;
           continue;
         }
         let fieldType = 'text';
@@ -2054,7 +2359,14 @@ const WEIGHT_MAP = {
         else if (lower.includes('phone') || lower.includes('tel') || lower.includes('số điện thoại')) fieldType = 'tel';
         else if (lower.includes('message') || lower.includes('comment') || lower.includes('nội dung') || (Number(child.height) || 0) >= 90) fieldType = 'textarea';
 
-        const texts = collectTextDescendants(child).map((t) => safeStr(t.characters || t.name).trim()).filter(Boolean);
+        const childTextNodes = collectTextDescendants(child);
+        const texts = childTextNodes.map((t) => safeStr(t.characters || t.name).trim()).filter(Boolean);
+        if (!entry.content.fieldTypography && childTextNodes.length > 0) {
+          entry.content.fieldTypography = await extractTextWithDevMode(childTextNodes[0]);
+        }
+        if (!entry.content.fieldStyle && (cEntry.style.background || cEntry.style.borderColor || cEntry.style.radius)) {
+          entry.content.fieldStyle = cEntry.style;
+        }
         const label = texts[0] || safeStr(child.name, `Field ${formFields.length + 1}`);
         formFields.push({
           id: `field_${formFields.length + 1}`,
@@ -2475,7 +2787,6 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
  *    HUG containers wrapping single-line text so browser font rendering never wraps the last word onto a 2nd line.
  * 5. Content & Style Completeness Audit: Verifies text nodes, colors, font sizes, and layout directions against Figma IR.
  */
-
 const UNVERIFIED_GLOBAL_IDS = new Set([
   'globals/colors?id=primary',
   'globals/colors?id=secondary',
@@ -2487,8 +2798,7 @@ const UNVERIFIED_GLOBAL_IDS = new Set([
   'globals/typography?id=secondary',
   'globals/typography?id=text',
   'globals/typography?id=accent',
-]);
-function verifyAndHealElementorJson(elements, doc = null, options = {}) {
+]);function verifyAndHealElementorJson(elements, doc = null, options = {}) {
   const list = Array.isArray(elements) ? elements : [];
   const nodesBySourceId = new Map();
   if (doc && doc.nodes) {
@@ -2722,6 +3032,63 @@ function verifyAndHealElementorJson(elements, doc = null, options = {}) {
           ],
         }));
         recordFix(nodeId, title, `Khôi phục ${extItems.length} mục Accordion từ cây thiết kế Figma`);
+      }
+    }
+
+    // ── 3C. Auto-Heal Counter & Gradient Text (`background-clip: text`) from IR / Dev Mode CSS ──
+    if (el.elType === 'widget' && irNode && irNode.text) {
+      const irText = irNode.text;
+      const gradCss = irText.gradientCss
+        || (irText.gradient && irText.gradient.color1 && irText.gradient.color2
+          ? `linear-gradient(${irText.gradient.angle ?? 180}deg, ${irText.gradient.color1} ${irText.gradient.stop1 ?? 0}%, ${irText.gradient.color2} ${irText.gradient.stop2 ?? 100}%)`
+          : null);
+
+      if (el.widgetType === 'counter') {
+        let counterHealed = false;
+        const rawChars = String(irText.characters || '').trim();
+        // If single-number counter duplicated its number string as `title` (e.g. title === "08"), clear duplicate title
+        if (settings.title && settings.title === rawChars) {
+          settings.title = '';
+          counterHealed = true;
+        }
+        // Preserve leading zero(s) like "08" -> prefix: "0"
+        const leadZero = /^(0+)(?=\d)/.exec(rawChars);
+        if (leadZero && !settings.prefix) {
+          settings.prefix = leadZero[1];
+          counterHealed = true;
+        }
+        if (!settings.typography_number_typography && (irText.fontFamily || irText.fontSize)) {
+          settings.typography_number_typography = 'custom';
+          settings.typography_number_font_family = irText.fontFamily || 'Inter';
+          settings.typography_number_font_weight = String(irText.fontWeight || '700');
+          settings.typography_number_font_style = irText.fontStyle || 'normal';
+          settings.typography_number_font_size = { unit: 'px', size: Number(irText.fontSize) || 48, sizes: [] };
+          if (irText.lineHeight) {
+            settings.typography_number_line_height = {
+              unit: irText.lineHeightUnit || 'px',
+              size: Number(irText.lineHeight),
+              sizes: [],
+            };
+          }
+          counterHealed = true;
+        }
+        if (!settings.number_color && (irText.color || (irText.gradient && irText.gradient.color2))) {
+          settings.number_color = irText.color || irText.gradient.color2;
+          counterHealed = true;
+        }
+        if (gradCss && (!settings.custom_css || !settings.custom_css.includes('background-clip'))) {
+          settings.custom_css = `selector .elementor-counter-number-wrapper, selector .elementor-counter-number {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+          counterHealed = true;
+        }
+        if (counterHealed) {
+          recordFix(nodeId, title, 'Bổ sung đầy đủ Typography, Leading Zero Prefix và Gradient Text CSS từ Figma Dev Mode cho Counter');
+        }
+      } else if ((el.widgetType === 'heading' || el.widgetType === 'text-editor') && gradCss) {
+        if (!settings.custom_css || !settings.custom_css.includes('background-clip')) {
+          const targetSel = el.widgetType === 'heading' ? 'selector .elementor-heading-title' : 'selector';
+          settings.custom_css = `${targetSel} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+          recordFix(nodeId, title, 'Bổ sung hiệu ứng chữ chuyển màu (background-clip: text) từ Figma Dev Mode');
+        }
       }
     }
 
@@ -3022,6 +3389,7 @@ const FLEX_ALIGN_MAP = {
 
     if (el && el.settings) {
       applyChildFlexAndPositionSettings(el, node, parentNode, isRoot);
+      applyWidgetWrapperBoxStyles(el, node);
       el.settings._f2e_node_id = node.sourceNodeId || node.id;
       el.settings._title = node.content && node.content.name ? node.content.name : wType;
     }
@@ -3171,6 +3539,77 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
       }
     } else if (sizingH === 'FILL') {
       settings._element_width = 'inherit';
+    }
+  }
+}
+
+const SELF_STYLED_WIDGETS = new Set([
+  'button',
+  'divider',
+  'spacer',
+  'icon',
+  'image',
+  'html',
+  'theme-site-logo',
+  'site-logo',
+  'nested-accordion',
+  'accordion',
+  'toggle',
+  'nested-tabs',
+  'tabs',
+]);
+
+/**
+ * Preserves Frame-level box styles (padding, background, gradient, border, border-radius, box-shadow)
+ * on Elementor Widgets using Elementor's Advanced wrapper controls (`_padding`, `_background_*`, `_border_*`).
+ */
+function applyWidgetWrapperBoxStyles(el, node) {
+  if (!el || el.elType !== 'widget' || !node) return;
+  if (node.type === 'text' || node.type === 'vector') return;
+  if (SELF_STYLED_WIDGETS.has(el.widgetType)) return;
+
+  const settings = el.settings;
+  const style = node.style || {};
+  const layout = node.layout || {};
+
+  if (
+    layout.padding &&
+    !settings._padding &&
+    (layout.padding.top || layout.padding.right || layout.padding.bottom || layout.padding.left)
+  ) {
+    settings._padding = boxValue(layout.padding);
+  }
+
+  if (!settings._background_background && !settings.background_color) {
+    if (style.gradient) {
+      settings._background_background = 'gradient';
+      settings._background_gradient_type = style.gradient.type || 'linear';
+      settings._background_color = style.gradient.color1;
+      settings._background_color_stop = { unit: '%', size: style.gradient.stop1 ?? 0, sizes: [] };
+      settings._background_color_b = style.gradient.color2;
+      settings._background_color_b_stop = { unit: '%', size: style.gradient.stop2 ?? 100, sizes: [] };
+      settings._background_gradient_angle = { unit: 'deg', size: style.gradient.angle ?? 180, sizes: [] };
+    } else if (style.background) {
+      settings._background_background = 'classic';
+      settings._background_color = style.background;
+    }
+  }
+
+  if (style.borderWidth && style.borderColor && !settings._border_border) {
+    settings._border_border = 'solid';
+    settings._border_width = boxValue(style.borderWidth);
+    settings._border_color = style.borderColor;
+  }
+
+  if (style.radius && !settings._border_radius && !settings.border_radius) {
+    settings._border_radius = boxValue(style.radius);
+  }
+
+  if (style.boxShadow && !settings._box_shadow_box_shadow) {
+    settings._box_shadow_box_shadow_type = 'yes';
+    settings._box_shadow_box_shadow = style.boxShadow;
+    if (style.boxShadow.position === 'inset') {
+      settings._box_shadow_box_shadow_position = 'inset';
     }
   }
 }function compileElementorClipboard(doc, options = {}) {
@@ -3349,28 +3788,9 @@ function flexGapValue(layout) {
   };
 }
 
-function applyGlobalColor(settings, key, colorHex) {
-  if (!colorHex || typeof colorHex !== 'string') return;
-  const hex = colorHex.trim().toUpperCase();
-  let gId = null;
-  if (['#64A14F', '#15803D', '#16A34A', '#2563EB', '#3B82F6'].includes(hex)) {
-    gId = 'globals/colors?id=primary';
-  } else if (['#038132', '#14532D', '#1E40AF', '#1D4ED8'].includes(hex)) {
-    gId = 'globals/colors?id=secondary';
-  } else if (['#FFCC00', '#F59E0B', '#FBBF24', '#EC4899', '#DB2777'].includes(hex)) {
-    gId = 'globals/colors?id=accent';
-  } else if (['#FFFFFF', '#F8FAFC'].includes(hex)) {
-    gId = 'globals/colors?id=848461d';
-  } else if (['#E2E8F0', '#CBD5E1', '#E5E7EB', '#334155'].includes(hex)) {
-    gId = 'globals/colors?id=31b945e';
-  } else if (['#0F172A', '#1E293B', '#111827', '#000000'].includes(hex)) {
-    gId = 'globals/colors?id=text';
-  }
-
-  if (gId) {
-    if (!settings.__globals__) settings.__globals__ = {};
-    settings.__globals__[key] = gId;
-  }
+function applyGlobalColor() {
+  // Exact Figma hex colors are preserved directly on Elementor controls.
+  // Verified Active Kit `__globals__` IDs are bound server-side by WordPress `GlobalStyles::bindGlobalsToElements()`.
 }
 
 function applyCommonBoxStyle(settings, style = {}, resolveMedia) {
@@ -3385,7 +3805,6 @@ function applyCommonBoxStyle(settings, style = {}, resolveMedia) {
   } else if (style.background) {
     settings.background_background = 'classic';
     settings.background_color = style.background;
-    applyGlobalColor(settings, 'background_color', style.background);
   }
 
   if (style.backgroundImage && resolveMedia) {
@@ -3403,36 +3822,47 @@ function applyCommonBoxStyle(settings, style = {}, resolveMedia) {
     settings.border_radius = boxValue(style.radius);
   }
 
-  if (style.borderWidth && style.borderColor) {
+  const bt = Math.round(Number(style.borderWidth && style.borderWidth.top) || 0);
+  const br = Math.round(Number(style.borderWidth && style.borderWidth.right) || 0);
+  const bb = Math.round(Number(style.borderWidth && style.borderWidth.bottom) || 0);
+  const bl = Math.round(Number(style.borderWidth && style.borderWidth.left) || 0);
+  const hasAnyBorderWidth = bt > 0 || br > 0 || bb > 0 || bl > 0;
+  const isVerticalDividerOnly = bt === 0 && bb === 0 && (br > 0 || bl > 0);
+
+  if (hasAnyBorderWidth && style.borderColor) {
     settings.border_border = 'solid';
     settings.border_width = boxValue(style.borderWidth);
     settings.border_color = style.borderColor;
-    applyGlobalColor(settings, 'border_color', style.borderColor);
+    // When a column divider border is right-only or left-only on Desktop, clear it on Mobile where columns stack vertically
+    if (isVerticalDividerOnly) {
+      settings.border_width_mobile = boxValue({ top: 0, right: 0, bottom: 0, left: 0 }, true);
+    }
   }
 
   // Linear Gradient Border Solution:
   // Elementor does not natively support linear-gradient on border-color.
-  // We automatically inject custom_css for pixel-perfect gradient borders,
-  // while keeping settings.border_color as a close fallback for Elementor Free!
-  if (style.borderGradient && style.borderWidth) {
-    const bw = Math.max(1, Number(style.borderWidth.top) || 1);
+  // Preserve EXACT per-side border widths (`border-width: T R B L !important;`) so 1-sided borders
+  // (e.g. `border-right: 1px solid`) NEVER turn into 4-sided full box borders!
+  if (style.borderGradient && hasAnyBorderWidth) {
     const g = style.borderGradient;
     const gradCss = style.devModeBorderImage && style.devModeBorderImage.startsWith('linear-gradient')
       ? style.devModeBorderImage
       : `linear-gradient(${g.angle}deg, ${g.color1} ${g.stop1}%, ${g.color2} ${g.stop2}%)`;
     const bgSolid = style.background || '#ffffff';
-    // For CSS background dual-clipping to be valid according to W3C CSS spec,
-    // the first layer CANNOT be a bare color (#ffffff) — it must be a gradient image!
     const bgLayer = style.gradient
       ? `linear-gradient(${style.gradient.angle}deg, ${style.gradient.color1} ${style.gradient.stop1}%, ${style.gradient.color2} ${style.gradient.stop2}%)`
       : `linear-gradient(${bgSolid}, ${bgSolid})`;
+    const bwCss = (bt === br && br === bb && bb === bl) ? `${bt}px` : `${bt}px ${br}px ${bb}px ${bl}px`;
+    const allFourSides = bt > 0 && br > 0 && bb > 0 && bl > 0;
 
     let borderSnippet = '';
-    if (style.radius) {
-      // Valid dual-background clipping with background-origin and background-clip
-      borderSnippet = `selector {\n  border: ${bw}px solid transparent !important;\n  background-image: ${bgLayer}, ${gradCss} !important;\n  background-origin: border-box !important;\n  background-clip: padding-box, border-box !important;\n}`;
+    if (style.radius && allFourSides) {
+      borderSnippet = `selector {\n  border-style: solid !important;\n  border-color: transparent !important;\n  border-width: ${bwCss} !important;\n  background-image: ${bgLayer}, ${gradCss} !important;\n  background-origin: border-box !important;\n  background-clip: padding-box, border-box !important;\n}`;
     } else {
-      borderSnippet = `selector {\n  border: ${bw}px solid !important;\n  border-image: ${gradCss} 1 !important;\n}`;
+      borderSnippet = `selector {\n  border-style: solid !important;\n  border-width: ${bwCss} !important;\n  border-image: ${gradCss} 1 !important;\n}`;
+      if (isVerticalDividerOnly) {
+        borderSnippet += `\n@media (max-width: 767px) {\n  selector { border-width: 0 !important; }\n}`;
+      }
     }
     settings.custom_css = (settings.custom_css ? settings.custom_css + '\n' : '') + borderSnippet;
   }
@@ -3506,27 +3936,6 @@ function applyTypographySettings(settings, prefix, text = {}, responsive = {}) {
       sizes: [],
     };
   }
-
-  // Global Typography Token binding (only bind when explicitly matches standard typographic scales)
-  // If the designer used custom display sizes (e.g. 40px stats, decorative numbers, custom weights),
-  // preserve custom typography so Elementor does not override it with theme defaults!
-  let gId = null;
-  const isDisplayOrCustom = size > 36 || (text.fontWeight && text.fontWeight !== '400' && text.fontWeight !== '600' && text.fontWeight !== '700');
-  if (!isDisplayOrCustom) {
-    if (size >= 30) {
-      gId = 'globals/typography?id=primary';
-    } else if (size >= 20) {
-      gId = 'globals/typography?id=secondary';
-    } else if (size >= 14 && size <= 18) {
-      gId = 'globals/typography?id=text';
-    } else if (size < 14) {
-      gId = 'globals/typography?id=accent';
-    }
-  }
-  if (gId) {
-    if (!settings.__globals__) settings.__globals__ = {};
-    settings.__globals__[`${prefix}_typography`] = gId;
-  }
 }
 
 function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, resolveMedia) {
@@ -3591,24 +4000,22 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     const padR = Number(layout.padding && layout.padding.right) || 0;
     if (padL >= 40 && padR >= 40 && (Number(layout.width) || 0) >= 1100) {
       const innerContentW = Math.max(960, Math.min(1320, (Number(layout.width) || 1440) - padL - padR));
+      const padT = Number(layout.padding && layout.padding.top) || 64;
+      const padB = Number(layout.padding && layout.padding.bottom) || 64;
       settings.content_width = 'boxed';
       settings.boxed_width = { unit: 'px', size: innerContentW, sizes: [] };
       settings.boxed_width_tablet = { unit: 'px', size: 768, sizes: [] };
       settings.boxed_width_mobile = { unit: 'px', size: 360, sizes: [] };
-      settings.padding = boxValue({
-        top: (layout.padding && layout.padding.top) || 64,
-        right: 24,
-        bottom: (layout.padding && layout.padding.bottom) || 64,
-        left: 24,
-      });
-      settings.padding_tablet = boxValue({ top: 50, right: 24, bottom: 50, left: 24 });
-      settings.padding_mobile = boxValue({ top: 30, right: 16, bottom: 30, left: 16 });
+      settings.padding = boxValue({ top: padT, right: 24, bottom: padB, left: 24 });
+      settings.padding_tablet = boxValue({ top: Math.min(padT, 50), right: 24, bottom: Math.min(padB, 50), left: 24 });
+      settings.padding_mobile = boxValue({ top: Math.min(padT, 30), right: 16, bottom: Math.min(padB, 30), left: 16 });
       settings.margin = boxValue({ top: 0, right: 0, bottom: 0, left: 0 });
     } else {
+      const basePad = layout.padding || { top: 60, right: 24, bottom: 60, left: 24 };
       settings.content_width = 'full';
-      settings.padding = boxValue(layout.padding || { top: 60, right: 24, bottom: 60, left: 24 });
-      settings.padding_tablet = boxValue({ top: 40, right: 20, bottom: 40, left: 20 });
-      settings.padding_mobile = boxValue({ top: 24, right: 16, bottom: 24, left: 16 });
+      settings.padding = boxValue(basePad);
+      settings.padding_tablet = boxValue((node.responsive && node.responsive.tablet && node.responsive.tablet.padding) || scaleBox(basePad, 0.85, 40));
+      settings.padding_mobile = boxValue((node.responsive && node.responsive.mobile && node.responsive.mobile.padding) || scaleBox(basePad, 0.65, 24));
       settings.margin = boxValue({ top: 0, right: 0, bottom: 0, left: 0 });
     }
   } else {
@@ -3872,18 +4279,41 @@ function inferHeadingTag(node) {
   return 'h5';
 }
 
+function getTextGradientCss(text) {
+  if (!text) return null;
+  if (typeof text.gradientCss === 'string' && text.gradientCss.includes('gradient')) {
+    return text.gradientCss.trim();
+  }
+  if (text.gradient && text.gradient.color1 && text.gradient.color2) {
+    const g = text.gradient;
+    return `linear-gradient(${g.angle ?? 180}deg, ${g.color1} ${g.stop1 ?? 0}%, ${g.color2} ${g.stop2 ?? 100}%)`;
+  }
+  return null;
+}
+
+function buildTextClipRule(selectorTarget, gradCss) {
+  return `${selectorTarget} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+}
+
 function buildHeading(node, allocId) {
   const text = node.text || {};
+  const gradCss = getTextGradientCss(text);
   const settings = {
     title: text.characters || (node.content && node.content.name) || 'Heading',
     header_size: inferHeadingTag(node),
     align: text.align === 'justified' ? 'justify' : (text.align || 'left'),
   };
-  if (text.color) {
-    settings.title_color = text.color;
-    applyGlobalColor(settings, 'title_color', text.color);
+  const fallbackColor = text.color || (text.gradient && (text.gradient.color2 || text.gradient.color1)) || null;
+  if (fallbackColor) {
+    settings.title_color = fallbackColor;
+    if (!gradCss) {
+      applyGlobalColor(settings, 'title_color', fallbackColor);
+    }
   }
   applyTypographySettings(settings, 'typography', text, node.responsive);
+  if (gradCss) {
+    settings.custom_css = buildTextClipRule('selector .elementor-heading-title', gradCss);
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
@@ -3896,17 +4326,30 @@ function buildHeading(node, allocId) {
 
 function buildTextEditor(node, allocId) {
   const text = node.text || {};
+  const gradCss = getTextGradientCss(text);
   const raw = String(text.characters || '').trim();
-  const paragraphs = raw.split(/\n+/).map((line) => `<p style="margin:0;">${escapeHtml(line)}</p>`).join('');
+  const inlineGradStyle = gradCss
+    ? `background:${gradCss};-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;`
+    : '';
+  const paragraphs = raw
+    .split(/\n+/)
+    .map((line) => `<p style="margin:0;${inlineGradStyle}">${escapeHtml(line)}</p>`)
+    .join('');
   const settings = {
     editor: paragraphs || '<p style="margin:0;"></p>',
     align: text.align === 'justified' ? 'justify' : (text.align || 'left'),
   };
-  if (text.color) {
-    settings.text_color = text.color;
-    applyGlobalColor(settings, 'text_color', text.color);
+  const fallbackColor = text.color || (text.gradient && (text.gradient.color2 || text.gradient.color1)) || null;
+  if (fallbackColor) {
+    settings.text_color = fallbackColor;
+    if (!gradCss) {
+      applyGlobalColor(settings, 'text_color', fallbackColor);
+    }
   }
   applyTypographySettings(settings, 'typography', text, node.responsive);
+  if (gradCss) {
+    settings.custom_css = buildTextClipRule('selector', gradCss);
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
@@ -3956,9 +4399,10 @@ function buildButton(node, allocId) {
   if (node.link) {
     settings.link = { url: node.link, is_external: '', nofollow: '' };
   }
-  if (text.color) {
-    settings.button_text_color = text.color;
-    applyGlobalColor(settings, 'button_text_color', text.color);
+  const btnTextColor = text.color || (text.gradient && (text.gradient.color2 || text.gradient.color1)) || null;
+  if (btnTextColor) {
+    settings.button_text_color = btnTextColor;
+    applyGlobalColor(settings, 'button_text_color', btnTextColor);
   }
   applyTypographySettings(settings, 'typography', text, node.responsive);
   if (style.radius) settings.border_radius = boxValue(style.radius);
@@ -3968,8 +4412,19 @@ function buildButton(node, allocId) {
     settings.border_color = style.borderColor;
     applyGlobalColor(settings, 'border_color', style.borderColor);
   }
-  if (layout.padding && (layout.padding.top || layout.padding.left)) {
+  if (style.boxShadow) {
+    settings.button_box_shadow_box_shadow_type = 'yes';
+    settings.button_box_shadow_box_shadow = style.boxShadow;
+    if (style.boxShadow.position === 'inset') {
+      settings.button_box_shadow_box_shadow_position = 'inset';
+    }
+  }
+  if (layout.padding && (layout.padding.top || layout.padding.right || layout.padding.bottom || layout.padding.left)) {
     settings.text_padding = boxValue(layout.padding);
+  }
+  const btnTextGrad = getTextGradientCss(text);
+  if (btnTextGrad) {
+    settings.custom_css = buildTextClipRule('selector .elementor-button-text', btnTextGrad);
   }
   return {
     id: allocId(node.id),
@@ -4106,13 +4561,17 @@ function buildIconOrInlineSvg(node, allocId, resolveMedia) {
     }
 
     // Render exact inline SVG inside a clean flex wrapper via Elementor HTML widget
+    const svgWMatch = node.svg.markup.match(/\bwidth=["'](\d+(?:\.\d+)?)/i);
+    const svgHMatch = node.svg.markup.match(/\bheight=["'](\d+(?:\.\d+)?)/i);
+    const boxW = Math.max(w, svgWMatch ? Math.round(parseFloat(svgWMatch[1])) : w);
+    const boxH = Math.max(h, svgHMatch ? Math.round(parseFloat(svgHMatch[1])) : h);
     return {
       id: allocId(node.id),
       elType: 'widget',
       widgetType: 'html',
       isInner: false,
       settings: {
-        html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${w}px;height:${h}px;line-height:0;">${node.svg.markup}</div>`,
+        html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${boxW}px;height:${boxH}px;flex-shrink:0;line-height:0;">${node.svg.markup}</div>`,
       },
       elements: [],
     };
@@ -4239,6 +4698,14 @@ function buildSpacer(node, allocId) {
 }
 
 function collectSubtreeTexts(node, nodes) {
+  if (!node) return [];
+  if (Array.isArray(node.extractedTexts) && node.extractedTexts.length > 0 && (!node.children || node.children.length === 0)) {
+    return node.extractedTexts.map((t, idx) => ({
+      id: `${node.id}-txt-${idx}`,
+      text: t,
+      responsive: node.responsive,
+    }));
+  }
   const out = [];
   const walk = (n) => {
     if (!n) return;
@@ -4268,9 +4735,12 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
   const titleNode = texts[0];
   const descNode = texts[1];
 
+  const titleTypo = content.titleTypography || (titleNode && titleNode.text) || node.text || null;
+  const descTypo = content.descriptionTypography || (descNode && descNode.text) || null;
+
   if (!title) {
-    title = (titleNode && titleNode.text && titleNode.text.characters) || content.name || 'Feature Title';
-    desc = (descNode && descNode.text && descNode.text.characters) || '';
+    title = (titleTypo && titleTypo.characters) || content.name || 'Feature Title';
+    desc = (descTypo && descTypo.characters) || '';
   }
 
   const pos = content.position || ((node.layout && node.layout.direction === 'row') ? 'left' : 'top');
@@ -4279,19 +4749,38 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
     description_text: desc,
     position: pos,
   };
-  if (titleNode && titleNode.text && titleNode.text.color) {
-    settings.title_color = titleNode.text.color;
-    applyGlobalColor(settings, 'title_color', titleNode.text.color);
+
+  if (titleTypo && titleTypo.align) {
+    settings.text_align = titleTypo.align === 'justified' ? 'justify' : titleTypo.align;
   }
-  if (titleNode && titleNode.text) {
-    applyTypographySettings(settings, 'title_typography', titleNode.text, node.responsive);
+
+  const titleGrad = getTextGradientCss(titleTypo);
+  const titleColor = (titleTypo && (titleTypo.color || (titleTypo.gradient && titleTypo.gradient.color2))) || null;
+  if (titleColor) {
+    settings.title_color = titleColor;
+    if (!titleGrad) {
+      applyGlobalColor(settings, 'title_color', titleColor);
+    }
   }
-  if (descNode && descNode.text && descNode.text.color) {
-    settings.description_color = descNode.text.color;
-    applyGlobalColor(settings, 'description_color', descNode.text.color);
+  if (titleTypo) {
+    applyTypographySettings(settings, 'title_typography', titleTypo, node.responsive);
   }
-  if (descNode && descNode.text) {
-    applyTypographySettings(settings, 'description_typography', descNode.text, node.responsive);
+  if (titleGrad) {
+    settings.custom_css = buildTextClipRule('selector .elementor-icon-box-title, selector .elementor-image-box-title', titleGrad);
+  }
+
+  const descColor = (descTypo && (descTypo.color || (descTypo.gradient && descTypo.gradient.color2))) || null;
+  if (descColor) {
+    settings.description_color = descColor;
+    applyGlobalColor(settings, 'description_color', descColor);
+  }
+  if (descTypo) {
+    applyTypographySettings(settings, 'description_typography', descTypo, node.responsive);
+  }
+
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    const spaceKey = wType === 'image-box' ? 'image_space' : 'icon_space';
+    settings[spaceKey] = { unit: 'px', size: node.layout.gap, sizes: [] };
   }
 
   const sha = (node.raster && node.raster.sha256) || (node.image && node.image.sha256) || (node.svg && node.svg.sha256) || '';
@@ -4313,7 +4802,10 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
     } else {
       settings.selected_icon = { value: 'fas fa-bolt', library: 'fa-solid' };
     }
-    settings.primary_color = '#2563EB';
+    settings.primary_color = content.iconColor || (node.svg && node.svg.color) || '#2563EB';
+    if (content.iconSize && Number(content.iconSize) > 0) {
+      settings.icon_size = { unit: 'px', size: Number(content.iconSize), sizes: [] };
+    }
   }
 
   return {
@@ -4328,6 +4820,7 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
 
 function buildIconList(node, nodes, allocId) {
   const items = (node.content && node.content.iconList) || [];
+  const texts = collectSubtreeTexts(node, nodes);
   let listData = [];
   if (items.length > 0) {
     listData = items.map((it, idx) => ({
@@ -4337,37 +4830,45 @@ function buildIconList(node, nodes, allocId) {
       link: it.link ? { url: it.link } : undefined,
     }));
   } else {
-    const texts = collectSubtreeTexts(node, nodes).filter((t) => t.text.characters.trim().length > 1);
-    listData = texts.map((t, idx) => ({
+    const validTexts = texts.filter((t) => t.text && t.text.characters && t.text.characters.trim().length > 1);
+    listData = validTexts.map((t, idx) => ({
       _id: shortId(`il-${idx}`),
       text: t.text.characters.replace(/^[\u2713\u2714\u2022\u00b7\u25cf\u25cb\u2013\u2014\-*]\s*/, ''),
       selected_icon: { value: 'fas fa-circle', library: 'fa-solid' },
     }));
   }
 
+  const firstTypo = node.text || (texts[0] && texts[0].text) || null;
   const isRow = (node.layout && node.layout.direction === 'row') || (Number(node.layout && node.layout.width) || 0) > 600;
   const gap = Math.max(12, Number(node.layout && node.layout.gap) || 24);
-  const color = (node.text && node.text.color) || '#FFFFFF';
+  const textColor = (firstTypo && (firstTypo.color || (firstTypo.gradient && firstTypo.gradient.color2))) || '#FFFFFF';
+  const iconColor = (node.content && node.content.iconColor) || textColor;
+  const iconSize = (node.content && node.content.iconSize && node.content.iconSize <= 32) ? node.content.iconSize : 6;
 
   const settings = {
     icon_list: listData,
     view: isRow ? 'inline' : 'traditional',
     space_between: { unit: 'px', size: gap, sizes: [] },
-    icon_size: { unit: 'px', size: 6, sizes: [] },
-    icon_color: color,
-    text_color: color,
+    icon_size: { unit: 'px', size: iconSize, sizes: [] },
+    icon_color: iconColor,
+    text_color: textColor,
   };
 
-  if (color) {
-    applyGlobalColor(settings, 'text_color', color);
-    applyGlobalColor(settings, 'icon_color', color);
+  if (textColor) {
+    applyGlobalColor(settings, 'text_color', textColor);
+  }
+  if (iconColor) {
+    applyGlobalColor(settings, 'icon_color', iconColor);
   }
 
-  if (node.text) {
-    applyTypographySettings(settings, 'icon_typography', node.text, node.responsive);
-    // Fallback for older elementor skins that use generic typography prefix
-    if (node.text.fontSize) {
-      settings.typography_font_size = { unit: 'px', size: node.text.fontSize, sizes: [] };
+  if (firstTypo) {
+    applyTypographySettings(settings, 'icon_typography', firstTypo, node.responsive);
+    if (firstTypo.fontSize) {
+      settings.typography_font_size = { unit: 'px', size: firstTypo.fontSize, sizes: [] };
+    }
+    const listGrad = getTextGradientCss(firstTypo);
+    if (listGrad) {
+      settings.custom_css = buildTextClipRule('selector .elementor-icon-list-text', listGrad);
     }
   }
 
@@ -4383,30 +4884,58 @@ function buildIconList(node, nodes, allocId) {
 
 function buildProgress(node, nodes, allocId) {
   const texts = collectSubtreeTexts(node, nodes);
+  const titleTypo = (texts[0] && texts[0].text) || node.text || null;
+  const pctNode = texts.find((t) => /%/.test((t.text && t.text.characters) || ''));
+  const pctVal = pctNode ? (parseInt(pctNode.text.characters.replace(/[^0-9]/g, ''), 10) || 85) : 85;
+  const settings = {
+    title: (titleTypo && titleTypo.characters) || (node.content && node.content.name) || 'Skill',
+    percent: { unit: '%', size: Math.min(100, Math.max(0, pctVal)), sizes: [] },
+  };
+  if (titleTypo) {
+    if (titleTypo.color) settings.title_color = titleTypo.color;
+    applyTypographySettings(settings, 'typography', titleTypo, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.bar_color = node.style.background;
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'progress',
     isInner: false,
-    settings: {
-      title: (texts[0] && texts[0].text.characters) || (node.content && node.content.name) || 'Skill',
-      percent: { unit: '%', size: 85, sizes: [] },
-    },
+    settings,
     elements: [],
   };
 }
 
 function buildAlert(node, nodes, allocId) {
   const texts = collectSubtreeTexts(node, nodes);
+  const titleTypo = (texts[0] && texts[0].text) || node.text || null;
+  const descTypo = (texts[1] && texts[1].text) || null;
+  const settings = {
+    alert_title: (titleTypo && titleTypo.characters) || (node.content && node.content.name) || 'Notice',
+    alert_description: (descTypo && descTypo.characters) || '',
+  };
+  if (titleTypo) {
+    if (titleTypo.color) settings.title_color = titleTypo.color;
+    applyTypographySettings(settings, 'typography_title', titleTypo, node.responsive);
+  }
+  if (descTypo) {
+    if (descTypo.color) settings.description_color = descTypo.color;
+    applyTypographySettings(settings, 'typography_description', descTypo, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.background_color = node.style.background;
+  }
+  if (node.style && node.style.borderColor) {
+    settings.border_color = node.style.borderColor;
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'alert',
     isInner: false,
-    settings: {
-      alert_title: (texts[0] && texts[0].text.characters) || (node.content && node.content.name) || 'Notice',
-      alert_description: (texts[1] && texts[1].text.characters) || '',
-    },
+    settings,
     elements: [],
   };
 }
@@ -4701,20 +5230,40 @@ function buildGalleryOrCarousel(node, nodes, wType, allocId, resolveMedia) {
 }
 
 function buildTestimonial(node, nodes, allocId, resolveMedia) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+  const textItems = collectSubtreeTexts(node, nodes);
   const imgs = collectSubtreeImages(node, nodes);
-  const sorted = [...texts].sort((a, b) => b.length - a.length);
+  const sortedNodes = [...textItems].sort((a, b) => ((b.text && b.text.characters) || '').length - ((a.text && a.text.characters) || '').length);
+
+  const contentNode = sortedNodes[0] || null;
+  const nameNode = sortedNodes[1] || null;
+  const jobNode = sortedNodes[2] || null;
+
+  const settings = {
+    testimonial_content: (contentNode && contentNode.text && contentNode.text.characters) || 'Great experience working with this team.',
+    testimonial_name: (nameNode && nameNode.text && nameNode.text.characters) || (node.content && node.content.name) || 'Client Name',
+    testimonial_job: (jobNode && jobNode.text && jobNode.text.characters) || 'Customer',
+    testimonial_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
+  };
+
+  if (contentNode && contentNode.text) {
+    if (contentNode.text.color) settings.content_content_color = contentNode.text.color;
+    applyTypographySettings(settings, 'content_typography', contentNode.text, node.responsive);
+  }
+  if (nameNode && nameNode.text) {
+    if (nameNode.text.color) settings.name_text_color = nameNode.text.color;
+    applyTypographySettings(settings, 'name_typography', nameNode.text, node.responsive);
+  }
+  if (jobNode && jobNode.text) {
+    if (jobNode.text.color) settings.job_text_color = jobNode.text.color;
+    applyTypographySettings(settings, 'job_typography', jobNode.text, node.responsive);
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'testimonial',
     isInner: false,
-    settings: {
-      testimonial_content: sorted[0] || 'Great experience working with this team.',
-      testimonial_name: sorted[1] || (node.content && node.content.name) || 'Client Name',
-      testimonial_job: sorted[2] || 'Customer',
-      testimonial_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
-    },
+    settings,
     elements: [],
   };
 }
@@ -4737,46 +5286,117 @@ function buildStarRating(node, allocId) {
 function buildSocialIcons(node, nodes, allocId) {
   const platforms = ['facebook', 'twitter', 'x', 'instagram', 'linkedin', 'youtube', 'tiktok', 'github', 'telegram', 'whatsapp'];
   const list = [];
-  for (const cid of node.children || []) {
-    const child = nodes[cid];
-    if (!child) continue;
-    const name = String((child.content && child.content.name) || '').toLowerCase();
-    const matched = platforms.find((p) => name.includes(p)) || 'link';
-    const iconVal = matched === 'x' || matched === 'twitter'
-      ? 'fab fa-x-twitter'
-      : (matched === 'link' ? 'fas fa-share-alt' : `fab fa-${matched}`);
-    list.push({
-      _id: shortId(cid),
-      social_icon: { value: iconVal, library: matched === 'link' ? 'fa-solid' : 'fa-brands' },
-      link: { url: child.link || '#', is_external: 'true', nofollow: '' },
-    });
+  const extractedSocials = (node.content && Array.isArray(node.content.socialItems)) ? node.content.socialItems : [];
+
+  if (extractedSocials.length > 0) {
+    for (const sItem of extractedSocials) {
+      const name = String(sItem.name || '').toLowerCase();
+      const matched = platforms.find((p) => name.includes(p)) || 'link';
+      const iconVal = matched === 'x' || matched === 'twitter'
+        ? 'fab fa-x-twitter'
+        : (matched === 'link' ? 'fas fa-share-alt' : `fab fa-${matched}`);
+      list.push({
+        _id: shortId(sItem.id || name),
+        social_icon: { value: iconVal, library: matched === 'link' ? 'fa-solid' : 'fa-brands' },
+        link: { url: sItem.link || '#', is_external: 'true', nofollow: '' },
+      });
+    }
+  } else {
+    for (const cid of node.children || []) {
+      const child = nodes[cid];
+      if (!child) continue;
+      const name = String((child.content && child.content.name) || '').toLowerCase();
+      const matched = platforms.find((p) => name.includes(p)) || 'link';
+      const iconVal = matched === 'x' || matched === 'twitter'
+        ? 'fab fa-x-twitter'
+        : (matched === 'link' ? 'fas fa-share-alt' : `fab fa-${matched}`);
+      list.push({
+        _id: shortId(cid),
+        social_icon: { value: iconVal, library: matched === 'link' ? 'fa-solid' : 'fa-brands' },
+        link: { url: child.link || '#', is_external: 'true', nofollow: '' },
+      });
+    }
+  }
+
+  const settings = { social_icon_list: list };
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.icon_spacing = { unit: 'px', size: node.layout.gap, sizes: [] };
   }
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'social-icons',
     isInner: false,
-    settings: { social_icon_list: list },
+    settings,
     elements: [],
   };
 }
 
 function buildCounter(node, nodes, allocId) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
-  const numText = texts.find((t) => /\d/.test(t)) || '100';
-  const labelText = texts.find((t) => t !== numText) || (node.content && node.content.name) || 'Stats';
-  const numMatch = /([0-9.,]+)(.*)/.exec(numText.trim());
+  const textNodes = collectSubtreeTexts(node, nodes);
+  const numNode = textNodes.find((n) => /\d/.test((n.text && n.text.characters) || '')) || (node.text ? node : textNodes[0]);
+  const labelNode = textNodes.find((n) => n !== numNode) || null;
+
+  const numTypo = (numNode && numNode.text) || node.text || {};
+  const numText = String(numTypo.characters || '100').trim();
+  const labelText = (labelNode && labelNode.text && labelNode.text.characters) ? String(labelNode.text.characters).trim() : '';
+
+  const numMatch = /^([^0-9+-]*?)([0-9.,]+)(.*)$/.exec(numText);
+  let prefix = (numMatch && numMatch[1]) || '';
+  const rawDigits = ((numMatch && numMatch[2]) || '100').replace(/,/g, '');
+  const suffix = (numMatch && numMatch[3]) || '';
+
+  // Preserve leading zero(s) such as "08" -> prefix: "0", ending_number: 8
+  const leadZeroMatch = /^(0+)(?=\d)/.exec(rawDigits);
+  if (leadZeroMatch) {
+    prefix += leadZeroMatch[1];
+  }
+  const endingNumber = Number(rawDigits);
+
+  const settings = {
+    starting_number: 0,
+    ending_number: Number.isFinite(endingNumber) ? endingNumber : 100,
+    prefix,
+    suffix,
+    title: labelText,
+  };
+
+  const gradCss = getTextGradientCss(numTypo);
+  const numColor = numTypo.color || (numTypo.gradient && (numTypo.gradient.color2 || numTypo.gradient.color1)) || null;
+  if (numColor) {
+    settings.number_color = numColor;
+    if (!gradCss) {
+      applyGlobalColor(settings, 'number_color', numColor);
+    }
+  }
+
+  if (numTypo.fontFamily || numTypo.fontSize || numTypo.fontWeight) {
+    applyTypographySettings(settings, 'typography_number', numTypo, (numNode && numNode.responsive) || node.responsive);
+  }
+
+  if (labelNode && labelNode.text) {
+    const lblTypo = labelNode.text;
+    const lblColor = lblTypo.color || (lblTypo.gradient && (lblTypo.gradient.color2 || lblTypo.gradient.color1)) || null;
+    if (lblColor) {
+      settings.title_color = lblColor;
+      applyGlobalColor(settings, 'title_color', lblColor);
+    }
+    applyTypographySettings(settings, 'typography_title', lblTypo, labelNode.responsive || node.responsive);
+  }
+
+  if (gradCss) {
+    settings.custom_css = buildTextClipRule(
+      'selector .elementor-counter-number-wrapper, selector .elementor-counter-number',
+      gradCss
+    );
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'counter',
     isInner: false,
-    settings: {
-      starting_number: 0,
-      ending_number: Number(((numMatch && numMatch[1]) || '100').replace(/,/g, '')) || 100,
-      suffix: (numMatch && numMatch[2]) || '',
-      title: labelText,
-    },
+    settings,
     elements: [],
   };
 }
@@ -4785,10 +5405,11 @@ function buildCounter(node, nodes, allocId) {
 
 function buildProForm(node, nodes, allocId) {
   const formFields = [];
-  let submitLabel = (node.content && node.content.submitLabel) || 'Send Message';
+  const content = node.content || {};
+  let submitLabel = content.submitLabel || 'Send Message';
 
-  if (node.content && Array.isArray(node.content.formFields) && node.content.formFields.length > 0) {
-    for (const [idx, f] of node.content.formFields.entries()) {
+  if (Array.isArray(content.formFields) && content.formFields.length > 0) {
+    for (const [idx, f] of content.formFields.entries()) {
       formFields.push({
         _id: shortId(`${node.id}-fld-${idx}`),
         custom_id: `field_${idx + 1}`,
@@ -4836,26 +5457,56 @@ function buildProForm(node, nodes, allocId) {
     );
   }
 
+  const settings = {
+    form_name: content.name || 'Figma Form',
+    form_fields: formFields,
+    button_text: submitLabel,
+    button_size: 'md',
+  };
+
+  if (node.layout && typeof node.layout.gap === 'number') {
+    settings.row_gap = { unit: 'px', size: node.layout.gap, sizes: [] };
+  }
+  const fieldTypo = content.fieldTypography || node.text || null;
+  if (fieldTypo) {
+    if (fieldTypo.color) settings.field_text_color = fieldTypo.color;
+    applyTypographySettings(settings, 'field_typography', fieldTypo, node.responsive);
+  }
+  if (content.fieldStyle) {
+    if (content.fieldStyle.background) settings.field_background_color = content.fieldStyle.background;
+    if (content.fieldStyle.borderColor) settings.field_border_color = content.fieldStyle.borderColor;
+    if (content.fieldStyle.borderWidth) settings.field_border_width = boxValue(content.fieldStyle.borderWidth);
+    if (content.fieldStyle.radius) settings.field_border_radius = boxValue(content.fieldStyle.radius);
+  }
+  if (content.buttonTypography) {
+    if (content.buttonTypography.color) settings.button_text_color = content.buttonTypography.color;
+    applyTypographySettings(settings, 'button_typography', content.buttonTypography, node.responsive);
+  }
+  if (content.buttonStyle) {
+    if (content.buttonStyle.background) settings.button_background_color = content.buttonStyle.background;
+    else if (content.buttonStyle.gradient) settings.button_background_color = content.buttonStyle.gradient.color1;
+    if (content.buttonStyle.radius) settings.button_border_radius = boxValue(content.buttonStyle.radius);
+  }
+  if (content.buttonPadding) {
+    settings.button_text_padding = boxValue(content.buttonPadding);
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'form',
     isInner: false,
-    settings: {
-      form_name: (node.content && node.content.name) || 'Figma Form',
-      form_fields: formFields,
-      button_text: submitLabel,
-      button_size: 'md',
-    },
+    settings,
     elements: [],
   };
 }
 
 function buildProNavMenu(node, nodes, allocId) {
   const menuItems = (node.content && node.content.menuItems) || [];
+  const textItems = collectSubtreeTexts(node, nodes);
   let items = menuItems.map((m) => (typeof m === 'string' ? m : m.name));
   if (items.length === 0) {
-    items = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+    items = textItems.map((t) => t.text.characters);
   }
   if (items.length === 0) {
     items = ['Trang chủ', 'Dịch vụ', 'Giới thiệu', 'Liên hệ'];
@@ -4868,18 +5519,15 @@ function buildProNavMenu(node, nodes, allocId) {
     _f2e_menu_items: items,
   };
 
-  if (node.text) {
-    if (node.text.fontSize) {
-      settings.typography_font_size = { unit: 'px', size: node.text.fontSize, sizes: [] };
-    }
-    if (node.text.fontFamily) {
-      settings.typography_font_family = node.text.fontFamily;
-    }
-    if (node.text.fontWeight) {
-      settings.typography_font_weight = node.text.fontWeight;
-    }
-    if (node.text.color) {
-      settings.color_menu_item = node.text.color;
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.padding_horizontal_menu_item = { unit: 'px', size: Math.round(node.layout.gap / 2), sizes: [] };
+  }
+
+  const navTypo = node.text || (textItems[0] && textItems[0].text) || null;
+  if (navTypo) {
+    applyTypographySettings(settings, 'typography', navTypo, node.responsive);
+    if (navTypo.color) {
+      settings.color_menu_item = navTypo.color;
     }
   }
 
@@ -4894,67 +5542,118 @@ function buildProNavMenu(node, nodes, allocId) {
 }
 
 function buildProCta(node, nodes, allocId, resolveMedia) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
   const imgs = collectSubtreeImages(node, nodes);
+  const settings = {
+    skin: 'classic',
+    title: texts[0] || (node.content && node.content.name) || 'Call to Action',
+    description: texts[1] || '',
+    button: texts[2] || 'Learn More',
+    bg_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
+  };
+
+  if (textItems[0] && textItems[0].text) {
+    if (textItems[0].text.color) settings.title_color = textItems[0].text.color;
+    applyTypographySettings(settings, 'title_typography', textItems[0].text, node.responsive);
+  }
+  if (textItems[1] && textItems[1].text) {
+    if (textItems[1].text.color) settings.description_color = textItems[1].text.color;
+    applyTypographySettings(settings, 'description_typography', textItems[1].text, node.responsive);
+  }
+  if (textItems[2] && textItems[2].text) {
+    if (textItems[2].text.color) settings.button_text_color = textItems[2].text.color;
+    applyTypographySettings(settings, 'button_typography', textItems[2].text, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.content_bg_color = node.style.background;
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'call-to-action',
     isInner: false,
-    settings: {
-      skin: 'classic',
-      title: texts[0] || (node.content && node.content.name) || 'Call to Action',
-      description: texts[1] || '',
-      button: texts[2] || 'Learn More',
-      bg_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
-    },
+    settings,
     elements: [],
   };
 }
 
 function buildProPriceTable(node, nodes, allocId) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
-  const priceText = texts.find((t) => /[$€£₫¥]|\d+\s*\/\s*(mo|yr|tháng|năm)/i.test(t) || /^\$?\d+$/.test(t.trim())) || '49';
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const priceNode = textItems.find((t) => /[$€£₫¥]|\d+\s*\/\s*(mo|yr|tháng|năm)/i.test(t.text.characters) || /^\$?\d+$/.test(t.text.characters.trim()));
+  const priceText = (priceNode && priceNode.text.characters) || '49';
   const numericPrice = priceText.replace(/[^0-9.]/g, '') || '49';
-  const heading = texts[0] || (node.content && node.content.name) || 'Pro Plan';
+  const headingNode = textItems[0] || null;
+  const heading = (headingNode && headingNode.text.characters) || (node.content && node.content.name) || 'Pro Plan';
   const features = texts.slice(2).map((ft, idx) => ({
     _id: shortId(`feat-${idx}`),
     item_text: ft,
     selected_icon: { value: 'fas fa-check', library: 'fa-solid' },
   }));
 
+  const settings = {
+    heading,
+    sub_heading: texts[1] && texts[1] !== priceText ? texts[1] : 'Monthly Plan',
+    price: numericPrice,
+    currency_symbol: 'dollar',
+    period: 'Monthly',
+    features_list: features,
+    button_text: texts[texts.length - 1] || 'Get Started',
+  };
+
+  if (headingNode && headingNode.text) {
+    if (headingNode.text.color) settings.heading_color = headingNode.text.color;
+    applyTypographySettings(settings, 'heading_typography', headingNode.text, node.responsive);
+  }
+  if (priceNode && priceNode.text) {
+    if (priceNode.text.color) settings.price_color = priceNode.text.color;
+    applyTypographySettings(settings, 'price_typography', priceNode.text, node.responsive);
+  }
+  if (textItems[2] && textItems[2].text) {
+    if (textItems[2].text.color) settings.features_color = textItems[2].text.color;
+    applyTypographySettings(settings, 'features_typography', textItems[2].text, node.responsive);
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'price-table',
     isInner: false,
-    settings: {
-      heading,
-      sub_heading: texts[1] && texts[1] !== priceText ? texts[1] : 'Monthly Plan',
-      price: numericPrice,
-      currency_symbol: 'dollar',
-      period: 'Monthly',
-      features_list: features,
-      button_text: texts[texts.length - 1] || 'Get Started',
-    },
+    settings,
     elements: [],
   };
 }
 
 function buildProFlipBox(node, nodes, allocId) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const settings = {
+    title_text_a: texts[0] || (node.content && node.content.name) || 'Front Title',
+    description_text_a: texts[1] || '',
+    title_text_b: texts[2] || texts[0] || 'Back Title',
+    description_text_b: texts[3] || texts[1] || '',
+    button_text: texts[4] || 'Read More',
+  };
+  if (textItems[0] && textItems[0].text) {
+    if (textItems[0].text.color) settings.title_color_a = textItems[0].text.color;
+    applyTypographySettings(settings, 'title_typography_a', textItems[0].text, node.responsive);
+  }
+  if (textItems[1] && textItems[1].text) {
+    if (textItems[1].text.color) settings.description_color_a = textItems[1].text.color;
+    applyTypographySettings(settings, 'description_typography_a', textItems[1].text, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.background_a_background = 'classic';
+    settings.background_a_color = node.style.background;
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'flip-box',
     isInner: false,
-    settings: {
-      title_text_a: texts[0] || (node.content && node.content.name) || 'Front Title',
-      description_text_a: texts[1] || '',
-      title_text_b: texts[2] || texts[0] || 'Back Title',
-      description_text_b: texts[3] || texts[1] || '',
-      button_text: texts[4] || 'Read More',
-    },
+    settings,
     elements: [],
   };
 }
@@ -5007,14 +5706,28 @@ function buildProLoopGrid(node, allocId, wType = 'loop-grid') {
 }
 
 function buildGenericProWidget(node, nodes, wType, allocId) {
-  const texts = collectSubtreeTexts(node, nodes).map((t) => t.text.characters);
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const firstTypo = node.text || (textItems[0] && textItems[0].text) || null;
   const settings = {};
   if (wType === 'blockquote') {
     settings.blockquote_content = texts[0] || (node.content && node.content.name) || '';
+    settings.author_name = texts[1] || '';
     settings.tweet_button_Label = 'Tweet';
+    if (firstTypo) {
+      if (firstTypo.color) settings.content_text_color = firstTypo.color;
+      applyTypographySettings(settings, 'content_typography', firstTypo, node.responsive);
+    }
   } else if (wType === 'animated-headline') {
     settings.before_text = texts[0] || '';
     settings.highlighted_text = texts[1] || (node.content && node.content.name) || '';
+    if (firstTypo) {
+      if (firstTypo.color) settings.title_color = firstTypo.color;
+      applyTypographySettings(settings, 'title_typography', firstTypo, node.responsive);
+    }
+  } else if (firstTypo) {
+    if (firstTypo.color) settings.title_color = firstTypo.color;
+    applyTypographySettings(settings, 'typography', firstTypo, node.responsive);
   }
   return {
     id: allocId(node.id),
@@ -5167,6 +5880,61 @@ function sendOutlineToUi() {
       mobile: responsiveState.mobile ? responsiveState.mobile.name : null,
     },
   });
+
+  if (selection.length > 0) {
+    inspectNodeDevMode(selection[0], { includeSubtree: false })
+      .then((data) => {
+        if (data) {
+          figma.ui.postMessage({ type: 'dev-mode-css', data });
+        }
+      })
+      .catch(() => { });
+  } else {
+    figma.ui.postMessage({ type: 'dev-mode-css', data: null });
+  }
+}
+
+async function handleInspectNodeDevMode(msg = {}) {
+  const { nodeId, includeSubtree = false, focusCanvas = false } = msg;
+  const selection = figma.currentPage.selection || [];
+  let target = null;
+
+  if (nodeId) {
+    if (typeof figma.getNodeByIdAsync === 'function') {
+      try {
+        target = await figma.getNodeByIdAsync(nodeId);
+      } catch (e) { }
+    }
+    if (!target) {
+      const findInTree = (list) => {
+        for (const n of list || []) {
+          if (!n) continue;
+          if (n.id === nodeId) return n;
+          if (Array.isArray(n.children)) {
+            const found = findInTree(n.children);
+            if (found) return found;
+          }
+        }
+        return null;
+      };
+      target = findInTree(selection);
+    }
+  } else if (selection.length > 0) {
+    target = selection[0];
+  }
+
+  if (!target) {
+    throw new Error('Hãy chọn một Layer hoặc Frame trên Figma để xem Dev Mode CSS.');
+  }
+
+  if (focusCanvas && figma.viewport && typeof figma.viewport.scrollAndZoomIntoView === 'function') {
+    try {
+      figma.viewport.scrollAndZoomIntoView([target]);
+    } catch (e) { }
+  }
+
+  const data = await inspectNodeDevMode(target, { includeSubtree: Boolean(includeSubtree) });
+  figma.ui.postMessage({ type: 'dev-mode-css', data });
 }
 
 async function setLayerWidgetOverride(nodeId, widget) {
@@ -5438,27 +6206,42 @@ async function handleLivePushToWordPress(payload) {
     throw new Error(`Lỗi ở bước 1B (Extract Node): ${extErr && extErr.message ? extErr.message : extErr}`);
   }
 
-  // Step 2: Upload deduplicated assets (SHA-256)
+  // Step 2: Upload deduplicated assets (SHA-256) with bounded concurrency (4 parallel workers)
   const attachmentMap = {};
   try {
     if (assetPayloads.length > 0) {
-      for (let i = 0; i < assetPayloads.length; i += 1) {
-        const asset = assetPayloads[i];
-        postStatus(`2/4: Đang đồng bộ tài nguyên ${i + 1}/${assetPayloads.length} (SHA-256: ${asset.sha256.slice(0, 8)})…`);
-        const uploaded = await wpRequest(site.siteUrl, site.token, '/assets', {
-          method: 'POST',
-          body: JSON.stringify({
-            sha256: asset.sha256,
-            mime: asset.mime,
-            kind: asset.kind,
-            base64: asset.base64,
-            name: document.title,
-          }),
-        });
-        if (uploaded && uploaded.id) {
-          attachmentMap[asset.sha256] = { id: uploaded.id, url: uploaded.url };
+      const CONCURRENCY = Math.min(4, assetPayloads.length);
+      let cursor = 0;
+      let completed = 0;
+
+      const uploadWorker = async () => {
+        while (cursor < assetPayloads.length) {
+          const idx = cursor;
+          cursor += 1;
+          const asset = assetPayloads[idx];
+          postStatus(`2/4: Đang đồng bộ tài nguyên ${completed + 1}/${assetPayloads.length} (SHA-256: ${asset.sha256.slice(0, 8)})…`);
+          const uploaded = await wpRequest(site.siteUrl, site.token, '/assets', {
+            method: 'POST',
+            body: JSON.stringify({
+              sha256: asset.sha256,
+              mime: asset.mime,
+              kind: asset.kind,
+              base64: asset.base64,
+              name: document.title,
+            }),
+          });
+          if (uploaded && uploaded.id) {
+            attachmentMap[asset.sha256] = { id: uploaded.id, url: uploaded.url };
+          }
+          completed += 1;
         }
+      };
+
+      const workers = [];
+      for (let w = 0; w < CONCURRENCY; w += 1) {
+        workers.push(uploadWorker());
       }
+      await Promise.all(workers);
     }
   } catch (assetErr) {
     throw new Error(`Lỗi ở bước 2 (Upload Asset): ${assetErr && assetErr.message ? assetErr.message : assetErr}`);
@@ -5477,7 +6260,7 @@ async function handleLivePushToWordPress(payload) {
     throw new Error(`Lỗi ở bước 3 (Sync Globals): ${dsErr && dsErr.message ? dsErr.message : dsErr}`);
   }
 
-  // Step 4: Compile on client with resolved attachmentMap AND send both IR + compiled elements to WordPress
+  // Step 4: Compile on client with resolved attachmentMap & send compiled elements to WordPress
   let result;
   let fidelityReport = null;
   try {
@@ -5503,7 +6286,6 @@ async function handleLivePushToWordPress(payload) {
         elementorVersion,
         attachmentMap,
         content: compiledElements,
-        document,
       }),
     });
   } catch (impErr) {
@@ -5700,6 +6482,9 @@ figma.ui.onmessage = async (msg) => {
     switch (msg.type) {
       case 'get-outline':
         sendOutlineToUi();
+        break;
+      case 'inspect-node-css':
+        await handleInspectNodeDevMode(msg);
         break;
       case 'set-widget':
         await setLayerWidgetOverride(msg.nodeId, msg.widget);

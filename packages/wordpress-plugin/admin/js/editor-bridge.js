@@ -14,54 +14,72 @@
   if (typeof window === 'undefined') return;
 
   const f2eEditorBridge = {
+    _uploadCache: new Map(),
+
     async uploadDataUriIfNeeded(dataUri, title = 'Figma Pasted Asset') {
       if (!dataUri || typeof dataUri !== 'string' || !dataUri.startsWith('data:image/')) {
         return null;
       }
+      if (this._uploadCache.has(dataUri)) {
+        return this._uploadCache.get(dataUri);
+      }
       const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUri);
       if (!match) return null;
 
-      try {
-        const res = await fetch(`${window.f2eEditorConfig?.restUrl || '/wp-json/f2e-bridge/v1'}/assets`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'X-WP-Nonce': window.f2eEditorConfig?.nonce || '',
-          },
-          body: JSON.stringify({
-            sha256: '',
-            mime: match[1],
-            base64: match[2],
-            name: title,
-          }),
-        });
-        const json = await res.json();
-        if (json && json.success && json.data && json.data.id) {
-          return { id: json.data.id, url: json.data.url };
+      const uploadPromise = (async () => {
+        try {
+          const res = await fetch(`${window.f2eEditorConfig?.restUrl || '/wp-json/f2e-bridge/v1'}/assets`, {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+              'X-WP-Nonce': window.f2eEditorConfig?.nonce || '',
+            },
+            body: JSON.stringify({
+              sha256: '',
+              mime: match[1],
+              base64: match[2],
+              name: title,
+            }),
+          });
+          const json = await res.json();
+          if (json && json.success && json.data && json.data.id) {
+            return { id: json.data.id, url: json.data.url };
+          }
+        } catch (e) {
+          console.warn('[F2E Bridge] Could not auto-upload pasted Data-URI asset:', e);
         }
-      } catch (e) {
-        console.warn('[F2E Bridge] Could not auto-upload pasted Data-URI asset:', e);
-      }
-      return null;
+        return null;
+      })();
+
+      this._uploadCache.set(dataUri, uploadPromise);
+      return uploadPromise;
     },
 
     async hydrateElementAssets(element) {
       if (!element || typeof element !== 'object') return element;
       const settings = element.settings || {};
 
+      const tasks = [];
       if (settings.image && typeof settings.image.url === 'string' && settings.image.url.startsWith('data:image/')) {
-        const uploaded = await this.uploadDataUriIfNeeded(settings.image.url, settings._title || 'Figma Image');
-        if (uploaded) settings.image = uploaded;
+        tasks.push(
+          this.uploadDataUriIfNeeded(settings.image.url, settings._title || 'Figma Image').then((uploaded) => {
+            if (uploaded) settings.image = uploaded;
+          })
+        );
       }
       if (settings.background_image && typeof settings.background_image.url === 'string' && settings.background_image.url.startsWith('data:image/')) {
-        const uploaded = await this.uploadDataUriIfNeeded(settings.background_image.url, settings._title || 'Figma BG');
-        if (uploaded) settings.background_image = uploaded;
+        tasks.push(
+          this.uploadDataUriIfNeeded(settings.background_image.url, settings._title || 'Figma BG').then((uploaded) => {
+            if (uploaded) settings.background_image = uploaded;
+          })
+        );
       }
 
-      if (Array.isArray(element.elements)) {
-        for (let i = 0; i < element.elements.length; i += 1) {
-          await this.hydrateElementAssets(element.elements[i]);
-        }
+      if (Array.isArray(element.elements) && element.elements.length > 0) {
+        tasks.push(Promise.all(element.elements.map((child) => this.hydrateElementAssets(child))));
+      }
+      if (tasks.length > 0) {
+        await Promise.all(tasks);
       }
       return element;
     },

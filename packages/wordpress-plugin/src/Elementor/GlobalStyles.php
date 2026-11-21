@@ -116,6 +116,106 @@ final class GlobalStyles
         return strtolower(trim($family)) . '|' . round($size, 1) . '|' . trim($weight);
     }
 
+    /**
+     * Post-processes compiled Elementor v3 elements on the server to bind verified
+     * Active Kit Global Colors and Global Typography (`__globals__`) while preserving
+     * exact Figma hex colors and font values as inline fallbacks.
+     *
+     * @param list<array<string,mixed>> $elements
+     * @param array<string,string>|null $customColorIndex Optional precomputed color index
+     * @param array<string,string>|null $customTypoIndex Optional precomputed typography index
+     * @return list<array<string,mixed>>
+     */
+    public function bindGlobalsToElements(array $elements, ?array $customColorIndex = null, ?array $customTypoIndex = null): array
+    {
+        $colors = $customColorIndex ?? $this->colorIndex();
+        $typos = $customTypoIndex ?? $this->typographyIndex();
+        if ($colors === [] && $typos === []) {
+            return $elements;
+        }
+
+        $colorFields = [
+            'background_color',
+            'title_color',
+            'text_color',
+            'button_text_color',
+            'button_background_color',
+            'border_color',
+            'color',
+            'primary_color',
+            'secondary_color',
+            'icon_color',
+            'heading_color',
+            'description_color',
+        ];
+
+        $typoPrefixes = [
+            'typography',
+            'title_typography',
+            'description_typography',
+            'heading_typography',
+            'content_typography',
+            'icon_typography',
+            'button_typography',
+        ];
+
+        $walk = function (array $list) use (&$walk, $colors, $typos, $colorFields, $typoPrefixes): array {
+            foreach ($list as $i => $el) {
+                if (!is_array($el)) {
+                    continue;
+                }
+                $settings = is_array($el['settings'] ?? null) ? $el['settings'] : [];
+                $globals = is_array($settings['__globals__'] ?? null) ? $settings['__globals__'] : [];
+
+                if ($colors !== []) {
+                    foreach ($colorFields as $field) {
+                        if (!empty($settings[$field]) && is_string($settings[$field]) && empty($globals[$field])) {
+                            $norm = self::normalizeColorKey($settings[$field]);
+                            if (isset($colors[$norm])) {
+                                $globals[$field] = 'globals/colors?id=' . $colors[$norm];
+                            }
+                        }
+                    }
+                }
+
+                if ($typos !== []) {
+                    foreach ($typoPrefixes as $prefix) {
+                        $globalKey = $prefix . '_typography';
+                        $familyKey = $prefix . '_font_family';
+                        $sizeKey = $prefix . '_font_size';
+                        $weightKey = $prefix . '_font_weight';
+                        if (
+                            empty($globals[$globalKey]) &&
+                            !empty($settings[$familyKey]) &&
+                            is_string($settings[$familyKey]) &&
+                            isset($settings[$sizeKey]['size']) &&
+                            is_numeric($settings[$sizeKey]['size'])
+                        ) {
+                            $weight = (string) ($settings[$weightKey] ?? '400');
+                            $tKey = self::normalizeTypoKey($settings[$familyKey], (float) $settings[$sizeKey]['size'], $weight);
+                            if (isset($typos[$tKey])) {
+                                $globals[$globalKey] = 'globals/typography?id=' . $typos[$tKey];
+                            }
+                        }
+                    }
+                }
+
+                if ($globals !== []) {
+                    $settings['__globals__'] = $globals;
+                }
+                $el['settings'] = $settings;
+
+                if (!empty($el['elements']) && is_array($el['elements'])) {
+                    $el['elements'] = $walk($el['elements']);
+                }
+                $list[$i] = $el;
+            }
+            return $list;
+        };
+
+        return $walk($elements);
+    }
+
     /** @return array<string,mixed> */
     private function getKitSettings(): array
     {

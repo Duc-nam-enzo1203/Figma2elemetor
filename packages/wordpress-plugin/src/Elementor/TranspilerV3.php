@@ -1038,28 +1038,69 @@ final class TranspilerV3
     /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
     private function buildCounter(array $node, array $nodes): array
     {
-        $content = is_array($node['content'] ?? null) ? $node['content'] : [];
-        $numText = (string) ($content['counterNumber'] ?? '');
-        $label = (string) ($content['counterTitle'] ?? $content['name'] ?? 'Stats');
-
-        if ($numText === '') {
-            $texts = array_map(static fn (array $n): string => (string) ($n['text']['characters'] ?? ''), $this->collectSubtreeTexts($node, $nodes));
-            foreach ($texts as $t) {
-                if (preg_match('/\d/', $t) === 1) {
-                    $numText = $t;
-                } else {
-                    $label = $t;
-                }
+        $textNodes = $this->collectSubtreeTexts($node, $nodes);
+        $numNode = null;
+        $labelNode = null;
+        foreach ($textNodes as $tn) {
+            $chars = (string) ($tn['text']['characters'] ?? '');
+            if ($numNode === null && preg_match('/\d/', $chars) === 1) {
+                $numNode = $tn;
+            } elseif ($labelNode === null) {
+                $labelNode = $tn;
             }
         }
-        if ($numText === '') $numText = '100';
-        preg_match('/([0-9.,]+)(.*)/', trim($numText), $m);
-        return $this->wrapElement('widget', 'counter', [
+        if ($numNode === null) {
+            $numNode = !empty($node['text']) ? $node : ($textNodes[0] ?? $node);
+        }
+
+        $numTypo = is_array($numNode['text'] ?? null) ? $numNode['text'] : (is_array($node['text'] ?? null) ? $node['text'] : []);
+        $numText = trim((string) ($numTypo['characters'] ?? '100'));
+        $labelText = ($labelNode !== null && $labelNode !== $numNode)
+            ? trim((string) ($labelNode['text']['characters'] ?? ''))
+            : '';
+
+        preg_match('/^([^0-9+-]*?)([0-9.,]+)(.*)$/', $numText, $m);
+        $prefix = (string) ($m[1] ?? '');
+        $rawDigits = str_replace(',', '', (string) ($m[2] ?? '100'));
+        $suffix = (string) ($m[3] ?? '');
+        if (preg_match('/^(0+)(?=\d)/', $rawDigits, $lz) === 1) {
+            $prefix .= $lz[1];
+        }
+
+        $globals = [];
+        $settings = [
             'starting_number' => 0,
-            'ending_number' => (float) str_replace(',', '', $m[1] ?? '100'),
-            'suffix' => $m[2] ?? '',
-            'title' => $label,
-        ], [], []);
+            'ending_number' => (float) $rawDigits,
+            'prefix' => $prefix,
+            'suffix' => $suffix,
+            'title' => $labelText,
+        ];
+
+        $numColor = (string) ($numTypo['color'] ?? $numTypo['gradient']['color2'] ?? $numTypo['gradient']['color1'] ?? '');
+        if ($numColor !== '') {
+            $this->bindColor($settings, $globals, 'number_color', $numColor);
+        }
+        if (!empty($numTypo)) {
+            $this->bindTypography($settings, $globals, 'typography_number', $numTypo, (array) ($numNode['responsive'] ?? $node['responsive'] ?? []));
+        }
+        if ($labelNode !== null && is_array($labelNode['text'] ?? null)) {
+            $lblTypo = $labelNode['text'];
+            if (!empty($lblTypo['color'])) {
+                $this->bindColor($settings, $globals, 'title_color', (string) $lblTypo['color']);
+            }
+            $this->bindTypography($settings, $globals, 'typography_title', $lblTypo, (array) ($labelNode['responsive'] ?? $node['responsive'] ?? []));
+        }
+
+        $gradCss = (string) ($numTypo['gradientCss'] ?? '');
+        if ($gradCss === '' && is_array($numTypo['gradient'] ?? null)) {
+            $g = $numTypo['gradient'];
+            $gradCss = sprintf('linear-gradient(%ddeg, %s %d%%, %s %d%%)', (int) ($g['angle'] ?? 180), (string) ($g['color1'] ?? '#A9C35E'), (int) ($g['stop1'] ?? 0), (string) ($g['color2'] ?? '#038132'), (int) ($g['stop2'] ?? 100));
+        }
+        if ($gradCss !== '') {
+            $settings['custom_css'] = "selector .elementor-counter-number-wrapper, selector .elementor-counter-number {\n  background: {$gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}";
+        }
+
+        return $this->wrapElement('widget', 'counter', $settings, $globals, []);
     }
 
     // ── Elementor Pro Widget Builders ──
@@ -1495,6 +1536,21 @@ final class TranspilerV3
     /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return list<array<string,mixed>> */
     private function collectSubtreeTexts(array $node, array $nodes): array
     {
+        if (!empty($node['extractedTexts']) && is_array($node['extractedTexts']) && empty($node['children'])) {
+            $out = [];
+            foreach ($node['extractedTexts'] as $idx => $t) {
+                if (is_array($t) && !empty($t['characters'])) {
+                    $out[] = [
+                        'id' => ((string) ($node['id'] ?? 'n')) . '-txt-' . $idx,
+                        'text' => $t,
+                        'responsive' => $node['responsive'] ?? [],
+                    ];
+                }
+            }
+            if ($out !== []) {
+                return $out;
+            }
+        }
         $out = [];
         $walk = function (array $n) use (&$walk, &$out, $nodes): void {
             if (!empty($n['text']['characters'])) {

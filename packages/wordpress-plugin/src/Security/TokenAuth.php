@@ -11,12 +11,17 @@ namespace F2EBridge\Security;
 final class TokenAuth
 {
     public const OPTION_TOKEN = 'f2e_bridge_connection_token';
+    public const OPTION_TOKEN_HASH = 'f2e_bridge_connection_token_hash';
     public const OPTION_USER_ID = 'f2e_bridge_paired_user_id';
 
     public function getOrCreateToken(): string
     {
         $existing = get_option(self::OPTION_TOKEN, '');
         if (is_string($existing) && strlen($existing) >= 32) {
+            $hash = get_option(self::OPTION_TOKEN_HASH, '');
+            if (!is_string($hash) || $hash === '') {
+                update_option(self::OPTION_TOKEN_HASH, $this->hashToken($existing), false);
+            }
             return $existing;
         }
         return $this->regenerateToken();
@@ -26,6 +31,7 @@ final class TokenAuth
     {
         $raw = 'f2e_live_' . bin2hex(random_bytes(24));
         update_option(self::OPTION_TOKEN, $raw, false);
+        update_option(self::OPTION_TOKEN_HASH, $this->hashToken($raw), false);
         if (function_exists('get_current_user_id') && get_current_user_id() > 0) {
             update_option(self::OPTION_USER_ID, (int) get_current_user_id(), false);
         }
@@ -41,11 +47,27 @@ final class TokenAuth
             return false;
         }
         $provided = $matches[1];
+        $storedHash = get_option(self::OPTION_TOKEN_HASH, '');
+        if (is_string($storedHash) && $storedHash !== '') {
+            return hash_equals($storedHash, $this->hashToken($provided));
+        }
+
+        // Legacy fallback if hash was not yet populated
         $stored = get_option(self::OPTION_TOKEN, '');
         if (!is_string($stored) || $stored === '') {
             return false;
         }
-        return hash_equals($stored, $provided);
+        $valid = hash_equals($stored, $provided);
+        if ($valid) {
+            update_option(self::OPTION_TOKEN_HASH, $this->hashToken($stored), false);
+        }
+        return $valid;
+    }
+
+    public function hashToken(string $token): string
+    {
+        $key = function_exists('wp_salt') ? (string) wp_salt('auth') : 'f2e_bridge_auth_key';
+        return hash_hmac('sha256', $token, $key);
     }
 
     public function getPairedUserId(): int

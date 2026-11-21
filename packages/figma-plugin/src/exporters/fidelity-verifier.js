@@ -268,6 +268,63 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
       }
     }
 
+    // ── 3C. Auto-Heal Counter & Gradient Text (`background-clip: text`) from IR / Dev Mode CSS ──
+    if (el.elType === 'widget' && irNode && irNode.text) {
+      const irText = irNode.text;
+      const gradCss = irText.gradientCss
+        || (irText.gradient && irText.gradient.color1 && irText.gradient.color2
+          ? `linear-gradient(${irText.gradient.angle ?? 180}deg, ${irText.gradient.color1} ${irText.gradient.stop1 ?? 0}%, ${irText.gradient.color2} ${irText.gradient.stop2 ?? 100}%)`
+          : null);
+
+      if (el.widgetType === 'counter') {
+        let counterHealed = false;
+        const rawChars = String(irText.characters || '').trim();
+        // If single-number counter duplicated its number string as `title` (e.g. title === "08"), clear duplicate title
+        if (settings.title && settings.title === rawChars) {
+          settings.title = '';
+          counterHealed = true;
+        }
+        // Preserve leading zero(s) like "08" -> prefix: "0"
+        const leadZero = /^(0+)(?=\d)/.exec(rawChars);
+        if (leadZero && !settings.prefix) {
+          settings.prefix = leadZero[1];
+          counterHealed = true;
+        }
+        if (!settings.typography_number_typography && (irText.fontFamily || irText.fontSize)) {
+          settings.typography_number_typography = 'custom';
+          settings.typography_number_font_family = irText.fontFamily || 'Inter';
+          settings.typography_number_font_weight = String(irText.fontWeight || '700');
+          settings.typography_number_font_style = irText.fontStyle || 'normal';
+          settings.typography_number_font_size = { unit: 'px', size: Number(irText.fontSize) || 48, sizes: [] };
+          if (irText.lineHeight) {
+            settings.typography_number_line_height = {
+              unit: irText.lineHeightUnit || 'px',
+              size: Number(irText.lineHeight),
+              sizes: [],
+            };
+          }
+          counterHealed = true;
+        }
+        if (!settings.number_color && (irText.color || (irText.gradient && irText.gradient.color2))) {
+          settings.number_color = irText.color || irText.gradient.color2;
+          counterHealed = true;
+        }
+        if (gradCss && (!settings.custom_css || !settings.custom_css.includes('background-clip'))) {
+          settings.custom_css = `selector .elementor-counter-number-wrapper, selector .elementor-counter-number {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+          counterHealed = true;
+        }
+        if (counterHealed) {
+          recordFix(nodeId, title, 'Bổ sung đầy đủ Typography, Leading Zero Prefix và Gradient Text CSS từ Figma Dev Mode cho Counter');
+        }
+      } else if ((el.widgetType === 'heading' || el.widgetType === 'text-editor') && gradCss) {
+        if (!settings.custom_css || !settings.custom_css.includes('background-clip')) {
+          const targetSel = el.widgetType === 'heading' ? 'selector .elementor-heading-title' : 'selector';
+          settings.custom_css = `${targetSel} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+          recordFix(nodeId, title, 'Bổ sung hiệu ứng chữ chuyển màu (background-clip: text) từ Figma Dev Mode');
+        }
+      }
+    }
+
     // Recursively heal children first
     if (Array.isArray(el.elements) && el.elements.length > 0) {
       for (let i = 0; i < el.elements.length; i += 1) {

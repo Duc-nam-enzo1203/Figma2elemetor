@@ -95,7 +95,8 @@ final class DocumentWriter
 
     /**
      * Incrementally merges incoming Figma-mapped elements into an existing Elementor tree
-     * using `settings._f2e_node_id` so existing page sections and Elementor IDs are preserved.
+     * using `settings._f2e_node_id` so existing page sections, nested child Elementor IDs,
+     * custom CSS, links, dynamic tags, custom attributes, and manually added WP widgets are preserved.
      *
      * @param list<array<string,mixed>> $existingTree
      * @param list<array<string,mixed>> $incomingElements
@@ -111,25 +112,27 @@ final class DocumentWriter
             }
         }
 
+        // Build a deep lookup table of all existing elements (at any depth) by `_f2e_node_id`
+        $existingIndex = [];
+        $this->indexTreeByF2eId($existingTree, $existingIndex);
+
         $matchedF2eIds = [];
         $updatedCount = 0;
 
-        $replaceInTree = function (array $tree) use (&$replaceInTree, $incomingByF2eId, &$matchedF2eIds, &$updatedCount): array {
+        $replaceInTree = function (array $tree) use (
+            &$replaceInTree,
+            $incomingByF2eId,
+            $existingIndex,
+            &$matchedF2eIds,
+            &$updatedCount
+        ): array {
             foreach ($tree as $i => $el) {
                 if (!is_array($el)) {
                     continue;
                 }
                 $fid = (string) ($el['settings']['_f2e_node_id'] ?? '');
                 if ($fid !== '' && isset($incomingByF2eId[$fid])) {
-                    $replacement = $incomingByF2eId[$fid];
-                    // Preserve original Elementor element ID and user custom CSS if any
-                    if (!empty($el['id'])) {
-                        $replacement['id'] = $el['id'];
-                    }
-                    if (!empty($el['settings']['custom_css']) && empty($replacement['settings']['custom_css'])) {
-                        $replacement['settings']['custom_css'] = $el['settings']['custom_css'];
-                    }
-                    $tree[$i] = $replacement;
+                    $tree[$i] = $this->reconcileSubtree($el, $incomingByF2eId[$fid], $existingIndex);
                     $matchedF2eIds[$fid] = true;
                     $updatedCount++;
                     continue;
@@ -152,6 +155,133 @@ final class DocumentWriter
         }
 
         return [$mergedTree, $updatedCount, $appendedCount];
+    }
+
+    /**
+     * Recursively indexes all elements in an Elementor tree by `settings._f2e_node_id`.
+     *
+     * @param list<array<string,mixed>> $tree
+     * @param array<string,array<string,mixed>> $index
+     */
+    private function indexTreeByF2eId(array $tree, array &$index): void
+    {
+        foreach ($tree as $el) {
+            if (!is_array($el)) {
+                continue;
+            }
+            $fid = (string) ($el['settings']['_f2e_node_id'] ?? '');
+            if ($fid !== '' && !isset($index[$fid])) {
+                $index[$fid] = $el;
+            }
+            if (!empty($el['elements']) && is_array($el['elements'])) {
+                $this->indexTreeByF2eId($el['elements'], $index);
+            }
+        }
+    }
+
+    /**
+     * Deeply reconciles an incoming Elementor element subtree against its existing counterpart
+     * and the global existing `_f2e_node_id` index, preserving Elementor IDs, user custom_css,
+     * user-configured links, dynamic tags, HTML attributes, and manually added non-Figma child widgets.
+     *
+     * @param array<string,mixed>|null $directOld
+     * @param array<string,mixed> $incoming
+     * @param array<string,array<string,mixed>> $existingIndex
+     * @return array<string,mixed>
+     */
+    private function reconcileSubtree(?array $directOld, array $incoming, array $existingIndex): array
+    {
+        $fid = (string) ($incoming['settings']['_f2e_node_id'] ?? '');
+        $old = ($fid !== '' && isset($existingIndex[$fid])) ? $existingIndex[$fid] : $directOld;
+
+        if (is_array($old)) {
+            if (!empty($old['id'])) {
+                $incoming['id'] = $old['id'];
+            }
+            $oldSettings = is_array($old['settings'] ?? null) ? $old['settings'] : [];
+            $incSettings = is_array($incoming['settings'] ?? null) ? $incoming['settings'] : [];
+
+            // Preserve user-authored WordPress settings if incoming did not override them
+            $preservedKeys = [
+                'custom_css',
+                '__dynamic__',
+                '_attributes',
+                '_element_id',
+                '_css_classes',
+                'css_classes',
+                '_animation',
+                'animation_duration',
+                '_animation_delay',
+            ];
+            foreach ($preservedKeys as $k) {
+                if (!empty($oldSettings[$k]) && empty($incSettings[$k])) {
+                    $incSettings[$k] = $oldSettings[$k];
+                }
+            }
+
+            // Preserve user-configured real link URLs (when Figma only exported default '#' or empty link)
+            foreach (['link', 'website_link'] as $linkKey) {
+                if (is_array($oldSettings[$linkKey] ?? null)) {
+                    $oldUrl = trim((string) ($oldSettings[$linkKey]['url'] ?? ''));
+                    $incUrl = is_array($incSettings[$linkKey] ?? null)
+                        ? trim((string) ($incSettings[$linkKey]['url'] ?? ''))
+                        : '';
+                    if ($oldUrl !== '' && $oldUrl !== '#' && ($incUrl === '' || $incUrl === '#')) {
+                        $incSettings[$linkKey] = $oldSettings[$linkKey];
+                    }
+                }
+            }
+
+            $incoming['settings'] = $incSettings;
+        }
+
+        // Recursively reconcile children
+        if (!empty($incoming['elements']) && is_array($incoming['elements'])) {
+            $oldChildren = (is_array($old) && !empty($old['elements']) && is_array($old['elements']))
+                ? $old['elements']
+                : [];
+
+            foreach ($incoming['elements'] as $idx => $incChild) {
+                if (!is_array($incChild)) {
+                    continue;
+                }
+                $childFid = (string) ($incChild['settings']['_f2e_node_id'] ?? '');
+                $matchedOldChild = null;
+                if ($childFid !== '' && isset($existingIndex[$childFid])) {
+                    $matchedOldChild = $existingIndex[$childFid];
+                } elseif (isset($oldChildren[$idx]) && is_array($oldChildren[$idx])) {
+                    $oldChildFid = (string) ($oldChildren[$idx]['settings']['_f2e_node_id'] ?? '');
+                    if ($oldChildFid === '' || $oldChildFid === $childFid) {
+                        $matchedOldChild = $oldChildren[$idx];
+                    }
+                }
+                $incoming['elements'][$idx] = $this->reconcileSubtree($matchedOldChild, $incChild, $existingIndex);
+            }
+
+            // If this is a Figma-mapped container and the user manually added pure WordPress widgets inside it, keep them
+            if (($incoming['elType'] ?? '') === 'container' && !empty($oldChildren)) {
+                $oldHadFigmaChildren = false;
+                $manualWpChildren = [];
+                foreach ($oldChildren as $oldChild) {
+                    if (!is_array($oldChild)) {
+                        continue;
+                    }
+                    $oldChildFid = (string) ($oldChild['settings']['_f2e_node_id'] ?? '');
+                    if ($oldChildFid !== '') {
+                        $oldHadFigmaChildren = true;
+                    } else {
+                        $manualWpChildren[] = $oldChild;
+                    }
+                }
+                if ($oldHadFigmaChildren && !empty($manualWpChildren)) {
+                    foreach ($manualWpChildren as $manualChild) {
+                        $incoming['elements'][] = $manualChild;
+                    }
+                }
+            }
+        }
+
+        return $incoming;
     }
 
     private function clearElementorCache(): void
