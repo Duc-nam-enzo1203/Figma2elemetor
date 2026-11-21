@@ -1211,25 +1211,84 @@ test('Post-Convert Fidelity Verifier & Auto-Healer: Heals Situations 4-column SV
   assert.equal(eyebrowText.settings.__globals__, undefined);
   assert.equal(eyebrowText.settings.text_color, '#16A34A');
 
-  // 2. Situations card keeps white background (#FFFFFF) without bogus 848461d global ID
+  // 2. Situations card keeps white background (#FFFFFF), removes bogus 848461d global ID and removes phantom #E2E8F0 border
   const situationsBox = root.elements[1];
   assert.equal(situationsBox.settings.__globals__, undefined);
   assert.equal(situationsBox.settings.background_color, '#FFFFFF');
+  assert.equal(situationsBox.settings.border_border, undefined);
+  assert.equal(situationsBox.settings.border_color, undefined);
   assert.equal(situationsBox.settings.flex_wrap, 'nowrap');
 
-  // 3. 4 Situations + 3 Vertical Dividers = 7 children in the horizontal row
-  assert.equal(situationsBox.elements.length, 7);
+  // 3. 4 clean Situation Containers (no fake HTML divider widgets); first 3 have border-right: 1px solid #16A34A & padding-right: 24px
+  assert.equal(situationsBox.elements.length, 4);
   const firstSituation = situationsBox.elements[0];
   assert.equal(firstSituation.elType, 'container');
-  assert.equal(firstSituation.settings.width.size, 22);
+  assert.equal(firstSituation.settings.width.size, 22.56);
+  assert.equal(firstSituation.settings.border_border, 'solid');
+  assert.equal(firstSituation.settings.border_width.right, '1');
+  assert.equal(firstSituation.settings.border_width.top, '0');
+  assert.equal(firstSituation.settings.border_color, '#16A34A');
+  assert.equal(firstSituation.settings.padding.right, '24');
   assert.equal(firstSituation.elements[0].widgetType, 'html');
   assert.ok(firstSituation.elements[0].settings.html.includes('<svg'));
   assert.equal(firstSituation.elements[1].widgetType, 'text-editor');
   assert.equal(firstSituation.elements[1].settings.align, 'left');
 
-  const firstDivider = situationsBox.elements[1];
-  assert.equal(firstDivider.widgetType, 'html');
-  assert.ok(firstDivider.settings.html.includes('f2e-vertical-divider'));
+  const fourthSituation = situationsBox.elements[3];
+  assert.equal(fourthSituation.elType, 'container');
+  assert.equal(fourthSituation.settings.border_border, undefined);
+});
+
+test('Dev Mode CSS Authoritative Extraction: Unwraps var(--token, fallback), strips phantom border, and parses border-right + padding-right', async () => {
+  const { applyDevModeCSSToNode, resolveCssVars, normalizeCssColor } = await import('../src/extraction/extractor.js');
+
+  assert.equal(resolveCssVars('var(--Spacing-24, 24px)'), '24px');
+  assert.equal(normalizeCssColor('var(--Surface-White, #FFF)'), '#FFFFFF');
+  assert.equal(normalizeCssColor('#000'), '#000000');
+
+  // 1. Node with phantom stroke in `style` that is NOT in Dev Mode CSS -> must be stripped
+  const situationsEntry = {
+    type: 'frame',
+    layout: {},
+    style: {
+      borderColor: '#E2E8F0',
+      borderWidth: { top: 1, right: 1, bottom: 1, left: 1, isLinked: true },
+    },
+  };
+  applyDevModeCSSToNode(situationsEntry, {
+    display: 'flex',
+    padding: 'var(--Space-24, 24px)',
+    gap: '24px',
+    'border-radius': '20px',
+    background: 'var(--White, #FFF)',
+  });
+  assert.equal(situationsEntry.style.borderColor, undefined);
+  assert.equal(situationsEntry.style.borderWidth, undefined);
+  assert.equal(situationsEntry.style.background, '#FFFFFF');
+  assert.equal(situationsEntry.layout.direction, 'row');
+  assert.equal(situationsEntry.layout.padding.top, 24);
+
+  // 2. Column node with border-right and padding-right in Dev Mode CSS
+  const colEntry = {
+    type: 'frame',
+    layout: {},
+    style: {},
+  };
+  applyDevModeCSSToNode(colEntry, {
+    display: 'flex',
+    'flex-direction': 'column',
+    'padding-right': 'var(--Space-24, 24px)',
+    ' gap': '24px',
+    gap: 'var(--Space-24, 24px)',
+    flex: '1 0 0',
+    'border-right': '1px solid var(--Green-Border, #16A34A)',
+  });
+  assert.equal(colEntry.layout.direction, 'column');
+  assert.equal(colEntry.layout.sizingH, 'FILL');
+  assert.equal(colEntry.layout.padding.right, 24);
+  assert.equal(colEntry.layout.padding.left, 0);
+  assert.equal(colEntry.style.borderColor, '#16A34A');
+  assert.deepEqual(colEntry.style.borderWidth, { top: 0, right: 1, bottom: 0, left: 0, isLinked: false });
 });
 
 

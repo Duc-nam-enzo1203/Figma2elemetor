@@ -165,7 +165,10 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
           });
         }
 
-        const itemGap = (irNode && irNode.layout && typeof irNode.layout.gap === 'number') ? irNode.layout.gap : 16;
+        const itemGap = (irNode && irNode.layout && typeof irNode.layout.gap === 'number') ? irNode.layout.gap : 24;
+        const irPad = (irNode && irNode.layout && irNode.layout.padding) || { top: 0, right: 0, bottom: 0, left: 0 };
+        const irBw = irNode && irNode.style && irNode.style.borderWidth;
+        const irBc = irNode && irNode.style && irNode.style.borderColor;
 
         el.elType = 'container';
         delete el.widgetType;
@@ -177,13 +180,33 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
           flex_justify_content: 'flex-start',
           flex_align_items: isRowBox ? 'center' : 'flex-start',
           content_width: 'full',
-          padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true },
+          padding: {
+            unit: 'px',
+            top: String(irPad.top || 0),
+            right: String(irPad.right || 0),
+            bottom: String(irPad.bottom || 0),
+            left: String(irPad.left || 0),
+            isLinked: irPad.top === irPad.right && irPad.right === irPad.bottom && irPad.bottom === irPad.left,
+          },
           margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true },
           _flex_size: settings._flex_size || 'grow',
           _f2e_node_id: nodeId,
           _title: title,
         };
+        if (irBw && irBc) {
+          el.settings.border_border = 'solid';
+          el.settings.border_width = {
+            unit: 'px',
+            top: String(irBw.top || 0),
+            right: String(irBw.right || 0),
+            bottom: String(irBw.bottom || 0),
+            left: String(irBw.left || 0),
+            isLinked: Boolean(irBw.isLinked),
+          };
+          el.settings.border_color = irBc;
+        }
         el.elements = childElements;
+        el._healedFromIconBox = true;
 
         recordFix(nodeId, title, 'Chuyển đổi Icon Box chứa Inline SVG thành Flexbox Container (SVG + Text) để hiển thị 100% icon vector và căn lề trái');
       }
@@ -223,8 +246,8 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
 
       if (growChildren.length >= 2) {
         const colCount = growChildren.length;
-        // Safe proportional width leaving room for flex gaps so columns never wrap onto multiple lines on Desktop
-        const safeColPct = Math.max(15, Math.floor(88 / colCount));
+        // Exact proportional percentage (e.g. 22.56% for 4 columns) leaving room for flex gaps
+        const safeColPct = Math.round((90.24 / colCount) * 100) / 100;
         const tabletColPct = colCount >= 3 ? 47 : 100;
 
         // If Figma row didn't explicitly wrap, do not wrap on Desktop so all columns stay on 1 row
@@ -235,13 +258,12 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
           recordFix(nodeId, title, `Cố định ${colCount} cột nằm trên 1 hàng ngang Desktop (nowrap) và tự gập 2 cột trên Tablet`);
         }
 
-        // Check if this is a multi-column feature card bar (like `Situations`) with green/accent SVG icons
-        // where vertical dividers between columns are needed
-        const hasExistingDividers = kids.some(
-          (k) => k && (k.widgetType === 'divider' || (k.widgetType === 'html' && String(k.settings?.html || '').includes('f2e-vertical-divider')))
-        );
+        // If children were healed from `icon-box` (which stripped their `border-right` and `padding-right` from Dev Mode),
+        // restore the per-column right border (`border-right: 1px solid`) and right padding (`padding-right: 24px`) on columns 0..N-2,
+        // and remove any phantom outer border on the parent card if not present in Dev Mode.
+        const allHealedFromIconBox = growChildren.every((c) => Boolean(c._healedFromIconBox));
         let accentStrokeColor = null;
-        if (!hasExistingDividers && colCount >= 3 && settings.background_color && settings.border_border) {
+        if (allHealedFromIconBox && colCount >= 3) {
           for (const col of growChildren) {
             const firstChildHtml = col.elements && col.elements[0] && col.elements[0].settings && col.elements[0].settings.html;
             if (typeof firstChildHtml === 'string') {
@@ -252,10 +274,19 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
               }
             }
           }
+          // Remove phantom #E2E8F0 border on parent card if it came from a non-DevMode stroke
+          const irHasParentBorder = irNode && irNode.style && irNode.style.borderWidth && irNode.style.borderColor;
+          if (!irHasParentBorder && settings.border_color === '#E2E8F0') {
+            delete settings.border_border;
+            delete settings.border_width;
+            delete settings.border_color;
+            recordFix(nodeId, title, 'Gỡ bỏ border #E2E8F0 dư thừa không có trong Figma Dev Mode');
+          }
         }
 
         for (let idx = 0; idx < growChildren.length; idx += 1) {
           const col = growChildren[idx];
+          delete col._healedFromIconBox;
           const cs = col.settings || (col.settings = {});
           if (col.elType === 'container') {
             if (cs._element_width === 'inherit') delete cs._element_width;
@@ -263,6 +294,16 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
             cs.width = { unit: '%', size: safeColPct, sizes: [] };
             cs.width_tablet = { unit: '%', size: tabletColPct, sizes: [] };
             cs.width_mobile = { unit: '%', size: 100, sizes: [] };
+
+            // Restore right border & right padding on columns 0..N-2 when healed from stripped icon-box
+            if (allHealedFromIconBox && accentStrokeColor && !cs.border_border && idx < growChildren.length - 1) {
+              cs.border_border = 'solid';
+              cs.border_width = { unit: 'px', top: '0', right: '1', bottom: '0', left: '0', isLinked: false };
+              cs.border_width_mobile = { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true };
+              cs.border_color = accentStrokeColor;
+              cs.padding = { unit: 'px', top: '0', right: '24', bottom: '0', left: '0', isLinked: false };
+              cs.padding_mobile = { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true };
+            }
           } else if (col.elType === 'widget') {
             if (cs._element_width === 'inherit') {
               cs._element_width = 'initial';
@@ -274,34 +315,6 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
               recordFix(cs._f2e_node_id || col.id, cs._title || col.widgetType, 'Sửa _element_width từ inherit (100%) sang chia cột ngang theo tỷ lệ');
             }
           }
-        }
-
-        // Insert vertical divider lines between feature columns if missing from an already-extracted multi-column card
-        if (!hasExistingDividers && accentStrokeColor && kids.length === growChildren.length) {
-          const withDividers = [];
-          for (let i = 0; i < kids.length; i += 1) {
-            withDividers.push(kids[i]);
-            if (i < kids.length - 1) {
-              withDividers.push({
-                id: shortId(`${el.id}-vdiv-${i}`),
-                elType: 'widget',
-                widgetType: 'html',
-                isInner: false,
-                settings: {
-                  html: `<div class="f2e-vertical-divider" style="width:1px;min-height:88px;height:100%;background-color:${accentStrokeColor};opacity:0.45;"></div>`,
-                  _element_width: 'auto',
-                  _flex_size: 'none',
-                  _flex_align_self: 'stretch',
-                  hide_tablet: 'hidden-tablet',
-                  hide_mobile: 'hidden-mobile',
-                  _title: 'Vertical Divider',
-                },
-                elements: [],
-              });
-            }
-          }
-          el.elements = withDividers;
-          recordFix(nodeId, title, `Tự động khôi phục ${kids.length - 1} vạch kẻ dọc phân cách cột (${accentStrokeColor})`);
         }
       }
     }

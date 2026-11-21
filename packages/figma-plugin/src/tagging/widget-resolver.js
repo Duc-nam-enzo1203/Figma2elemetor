@@ -547,22 +547,23 @@ function isIconListNode(node, kids) {
   // A large section (> 400px tall) is never a single icon list
   if (nodeH > 400) return false;
 
-  // Case A: Every child is an item containing (icon/shape/dot + 1 text)
+  // Case A: Every child is a compact horizontal bullet item containing (small dot/check/icon <= 24px + 1 short text)
   const isEveryChildBullet = kids.every((child) => {
     const childW = Number(child.width) || 0;
     const childH = Number(child.height) || 0;
-    // An individual bullet item is never a massive column or multi-element card
-    if (childH > 96 || (childW > 480 && nodeH > 80)) return false;
+    // A vertical card (icon stacked above text) or tall card (> 56px) is a feature column/card, NEVER a bullet list item!
+    if (child.layoutMode === 'VERTICAL') return false;
+    if (childH > 56 || (childW > 480 && nodeH > 80)) return false;
 
     const childKids = visibleChildren(child);
     if (childKids.length < 1 || childKids.length > 4) return false;
     const texts = collectTextDescendants(child);
     if (texts.length !== 1) return false;
     const textLen = String(texts[0].characters || '').trim().length;
-    if (textLen < 2 || textLen > 100) return false;
+    if (textLen < 2 || textLen > 60) return false;
     const shapes = childKids.filter((k) => k.type !== 'TEXT');
     if (shapes.length > 0) {
-      return shapes.every((s) => (Number(s.width) || 0) <= 40 && (Number(s.height) || 0) <= 40);
+      return shapes.every((s) => (Number(s.width) || 0) <= 24 && (Number(s.height) || 0) <= 24);
     }
     return true;
   });
