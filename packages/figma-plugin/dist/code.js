@@ -102,6 +102,28 @@
   return result;
 }
 
+/** Pure-JS Base64 decoder to Uint8Array (for Figma sandbox without atob) */function base64ToBytes(b64) {
+  const clean = String(b64 || '').replace(/[^A-Za-z0-9+/=]/g, '');
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const lookup = new Uint8Array(128);
+  for (let i = 0; i < chars.length; i += 1) lookup[chars.charCodeAt(i)] = i;
+  const len = clean.length;
+  const pad = clean.endsWith('==') ? 2 : (clean.endsWith('=') ? 1 : 0);
+  const out = new Uint8Array(Math.max(0, ((len * 3) >> 2) - pad));
+  let p = 0;
+  for (let i = 0; i < len; i += 4) {
+    const c1 = lookup[clean.charCodeAt(i)] || 0;
+    const c2 = lookup[clean.charCodeAt(i + 1)] || 0;
+    const c3 = lookup[clean.charCodeAt(i + 2)] || 0;
+    const c4 = lookup[clean.charCodeAt(i + 3)] || 0;
+    const triplet = (c1 << 18) | (c2 << 12) | (c3 << 6) | c4;
+    if (p < out.length) out[p++] = (triplet >> 16) & 0xff;
+    if (p < out.length) out[p++] = (triplet >> 8) & 0xff;
+    if (p < out.length) out[p++] = triplet & 0xff;
+  }
+  return out;
+}
+
 /** Pure-JS SHA-256 (FIPS 180-4) over Uint8Array/ArrayBuffer */async function sha256(input) {
   const bytes = typeof input === 'string'
     ? utf8Bytes(input)
@@ -162,6 +184,7 @@
   { value: 'container-grid', label: 'Grid Container (CSS Grid)', category: 'Layout', icon: 'container-grid', pro: false },
   { value: 'inner-section', label: 'Inner Section / Columns', category: 'Layout', icon: 'columns', pro: false },
   { value: 'unwrap', label: 'Bỏ qua Container (Unwrap - Giữ con)', category: 'Layout', icon: 'unwrap', pro: false },
+  { value: 'background', label: 'Background (Gộp vào ảnh nền)', category: 'Layout', icon: 'image', pro: false },
 
   // ── Basic (Elementor Free) ──
   { value: 'heading', label: 'Heading (H1–H6)', category: 'Basic (Free)', icon: 't-letter', pro: false },
@@ -399,6 +422,9 @@ const NAMING_ALIASES = {
   unwrap: 'unwrap',
   'unwrap-container': 'unwrap',
   flatten: 'unwrap',
+  bg: 'background',
+  background: 'background',
+  backdrop: 'background',
 };
 
 const VECTOR_TYPES = new Set([
@@ -411,6 +437,26 @@ const VECTOR_TYPES = new Set([
   return node.children.filter((child) => child && child.visible !== false);
 }function hasImageFill(node) {
   return Array.isArray(node && node.fills) && node.fills.some((fill) => fill && fill.type === 'IMAGE' && fill.visible !== false);
+}function hasDescendantImageFill(node, depth = 0) {
+  if (!node || depth > 5) return false;
+  if (hasImageFill(node)) return true;
+  return visibleChildren(node).some((child) => hasDescendantImageFill(child, depth + 1));
+}function countImageFills(node, depth = 0) {
+  if (!node || depth > 5) return 0;
+  let count = hasImageFill(node) ? 1 : 0;
+  for (const child of visibleChildren(node)) {
+    count += countImageFills(child, depth + 1);
+  }
+  return count;
+}function isSingleMaskedRasterWrapper(node) {
+  if (!node || hasImageFill(node)) return false;
+  const kids = visibleChildren(node);
+  if (kids.length === 0) return false;
+  if (collectTextDescendants(node).length > 0) return false;
+  if (isVectorGraphic(node)) return false;
+  const hasMaskChild = kids.some((k) => Boolean(k && k.isMask));
+  if (hasMaskChild && hasDescendantImageFill(node)) return true;
+  return countImageFills(node) === 1 && kids.every((k) => k && k.type !== 'TEXT');
 }function hasSolidOrGradientFill(node) {
   return Array.isArray(node && node.fills) && node.fills.some((fill) => fill && (fill.type === 'SOLID' || String(fill.type || '').startsWith('GRADIENT_')) && fill.visible !== false);
 }
@@ -545,7 +591,7 @@ function candidateFitsNode(node, widget) {
     return node.type === 'TEXT';
   }
   if (widget === 'image') {
-    return hasImageFill(node) || (kids.length === 0 && node.type === 'RECTANGLE');
+    return hasImageFill(node) || isSingleMaskedRasterWrapper(node) || (kids.length === 0 && node.type === 'RECTANGLE');
   }
   if (widget === 'icon') {
     return isVectorGraphic(node);
@@ -615,8 +661,8 @@ function classifyByHeuristics(node) {
     return { widget: (w <= 128 && h <= 128) ? 'icon' : 'image', source: 'heuristic' };
   }
 
-  // Leaf with Image fill -> Image widget
-  if (hasImageFill(node) && kids.length === 0) {
+  // Leaf with Image fill or single masked/wrapped raster frame -> Image widget
+  if ((hasImageFill(node) && kids.length === 0) || isSingleMaskedRasterWrapper(node)) {
     return { widget: 'image', source: 'heuristic' };
   }
 
@@ -625,8 +671,15 @@ function classifyByHeuristics(node) {
     return { widget: 'button', source: 'heuristic' };
   }
 
-  // Gallery heuristic (2+ sibling images with no text)
-  if (kids.length >= 2 && kids.every((child) => hasImageFill(child) && visibleChildren(child).length === 0)) {
+  // Gallery heuristic (3+ sibling images with no text; 2-photo rows stay as containers)
+  if (
+    kids.length >= 3 &&
+    kids.every(
+      (child) =>
+        collectTextDescendants(child).length === 0 &&
+        ((hasImageFill(child) && visibleChildren(child).length === 0) || isSingleMaskedRasterWrapper(child))
+    )
+  ) {
     return { widget: 'image-gallery', source: 'heuristic' };
   }
 
@@ -720,6 +773,144 @@ function isIconListNode(node, kids) {
   return false;
 }
 
+const STRICT_BG_TOKENS = new Set([
+  'bg', 'background', 'backdrop', 'overlay', 'hero-bg', 'decor', 'watermark', 'vignette', 'scrim',
+]);
+
+const EXACT_SHAPE_BG_NAMES = new Set([
+  'line', 'main', 'mask', 'shape', 'shadow', 'glow', 'gradient', 'tint', 'blur', 'pattern', 'wave', 'curve', 'rectangle', 'ellipse',
+]);
+
+function hasOverlayOpacityOrBlend(ch) {
+  if (!ch) return false;
+  if (typeof ch.opacity === 'number' && ch.opacity < 0.95) return true;
+  if (ch.blendMode && ch.blendMode !== 'PASS_THROUGH' && ch.blendMode !== 'NORMAL') return true;
+  if (Array.isArray(ch.fills)) {
+    return ch.fills.some((f) => {
+      if (!f || f.visible === false) return false;
+      if (typeof f.opacity === 'number' && f.opacity < 0.95) return true;
+      if (String(f.type || '').startsWith('GRADIENT_') && Array.isArray(f.gradientStops)) {
+        return f.gradientStops.some((st) => st && st.color && typeof st.color.a === 'number' && st.color.a < 0.95);
+      }
+      return false;
+    });
+  }
+  return false;
+}
+
+function boxesOverlap(a, b) {
+  const ax1 = Number(a && a.x) || 0;
+  const ay1 = Number(a && a.y) || 0;
+  const ax2 = ax1 + (Number(a && a.width) || 0);
+  const ay2 = ay1 + (Number(a && a.height) || 0);
+  const bx1 = Number(b && b.x) || 0;
+  const by1 = Number(b && b.y) || 0;
+  const bx2 = bx1 + (Number(b && b.width) || 0);
+  const by2 = by1 + (Number(b && b.height) || 0);
+  return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1;
+}
+
+/**
+ * Identifies composite background layers inside a container frame (such as multi-layer
+ * Hero backgrounds: BG + Mask + Line + Main + Overlay stacked behind Menu/Text/Group).
+ *
+ * Respects explicit `background` tags (via pluginData or `[bg]` prefix) on any frame,
+ * and auto-detects non-text visual layers stacked strictly behind foreground content
+ * (plus full-frame translucent overlays above foreground content) inside freeform
+ * (non-Auto-Layout) frames without mutating the Figma canvas.
+ */function detectCompositeBackgroundChildren(containerNode) {
+  const kids = visibleChildren(containerNode);
+  if (kids.length < 2) {
+    return { bgChildren: [], fgChildren: kids, bgIds: new Set() };
+  }
+
+  const bgIds = new Set();
+
+  // 1. Explicit `background` tag (pluginData override or `[bg]` / `[background]` bracket tag)
+  for (const child of kids) {
+    const resolved = resolveWidget(child);
+    if (resolved.widget === 'background') {
+      bgIds.add(child.id);
+    }
+  }
+
+  // 2. Smart Auto-Detection for freeform (non-Auto-Layout) frames with mixed background + foreground content
+  const isFreeform = !containerNode.layoutMode || containerNode.layoutMode === 'NONE';
+  if (isFreeform) {
+    // In Figma API, `children[0]` is bottom-most (lowest z-index), `children[n-1]` is top-most.
+    const isForegroundContent = (child) => {
+      if (bgIds.has(child.id)) return false;
+      const resolved = resolveWidget(child);
+      if (resolved.source === 'override' && resolved.widget !== 'background') return true;
+      if (collectTextDescendants(child).length > 0) return true;
+      return ['nav-menu', 'button', 'form', 'heading', 'text-editor', 'icon-list'].includes(resolved.widget);
+    };
+
+    const firstFgIdx = kids.findIndex((c) => isForegroundContent(c));
+    if (firstFgIdx >= 0) {
+      const fgCandidates = kids.slice(firstFgIdx).filter((c) => isForegroundContent(c));
+      const parentArea = Math.max(1, (Number(containerNode.width) || 0) * (Number(containerNode.height) || 0));
+
+      // All non-text layers strictly below the first foreground content layer (`i < firstFgIdx`)
+      for (let i = 0; i < firstFgIdx; i += 1) {
+        const child = kids[i];
+        if (bgIds.has(child.id)) continue;
+        if (isForegroundContent(child)) continue;
+        const resolved = resolveWidget(child);
+        if (resolved.source === 'override' && resolved.widget !== 'background') continue;
+        if (collectTextDescendants(child).length > 0) continue;
+
+        const lower = String(child.name || '').trim().toLowerCase();
+        const tokens = lower.split(/[^a-z0-9-]+/).filter(Boolean);
+        const matchesStrictBg = lower === 'hero bg' || tokens.some((t) => STRICT_BG_TOKENS.has(t));
+        const matchesShapeBg = tokens.some((t) => EXACT_SHAPE_BG_NAMES.has(t));
+        const cw = Number(child.width) || 0;
+        const ch = Number(child.height) || 0;
+        const childArea = cw * ch;
+        const coversLargeArea = parentArea > 1 && childArea / parentArea >= 0.30;
+        const overlapsFg = fgCandidates.some((fg) => boxesOverlap(child, fg));
+        const isSmallIcon = isVectorGraphic(child) && cw > 0 && ch > 0 && cw <= 72 && ch <= 72 && !overlapsFg && !coversLargeArea;
+
+        if (matchesStrictBg || (matchesShapeBg && !isSmallIcon) || coversLargeArea || overlapsFg) {
+          bgIds.add(child.id);
+        }
+      }
+
+      // Post-foreground translucent/blend overlays (`i > firstFgIdx`) covering >= 50% of container
+      for (let i = firstFgIdx + 1; i < kids.length; i += 1) {
+        const child = kids[i];
+        if (bgIds.has(child.id)) continue;
+        if (isForegroundContent(child)) continue;
+        const resolved = resolveWidget(child);
+        if (resolved.source === 'override' && resolved.widget !== 'background') continue;
+        if (collectTextDescendants(child).length > 0) continue;
+
+        const lower = String(child.name || '').trim().toLowerCase();
+        const tokens = lower.split(/[^a-z0-9-]+/).filter(Boolean);
+        const matchesStrictBg = lower === 'hero bg' || tokens.some((t) => STRICT_BG_TOKENS.has(t));
+        const cw = Number(child.width) || 0;
+        const ch = Number(child.height) || 0;
+        const childArea = cw * ch;
+        const areaRatio = parentArea > 1 ? childArea / parentArea : 0;
+
+        if (areaRatio >= 0.50 && (matchesStrictBg || hasOverlayOpacityOrBlend(child))) {
+          bgIds.add(child.id);
+        }
+      }
+    }
+  }
+
+  const bgChildren = kids.filter((c) => bgIds.has(c.id));
+  const fgChildren = kids.filter((c) => !bgIds.has(c.id));
+
+  // Safety: never bake ALL children into background (must leave at least 1 foreground element)
+  if (bgChildren.length === 0 || fgChildren.length === 0) {
+    return { bgChildren: [], fgChildren: kids, bgIds: new Set() };
+  }
+
+  return { bgChildren, fgChildren, bgIds };
+}
+
 
   // ── Module: src/optimizer/auto-layout-fixer.js ──
 /**
@@ -737,10 +928,10 @@ function isIconListNode(node, kids) {
 /**
  * Infers Flexbox or Grid layout parameters from child coordinates (x, y, width, height)
  * when `node.layoutMode === 'NONE'` or `node.type === 'GROUP'`.
- */function inferVirtualLayout(node) {
+ */function inferVirtualLayout(node, overrideChildren = null) {
   const nodeW = Math.round(Number(node.width) || 0);
   const nodeH = Math.round(Number(node.height) || 0);
-  const kids = visibleChildren(node);
+  const kids = Array.isArray(overrideChildren) ? overrideChildren : visibleChildren(node);
 
   if (kids.length === 0) {
     return {
@@ -924,51 +1115,59 @@ function inferCrossAlign(items, posKey, centerKey, sizeKey) {
 }
 
 /**
- * Mutates the selected Figma nodes on the canvas to apply real Figma Auto Layout
- * where missing, without breaking visual appearance.
+ * NON-DESTRUCTIVE Smart Layout & Background Analyzer (ZERO visual mutations on Figma canvas!).
+ *
+ * Unlike destructive Auto-Layout conversion that shifts overlapping/freeform designs on Figma,
+ * this function ONLY writes lightweight `f2e-widget` pluginData tags:
+ * 1. Tags composite background layers (e.g. BG + Mask + Line + Main + Overlay behind text/menu)
+ *    as `background` so they bake cleanly into 1 WebP Container background image at export time.
+ * 2. Tags pure vector groups/frames as `icon` so they export as a single SVG instead of scattered paths.
+ * 3. Counts freeform frames that will safely use read-only Virtual Auto-Layout in memory during export.
  */function fixAndOptimizeCanvasSelection(selection) {
-  let convertedFrames = 0;
+  let virtualLayoutFrames = 0;
   let taggedIcons = 0;
+  let taggedBackgrounds = 0;
 
   const processNode = (node) => {
     if (!node || node.visible === false) return;
 
-    // 1. If node is a pure vector group/frame, mark it as an Icon so children aren't split
+    const kids = visibleChildren(node);
+
+    // 0. Never tag 1px divider lines as SVG icons
+    if (node.type !== 'TEXT' && isDividerNode(node, kids)) {
+      return;
+    }
+
+    // 1. If node is a pure vector group/frame <= 128x128, mark it as an Icon so children aren't split
     if (isVectorGraphic(node)) {
-      if (typeof node.setPluginData === 'function' && !node.getPluginData('f2e-widget')) {
+      const w = Number(node.width) || 0;
+      const h = Number(node.height) || 0;
+      if (w <= 128 && h <= 128 && typeof node.setPluginData === 'function' && !node.getPluginData('f2e-widget')) {
         node.setPluginData('f2e-widget', 'icon');
         taggedIcons += 1;
       }
       return;
     }
 
-    const kids = visibleChildren(node);
-    for (const child of kids) {
-      processNode(child);
+    if (kids.length === 0) return;
+
+    // 2. Detect composite background layers behind foreground content (non-destructive tagging)
+    const { bgChildren, fgChildren } = detectCompositeBackgroundChildren(node);
+    for (const bgNode of bgChildren) {
+      if (typeof bgNode.setPluginData === 'function' && !bgNode.getPluginData('f2e-widget')) {
+        bgNode.setPluginData('f2e-widget', 'background');
+        taggedBackgrounds += 1;
+      }
     }
 
-    // 2. Convert non-Auto-Layout Frame to Auto-Layout if it has 1+ children
-    if (node.type === 'FRAME' && (!node.layoutMode || node.layoutMode === 'NONE') && kids.length > 0) {
-      const inferred = inferVirtualLayout(node);
-      try {
-        node.layoutMode = inferred.direction === 'row' ? 'HORIZONTAL' : 'VERTICAL';
-        node.primaryAxisSizingMode = 'FIXED';
-        node.counterAxisSizingMode = 'FIXED';
-        node.paddingTop = inferred.padding.top;
-        node.paddingRight = inferred.padding.right;
-        node.paddingBottom = inferred.padding.bottom;
-        node.paddingLeft = inferred.padding.left;
-        node.itemSpacing = inferred.gap;
-        node.primaryAxisAlignItems = inferred.justify;
-        node.counterAxisAlignItems = inferred.align;
-        if (inferred.mode === 'grid') {
-          node.layoutWrap = 'WRAP';
-          node.counterAxisSpacing = inferred.rowGap || inferred.gap;
-        }
-        convertedFrames += 1;
-      } catch (err) {
-        // Locked or component instance nodes cannot have layoutMode changed
-      }
+    // 3. Track freeform frames that will safely use read-only Virtual Auto-Layout at export time
+    if ((node.type === 'FRAME' || node.type === 'GROUP') && (!node.layoutMode || node.layoutMode === 'NONE')) {
+      virtualLayoutFrames += 1;
+    }
+
+    // Recurse only into foreground children (background layers will be baked into 1 composite image)
+    for (const child of fgChildren) {
+      processNode(child);
     }
   };
 
@@ -976,22 +1175,16 @@ function inferCrossAlign(items, posKey, centerKey, sizeKey) {
     processNode(root);
   }
 
-  return { convertedFrames, taggedIcons };
+  return { convertedFrames: 0, virtualLayoutFrames, taggedIcons, taggedBackgrounds };
 }
 
 
-  // ── Module: src/extraction/extractor.js ──
+  // ── Module: src/extraction/primitives.js ──
 /**
- * Core Extraction Pipeline for Figma Plugin API
- * - Safely guards against Figma `Symbol(figma.mixed)` values on every property
- * - Extracts native Auto-Layout OR falls back to Virtual Auto-Layout Inference
- * - Extracts child positioning (`layoutPositioning === 'ABSOLUTE'`, `x`, `y`, `layoutSizingHorizontal`, `layoutSizingVertical`, `layoutGrow`, `layoutAlign`)
- * - Extracts solid & linear/radial gradient backgrounds, strokes (linked & per-side),
- *   corner radii (uniform & 4-corner), drop/inner shadows, opacity, clipContent
- * - Extracts full typography (font family, weight, size, line-height, letter-spacing, transform, color)
- * - Exports Vector/Icon/Logo groups as clean inline SVG strings + SHA-256 hash
- * - Exports Image nodes as PNG/JPG (1x/2x) + Base64 & SHA-256 hash
+ * Low-level Figma node primitive extractors (layout, style, typography, responsive).
  */
+
+
 const WEIGHT_MAP = {
   thin: '100',
   hairline: '100',
@@ -1011,7 +1204,8 @@ const WEIGHT_MAP = {
   heavy: '900',
 };
 
-/** Safe number coercion that never throws on `Symbol(figma.mixed)` */function safeNum(val, fallback = 0) {
+/** Safe number coercion that never throws on `Symbol(figma.mixed)` */
+function safeNum(val, fallback = 0) {
   if (typeof val === 'number' && Number.isFinite(val)) return val;
   if (typeof val === 'string') {
     const n = Number(val);
@@ -1020,14 +1214,17 @@ const WEIGHT_MAP = {
   return fallback;
 }
 
-/** Safe string coercion that never throws on `Symbol(figma.mixed)` */function safeStr(val, fallback = '') {
+/** Safe string coercion that never throws on `Symbol(figma.mixed)` */
+function safeStr(val, fallback = '') {
   if (typeof val === 'string') return val;
   if (typeof val === 'number') return String(val);
   return fallback;
-}function fontWeightOf(styleName) {
+}
+function fontWeightOf(styleName) {
   const key = safeStr(styleName, '').toLowerCase().replace(/[\s_-]|italic|oblique/g, '');
   return WEIGHT_MAP[key] || '400';
-}function rgbToHex(color, alpha = 1) {
+}
+function rgbToHex(color, alpha = 1) {
   if (!color || typeof color !== 'object') return '#000000';
   const r = Math.round(Math.max(0, Math.min(1, safeNum(color.r, 0))) * 255);
   const g = Math.round(Math.max(0, Math.min(1, safeNum(color.g, 0))) * 255);
@@ -1037,14 +1234,16 @@ const WEIGHT_MAP = {
     return `rgba(${r}, ${g}, ${b}, ${Math.round(a * 100) / 100})`;
   }
   return `#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
-}function extractSolidColor(paints) {
+}
+function extractSolidColor(paints) {
   if (!Array.isArray(paints)) return null;
   const paint = [...paints].reverse().find(
     (item) => item && item.type === 'SOLID' && item.visible !== false && safeNum(item.opacity, 1) > 0
   );
   if (!paint || !paint.color) return null;
   return rgbToHex(paint.color, safeNum(paint.opacity, 1));
-}function extractGradient(paints) {
+}
+function extractGradient(paints) {
   if (!Array.isArray(paints)) return null;
   const paint = [...paints].reverse().find(
     (item) => item && safeStr(item.type).startsWith('GRADIENT_') && item.visible !== false && safeNum(item.opacity, 1) > 0
@@ -1071,7 +1270,8 @@ const WEIGHT_MAP = {
     stop2: Math.round(safeNum(stop1.position, 1) * 100),
     angle,
   };
-}function extractLayout(node, parentNode = null) {
+}
+function extractLayout(node, parentNode = null) {
   let width = Math.round(safeNum(node.width, 0));
   let height = Math.round(safeNum(node.height, 0));
   const strokeW = Math.max(1, Math.round(safeNum(node.strokeWeight, 1)));
@@ -1089,8 +1289,14 @@ const WEIGHT_MAP = {
   } else if (height === 0 && width > 0) {
     height = strokeW;
   }
-  const x = Math.round(safeNum(node.x, 0));
-  const y = Math.round(safeNum(node.y, 0));
+  const rawX = safeNum(node.x, 0);
+  const rawY = safeNum(node.y, 0);
+  const x = parentNode && parentNode.type === 'GROUP'
+    ? Math.round(rawX - safeNum(parentNode.x, 0))
+    : Math.round(rawX);
+  const y = parentNode && parentNode.type === 'GROUP'
+    ? Math.round(rawY - safeNum(parentNode.y, 0))
+    : Math.round(rawY);
 
   let layout;
   if (node.layoutMode && node.layoutMode !== 'NONE') {
@@ -1114,10 +1320,6 @@ const WEIGHT_MAP = {
       primarySizing: safeStr(node.primaryAxisSizingMode, 'AUTO'),
       counterSizing: safeStr(node.counterAxisSizingMode, 'AUTO'),
       clipsContent: Boolean(node.clipsContent),
-      minWidth: typeof node.minWidth === 'number' ? Math.round(node.minWidth) : null,
-      maxWidth: typeof node.maxWidth === 'number' ? Math.round(node.maxWidth) : null,
-      minHeight: typeof node.minHeight === 'number' ? Math.round(node.minHeight) : null,
-      maxHeight: typeof node.maxHeight === 'number' ? Math.round(node.maxHeight) : null,
       inferred: false,
     };
     if (typeof node.counterAxisSpacing === 'number') {
@@ -1133,6 +1335,11 @@ const WEIGHT_MAP = {
     layout.y = y;
     layout.clipsContent = Boolean(node.clipsContent);
   }
+
+  layout.minWidth = typeof node.minWidth === 'number' ? Math.round(node.minWidth) : (layout.minWidth ?? null);
+  layout.maxWidth = typeof node.maxWidth === 'number' ? Math.round(node.maxWidth) : (layout.maxWidth ?? null);
+  layout.minHeight = typeof node.minHeight === 'number' ? Math.round(node.minHeight) : (layout.minHeight ?? null);
+  layout.maxHeight = typeof node.maxHeight === 'number' ? Math.round(node.maxHeight) : (layout.maxHeight ?? null);
 
   // Child sizing relative to parent Auto-Layout
   if (typeof node.layoutSizingHorizontal === 'string') {
@@ -1169,7 +1376,8 @@ const WEIGHT_MAP = {
   }
 
   return layout;
-}function extractStyle(node) {
+}
+function extractStyle(node) {
   const style = {};
 
   if (node.type !== 'TEXT') {
@@ -1210,11 +1418,16 @@ const WEIGHT_MAP = {
       typeof node.strokeBottomWeight === 'number' ||
       typeof node.strokeLeftWeight === 'number';
 
-    if (hasIndividualStrokes && node.strokeWeight !== Number(node.strokeTopWeight)) {
-      const bt = Math.round(safeNum(node.strokeTopWeight, 0));
-      const br = Math.round(safeNum(node.strokeRightWeight, 0));
-      const bb = Math.round(safeNum(node.strokeBottomWeight, 0));
-      const bl = Math.round(safeNum(node.strokeLeftWeight, 0));
+    const roundStroke = (v) => {
+      const n = safeNum(v, 0);
+      return n > 0 ? Math.max(1, Math.round(n)) : 0;
+    };
+
+    if (hasIndividualStrokes) {
+      const bt = roundStroke(node.strokeTopWeight);
+      const br = roundStroke(node.strokeRightWeight);
+      const bb = roundStroke(node.strokeBottomWeight);
+      const bl = roundStroke(node.strokeLeftWeight);
       if (bt > 0 || br > 0 || bb > 0 || bl > 0) {
         style.borderWidth = { top: bt, right: br, bottom: bb, left: bl, isLinked: bt === br && br === bb && bb === bl };
       }
@@ -1253,7 +1466,8 @@ const WEIGHT_MAP = {
   }
 
   return style;
-}function extractTypography(node) {
+}
+function extractTypography(node) {
   if (!node) return null;
   const characters = safeStr(node.characters, '');
 
@@ -1275,6 +1489,18 @@ const WEIGHT_MAP = {
       try {
         const fn = node.getRangeFontName(0, 1);
         if (fn && typeof fn === 'object' && fn.family) fontName = fn;
+      } catch (e) { }
+    }
+    if (!lineHeightObj && typeof node.getRangeLineHeight === 'function') {
+      try {
+        const lh = node.getRangeLineHeight(0, 1);
+        if (lh && typeof lh === 'object' && lh.unit) lineHeightObj = lh;
+      } catch (e) { }
+    }
+    if (!letterSpacingObj && typeof node.getRangeLetterSpacing === 'function') {
+      try {
+        const ls = node.getRangeLetterSpacing(0, 1);
+        if (ls && typeof ls === 'object') letterSpacingObj = ls;
       } catch (e) { }
     }
     if (!fillsArr && typeof node.getRangeFills === 'function') {
@@ -1304,7 +1530,7 @@ const WEIGHT_MAP = {
       text.lineHeight = Math.round(safeNum(lineHeightObj.value, text.fontSize * 1.35));
       text.lineHeightUnit = 'px';
     } else if (lineHeightObj.unit === 'PERCENT') {
-      text.lineHeight = Math.round(safeNum(lineHeightObj.value, 135) / 10) / 10;
+      text.lineHeight = Math.round(safeNum(lineHeightObj.value, 135)) / 100;
       text.lineHeightUnit = 'em';
     }
   } else {
@@ -1314,7 +1540,14 @@ const WEIGHT_MAP = {
   }
 
   if (letterSpacingObj && safeNum(letterSpacingObj.value, 0) !== 0) {
-    text.letterSpacing = Math.round(safeNum(letterSpacingObj.value, 0) * 10) / 10;
+    const rawLs = safeNum(letterSpacingObj.value, 0);
+    if (letterSpacingObj.unit === 'PERCENT') {
+      text.letterSpacing = Math.round((rawLs / 100) * 1000) / 1000;
+      text.letterSpacingUnit = 'em';
+    } else {
+      text.letterSpacing = Math.round(rawLs * 10) / 10;
+      text.letterSpacingUnit = 'px';
+    }
   }
 
   if (node.textCase === 'UPPER') text.transform = 'uppercase';
@@ -1347,7 +1580,8 @@ const WEIGHT_MAP = {
   if (color) text.color = color;
 
   return text;
-}function extractLink(node) {
+}
+function extractLink(node) {
   const reactions = Array.isArray(node && node.reactions) ? node.reactions : [];
   for (const reaction of reactions) {
     const action = (reaction && reaction.action) || (Array.isArray(reaction && reaction.actions) ? reaction.actions[0] : null);
@@ -1356,7 +1590,8 @@ const WEIGHT_MAP = {
     }
   }
   return null;
-}function extractButtonIcon(node) {
+}
+function extractButtonIcon(node) {
   if (!node || !Array.isArray(node.children)) return null;
   const kids = node.children.filter((c) => c && c.visible !== false);
   const textChild = kids.find((c) => c.type === 'TEXT');
@@ -1407,7 +1642,8 @@ const WEIGHT_MAP = {
     library: 'fa-solid',
     align,
   };
-}function captureResponsiveTree(rootNode) {
+}
+function captureResponsiveTree(rootNode) {
   const walk = (node, path = [], parent = null) => {
     const kids = visibleChildren(node);
     const name = safeStr(node.name).trim();
@@ -1424,7 +1660,8 @@ const WEIGHT_MAP = {
     };
   };
   return walk(rootNode, [], null);
-}function matchResponsiveOverride(capturedTree, pathNames, expectedType) {
+}
+function matchResponsiveOverride(capturedTree, pathNames, expectedType) {
   if (!capturedTree) return null;
   let current = capturedTree;
   for (const seg of pathNames) {
@@ -1443,23 +1680,88 @@ const WEIGHT_MAP = {
   };
 }
 
+
+  // ── Module: src/extraction/devmode-css.js ──
+/**
+ * Figma Dev Mode CSS (`node.getCSSAsync()`) parser, normalizer & live inspector.
+ */
+
+
 /**
  * Unwraps CSS variables generated by Figma Dev Mode (`var(--token-name, fallback)`)
  * and strips CSS comments (`/* 140% *\/`) so exact values are extracted deterministically.
- */function resolveCssVars(rawVal) {
+ */
+function resolveCssVars(rawVal) {
   if (typeof rawVal !== 'string') return '';
   let s = rawVal.replace(/\/\*[\s\S]*?\*\//g, '').trim();
-  let prev = '';
-  while (s.includes('var(') && s !== prev) {
-    prev = s;
-    s = s.replace(/var\(\s*--[^,)]+\s*,\s*([^()]+)\)/g, '$1').trim();
+  for (let pass = 0; pass < 64; pass += 1) {
+    const lower = s.toLowerCase();
+    let searchPos = 0;
+    let replaced = false;
+    while (searchPos < s.length) {
+      const idx = lower.indexOf('var(', searchPos);
+      if (idx === -1) break;
+      let depth = 0;
+      let commaIdx = -1;
+      let endIdx = -1;
+      for (let i = idx + 3; i < s.length; i += 1) {
+        const ch = s[i];
+        if (ch === '(') depth += 1;
+        else if (ch === ')') {
+          depth -= 1;
+          if (depth === 0) {
+            endIdx = i;
+            break;
+          }
+        } else if (ch === ',' && depth === 1 && commaIdx === -1) {
+          commaIdx = i;
+        }
+      }
+      if (endIdx === -1) break;
+      if (commaIdx !== -1) {
+        const varName = s.slice(idx + 4, commaIdx).trim();
+        if (varName.startsWith('--')) {
+          const fallback = s.slice(commaIdx + 1, endIdx).trim();
+          s = `${s.slice(0, idx)}${fallback}${s.slice(endIdx + 1)}`.trim();
+          replaced = true;
+          break;
+        }
+      }
+      searchPos = idx + 4;
+    }
+    if (!replaced) break;
   }
   return s;
 }
 
+function splitTopLevelCssLayers(str) {
+  const layers = [];
+  let depth = 0;
+  let start = 0;
+  for (let i = 0; i < str.length; i += 1) {
+    if (str[i] === '(') depth += 1;
+    else if (str[i] === ')') depth = Math.max(0, depth - 1);
+    else if (str[i] === ',' && depth === 0) {
+      const part = str.slice(start, i).trim();
+      if (part) layers.push(part);
+      start = i + 1;
+    }
+  }
+  const tail = str.slice(start).trim();
+  if (tail) layers.push(tail);
+  return layers;
+}
+function sanitizeDevModeBackgroundCss(devBg) {
+  if (!devBg || typeof devBg !== 'string') return '';
+  const layers = splitTopLevelCssLayers(devBg);
+  const cleanLayers = layers.filter((layer) => !/url\(\s*<[^>]*>\s*\)/i.test(layer));
+  return cleanLayers.join(', ').trim();
+}
+
 /**
  * Normalizes CSS color strings from Figma Dev Mode (e.g. `#FFF` -> `#FFFFFF`, `#000` -> `#000000`, `var(--c, #16A34A)` -> `#16A34A`).
- */function normalizeCssColor(rawColor) {
+ */
+function normalizeCssColor(rawColor) {
   const s = resolveCssVars(rawColor);
   if (!s) return null;
   const hex3 = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(s);
@@ -1480,7 +1782,8 @@ const WEIGHT_MAP = {
 /**
  * Apply full Dev Mode CSS from Figma (node.getCSSAsync()) to an IR entry.
  * Treats Figma Dev Mode as the authoritative source of truth for borders, padding, flex layout, and typography.
- */function applyDevModeCSSToNode(entry, devModeCSS) {
+ */
+function applyDevModeCSSToNode(entry, devModeCSS) {
   if (!entry || !devModeCSS || typeof devModeCSS !== 'object') return;
   entry.devModeCSS = devModeCSS;
   entry.devModeCSSString = Object.entries(devModeCSS)
@@ -1531,16 +1834,19 @@ const WEIGHT_MAP = {
   }
 
   if (devModeCSS['border-radius']) {
-    const rClean = resolveCssVars(devModeCSS['border-radius']);
-    const parts = rClean.split(/\s+/).map((p) => parseFloat(p) || 0);
+    const rClean = resolveCssVars(devModeCSS['border-radius']).split('/')[0].trim();
+    const rawTokens = rClean.split(/\s+/).filter(Boolean);
+    const hasPct = rawTokens.some((tok) => tok.includes('%') && parseFloat(tok) !== 0);
+    const unit = hasPct ? '%' : 'px';
+    const parts = rawTokens.map((p) => parseFloat(p) || 0);
     if (parts.length === 1 && parts[0] > 0) {
-      style.radius = { top: parts[0], right: parts[0], bottom: parts[0], left: parts[0], isLinked: true };
+      style.radius = { top: parts[0], right: parts[0], bottom: parts[0], left: parts[0], isLinked: true, unit };
     } else if (parts.length === 2) {
-      style.radius = { top: parts[0], right: parts[1], bottom: parts[0], left: parts[1], isLinked: false };
+      style.radius = { top: parts[0], right: parts[1], bottom: parts[0], left: parts[1], isLinked: false, unit };
     } else if (parts.length === 3) {
-      style.radius = { top: parts[0], right: parts[1], bottom: parts[2], left: parts[1], isLinked: false };
+      style.radius = { top: parts[0], right: parts[1], bottom: parts[2], left: parts[1], isLinked: false, unit };
     } else if (parts.length >= 4) {
-      style.radius = { top: parts[0], right: parts[1], bottom: parts[2], left: parts[3], isLinked: false };
+      style.radius = { top: parts[0], right: parts[1], bottom: parts[2], left: parts[3], isLinked: false, unit };
     }
   }
 
@@ -1598,7 +1904,16 @@ const WEIGHT_MAP = {
       if (bClean) {
         const c = normalizeCssColor(bClean);
         if (c) style.borderColor = c;
+        const bsMatch = bClean.match(/\b(solid|dashed|dotted|double)\b/i);
+        if (bsMatch) style.borderStyle = bsMatch[1].toLowerCase();
       }
+    }
+  }
+
+  if (devModeCSS['border-style']) {
+    const bsClean = resolveCssVars(devModeCSS['border-style']).toLowerCase();
+    if (/^(solid|dashed|dotted|double)$/.test(bsClean)) {
+      style.borderStyle = bsClean;
     }
   }
 
@@ -1607,8 +1922,10 @@ const WEIGHT_MAP = {
     if (c) style.borderColor = c;
   }
 
-  // 2. Authoritative Dev Mode Background & Gradient (including background-clip: text on TEXT layers)
-  const devBg = resolveCssVars(devModeCSS['background'] || devModeCSS['background-color'] || '');
+  // 2. Authoritative Dev Mode Background & Gradient (including multi-stop gradients & background-clip: text on TEXT layers)
+  const rawDevBg = resolveCssVars(devModeCSS['background'] || devModeCSS['background-color'] || '');
+  const devBg = sanitizeDevModeBackgroundCss(rawDevBg);
+  const hadImagePlaceholder = rawDevBg !== devBg;
   const isTextClip = Boolean(
     entry.type === 'text' ||
     (devModeCSS['background-clip'] && String(devModeCSS['background-clip']).includes('text')) ||
@@ -1646,10 +1963,14 @@ const WEIGHT_MAP = {
           delete style.gradient;
           delete style.background;
         }
-      } else if (parsedGrad) {
+      } else if (parsedGrad && !(entry.widget === 'image' && hadImagePlaceholder)) {
         style.gradient = parsedGrad;
+        // Preserve full CSS gradient string when Figma Dev Mode has 3+ color stops or stacked gradients
+        if (colors.length >= 3 || (devBg.match(/gradient\(/g) || []).length > 1) {
+          style.devModeBackgroundCss = devBg;
+        }
       }
-    } else {
+    } else if (!(entry.widget === 'image' && hadImagePlaceholder)) {
       const solidBg = normalizeCssColor(devBg);
       if (solidBg) {
         if (entry.type === 'text') {
@@ -1660,6 +1981,16 @@ const WEIGHT_MAP = {
         }
       }
     }
+  }
+
+  if (devModeCSS['background-size']) {
+    style.backgroundSize = resolveCssVars(devModeCSS['background-size']);
+  }
+  if (devModeCSS['background-position']) {
+    style.backgroundPosition = resolveCssVars(devModeCSS['background-position']);
+  }
+  if (devModeCSS['background-repeat']) {
+    style.backgroundRepeat = resolveCssVars(devModeCSS['background-repeat']);
   }
 
   // 3. Authoritative Dev Mode Flexbox, Padding, Gap & Box Sizing
@@ -1705,8 +2036,18 @@ const WEIGHT_MAP = {
       }
     }
   }
-  if (devModeCSS['align-self'] && resolveCssVars(devModeCSS['align-self']) === 'stretch') {
-    layout.alignSelf = 'stretch';
+  if (devModeCSS['align-self']) {
+    const asVal = resolveCssVars(devModeCSS['align-self']).toLowerCase();
+    if (/^(flex-start|start|center|flex-end|end|stretch)$/.test(asVal)) {
+      layout.alignSelf = asVal === 'start' ? 'flex-start' : (asVal === 'end' ? 'flex-end' : asVal);
+    }
+  }
+  if (devModeCSS['overflow']) {
+    const ovVal = resolveCssVars(devModeCSS['overflow']).toLowerCase();
+    if (/^(hidden|auto|scroll|visible)$/.test(ovVal)) {
+      layout.overflow = ovVal;
+      if (ovVal === 'hidden') layout.clipsContent = true;
+    }
   }
 
   if (devModeCSS['padding']) {
@@ -1751,13 +2092,104 @@ const WEIGHT_MAP = {
   }
 
   if (devModeCSS['width'] && (!layout.width || layout.width === 0)) {
-    const wVal = parseFloat(resolveCssVars(devModeCSS['width']));
-    if (!isNaN(wVal)) layout.width = Math.round(wVal);
+    const rawW = resolveCssVars(devModeCSS['width']);
+    if (rawW && !rawW.includes('%')) {
+      const wVal = parseFloat(rawW);
+      if (!isNaN(wVal)) layout.width = Math.round(wVal);
+    }
   }
 
   if (devModeCSS['height'] && (!layout.height || layout.height === 0)) {
-    const hVal = parseFloat(resolveCssVars(devModeCSS['height']));
-    if (!isNaN(hVal)) layout.height = Math.round(hVal);
+    const rawH = resolveCssVars(devModeCSS['height']);
+    if (rawH && !rawH.includes('%')) {
+      const hVal = parseFloat(rawH);
+      if (!isNaN(hVal)) layout.height = Math.round(hVal);
+    }
+  }
+  if (devModeCSS['min-height']) {
+    const mhVal = parseFloat(resolveCssVars(devModeCSS['min-height']));
+    if (!isNaN(mhVal) && mhVal > 0) layout.minHeight = Math.round(mhVal);
+  }
+  if (devModeCSS['max-width']) {
+    const mwVal = parseFloat(resolveCssVars(devModeCSS['max-width']));
+    if (!isNaN(mwVal) && mwVal > 0) layout.maxWidth = Math.round(mwVal);
+  }
+  if (devModeCSS['min-width']) {
+    const minWVal = parseFloat(resolveCssVars(devModeCSS['min-width']));
+    if (!isNaN(minWVal) && minWVal > 0) layout.minWidth = Math.round(minWVal);
+  }
+
+  // 3b. Authoritative Dev Mode Box Shadow & Opacity
+  if (devModeCSS['box-shadow']) {
+    const bsClean = resolveCssVars(devModeCSS['box-shadow']);
+    if (bsClean && bsClean !== 'none') {
+      // Split top-level comma-separated shadow layers (ignoring commas inside rgba())
+      const shadowLayers = [];
+      let depth = 0;
+      let start = 0;
+      for (let i = 0; i < bsClean.length; i += 1) {
+        if (bsClean[i] === '(') depth += 1;
+        else if (bsClean[i] === ')') depth = Math.max(0, depth - 1);
+        else if (bsClean[i] === ',' && depth === 0) {
+          shadowLayers.push(bsClean.slice(start, i).trim());
+          start = i + 1;
+        }
+      }
+      shadowLayers.push(bsClean.slice(start).trim());
+      const validLayers = shadowLayers.filter(Boolean);
+      if (validLayers.length > 1) {
+        // Multi-layer box-shadow: preserve exact CSS in custom_css
+        style.devModeBoxShadow = bsClean;
+      }
+      const first = validLayers[0] || '';
+      const isInset = /\binset\b/i.test(first);
+      const color = normalizeCssColor(first) || 'rgba(0,0,0,0.15)';
+      const nums = (first.replace(/rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}|\binset\b/gi, '').match(/-?[\d.]+(?=px|\b)/g) || []).map((n) => parseFloat(n));
+      if (nums.length >= 2) {
+        style.boxShadow = {
+          horizontal: Math.round(nums[0] || 0),
+          vertical: Math.round(nums[1] || 0),
+          blur: Math.round(nums[2] || 0),
+          spread: Math.round(nums[3] || 0),
+          color,
+          position: isInset ? 'inset' : '',
+        };
+      }
+    }
+  }
+
+  if (devModeCSS['opacity'] !== undefined) {
+    const opVal = parseFloat(resolveCssVars(devModeCSS['opacity']));
+    if (!isNaN(opVal) && opVal >= 0 && opVal < 1) {
+      style.opacity = Math.round(opVal * 1000) / 1000;
+    }
+  }
+
+  // 3c. Lossless Residual Dev Mode CSS Passthrough
+  // Properties that Elementor has no native UI control for (glassmorphism, blend modes, filters, transforms, etc.)
+  const RESIDUAL_PROPS = [
+    'backdrop-filter',
+    '-webkit-backdrop-filter',
+    'filter',
+    'mix-blend-mode',
+    'background-blend-mode',
+    'transform',
+    'aspect-ratio',
+    'clip-path',
+    '-webkit-text-stroke',
+    '-webkit-text-stroke-width',
+    '-webkit-text-stroke-color',
+    'font-feature-settings',
+    'font-variant-numeric',
+  ];
+  for (const prop of RESIDUAL_PROPS) {
+    if (devModeCSS[prop]) {
+      const val = resolveCssVars(devModeCSS[prop]);
+      if (val && val !== 'none' && val !== 'normal' && val !== 'auto') {
+        if (!style.devModeExtraCss) style.devModeExtraCss = {};
+        style.devModeExtraCss[prop] = val;
+      }
+    }
   }
 
   // 4. Authoritative Dev Mode Typography
@@ -1796,8 +2228,20 @@ const WEIGHT_MAP = {
       if (normC) text.color = normC;
     }
     if (devModeCSS['letter-spacing']) {
-      const lsMatch = resolveCssVars(devModeCSS['letter-spacing']).match(/([-\d.]+)px/);
-      if (lsMatch) text.letterSpacing = parseFloat(lsMatch[1]);
+      const lsMatch = resolveCssVars(devModeCSS['letter-spacing']).match(/([-\d.]+)\s*(px|em|rem|%)?/i);
+      if (lsMatch) {
+        const lsVal = parseFloat(lsMatch[1]);
+        const lsUnit = (lsMatch[2] || 'px').toLowerCase();
+        if (!Number.isNaN(lsVal)) {
+          if (lsUnit === '%') {
+            text.letterSpacing = Math.round((lsVal / 100) * 1000) / 1000;
+            text.letterSpacingUnit = 'em';
+          } else {
+            text.letterSpacing = lsVal;
+            text.letterSpacingUnit = lsUnit;
+          }
+        }
+      }
     }
     if (devModeCSS['text-align']) {
       text.align = resolveCssVars(devModeCSS['text-align']).toLowerCase();
@@ -1805,8 +2249,35 @@ const WEIGHT_MAP = {
     if (devModeCSS['text-transform']) {
       text.transform = resolveCssVars(devModeCSS['text-transform']);
     }
+    if (devModeCSS['text-decoration'] || devModeCSS['text-decoration-line']) {
+      const td = resolveCssVars(devModeCSS['text-decoration-line'] || devModeCSS['text-decoration']).toLowerCase();
+      if (td.includes('underline')) text.decoration = 'underline';
+      else if (td.includes('line-through')) text.decoration = 'line-through';
+      else if (td.includes('overline')) text.decoration = 'overline';
+    }
     if (devModeCSS['font-style']) {
       text.fontStyle = resolveCssVars(devModeCSS['font-style']);
+    }
+    if (devModeCSS['text-shadow']) {
+      const tsClean = resolveCssVars(devModeCSS['text-shadow']);
+      if (tsClean && tsClean !== 'none') {
+        const tsColor = normalizeCssColor(tsClean) || 'rgba(0,0,0,0.25)';
+        const tsNums = (tsClean.replace(/rgba?\([^)]+\)|#[0-9a-fA-F]{3,8}/gi, '').match(/-?[\d.]+(?=px|\b)/g) || []).map((n) => parseFloat(n));
+        if (tsNums.length >= 2) {
+          text.textShadow = {
+            horizontal: Math.round(tsNums[0] || 0),
+            vertical: Math.round(tsNums[1] || 0),
+            blur: Math.round(tsNums[2] || 0),
+            color: tsColor,
+          };
+        }
+      }
+    }
+    if (devModeCSS['-webkit-text-stroke']) {
+      const strokeVal = resolveCssVars(devModeCSS['-webkit-text-stroke']);
+      if (strokeVal && strokeVal !== 'none') {
+        text.textStrokeCss = strokeVal;
+      }
     }
   }
 }
@@ -1815,7 +2286,8 @@ const WEIGHT_MAP = {
  * Live Inspector for Figma Dev Mode CSS (`await node.getCSSAsync()`).
  * Extracts raw Dev Mode CSS, unwraps `var(--token, fallback)` values, identifies CSS variables
  * and color swatches, and computes the exact Elementor widget & control mapping for display in the Plugin UI.
- */async function inspectNodeDevMode(node, options = {}) {
+ */
+async function inspectNodeDevMode(node, options = {}) {
   if (!node) return null;
   const { includeSubtree = false, maxSubtreeNodes = 20 } = options;
 
@@ -2002,518 +2474,20 @@ const WEIGHT_MAP = {
   return rootResult;
 }
 
+
+  // ── Module: src/extraction/design-system.js ──
 /**
- * Full extraction of selected Figma nodes into the F2E Intermediate Representation (IR)
- */async function extractDesignSelection(selection, options = {}) {
-  const {
-    fileKey = 'local-figma',
-    imageFormat = 'PNG',
-    imageScale = 2,
-    responsiveFrames = { tablet: null, mobile: null },
-    designTokens = { colors: [], typography: [] },
-    isRootSelection = true,
-  } = options;
-
-  const nodes = {};
-  const assets = {};
-  const assetPayloads = [];
-  const warnings = [];
-  const pendingExports = [];
-
-  const visit = async (node, context = {}) => {
-    const { insideAtomic = false, path = [], parentNode = null, isTopRoot = false } = context;
-    if (!node || node.visible === false) return null;
-
-    let choice = resolveWidget(node);
-    // Guard: If top-level root artboard is heuristic-skip, fallback to container so export doesn't fail
-    if (isTopRoot && choice.widget === 'skip' && choice.source !== 'override') {
-      choice = { widget: 'container', source: 'root-fallback' };
-    }
-    if (choice.widget === 'skip') return null;
-    if (insideAtomic) return null;
-
-    const id = `f2e:${fileKey}:${node.id}`;
-    let devModeCSS = null;
-    if (typeof node.getCSSAsync === 'function') {
-      try {
-        devModeCSS = await node.getCSSAsync();
-      } catch (e) { }
-    }
-
-    const layout = extractLayout(node, parentNode);
-    const style = extractStyle(node);
-    if (devModeCSS) {
-      if (devModeCSS['border-image-source'] || devModeCSS['border-image']) {
-        style.devModeBorderImage = devModeCSS['border-image-source'] || devModeCSS['border-image'];
-      }
-      if (devModeCSS['border']) {
-        style.devModeBorder = devModeCSS['border'];
-      }
-    }
-
-    // Skip empty decorative background placeholder frames (`bg`) that have no fill, no image, no border, and no children
-    let rawKids = visibleChildren(node);
-    if (
-      !isTopRoot &&
-      rawKids.length === 0 &&
-      node.type !== 'TEXT' &&
-      choice.widget === 'container' &&
-      !style.background &&
-      !style.gradient &&
-      !style.borderColor &&
-      !hasImageFill(node)
-    ) {
-      return null;
-    }
-
-    if (Array.isArray(layout.orderedIds) && layout.orderedIds.length === rawKids.length) {
-      const byId = new Map(rawKids.map((k) => [k.id, k]));
-      rawKids = layout.orderedIds.map((oid) => byId.get(oid)).filter(Boolean);
-    }
-
-    // Atomic leaf widgets consume their own subtree directly (do not produce child Elementor elements)
-    const isLeafWidget = isAtomicLeafWidget(choice.widget);
-
-    const childrenIds = [];
-    if (!isLeafWidget) {
-      for (const child of rawKids) {
-        const childName = safeStr(child.name).trim().toLowerCase();
-        const cid = await visit(child, {
-          insideAtomic: false,
-          path: [...path, childName],
-          parentNode: node,
-          isTopRoot: false,
-        });
-        if (cid !== null) childrenIds.push(cid);
-      }
-    }
-
-    const rawLayerName = safeStr(node.name, 'Layer');
-    const cleanName = rawLayerName.replace(/\[[a-z0-9_-]+\]\s*/i, '').trim() || rawLayerName;
-
-    const entry = {
-      id,
-      sourceNodeId: node.id,
-      type: safeStr(node.type, 'FRAME').toLowerCase(),
-      widget: choice.widget === 'container-grid' ? 'container' : choice.widget,
-      widgetSource: choice.source,
-      children: childrenIds,
-      layout: choice.widget === 'container-grid' ? { ...layout, mode: 'grid' } : layout,
-      style,
-      content: {
-        name: cleanName,
-        rawName: rawLayerName,
-      },
-      responsive: {},
-    };
-
-    for (const vp of ['tablet', 'mobile']) {
-      if (responsiveFrames[vp]) {
-        const matched = matchResponsiveOverride(responsiveFrames[vp], path, node.type);
-        if (matched) entry.responsive[vp] = matched;
-      }
-    }
-
-    const extractTextWithDevMode = async (tn) => {
-      if (!tn) return null;
-      const typo = extractTypography(tn);
-      if (!typo) return null;
-      if (typeof tn.getCSSAsync === 'function') {
-        try {
-          const tCss = await tn.getCSSAsync();
-          if (tCss && Object.keys(tCss).length > 0) {
-            applyDevModeCSSToNode({ type: 'text', text: typo, style: {}, layout: {} }, tCss);
-          }
-        } catch (e) { }
-      }
-      return typo;
-    };
-
-    const link = extractLink(node);
-    if (link) entry.link = link;
-
-    if (node.type === 'TEXT') {
-      entry.text = extractTypography(node);
-      entry.content.characters = entry.text.characters;
-    }
-
-    // Apply outer node's Dev Mode CSS first so FRAME box styles do not overwrite child text typography
-    if (devModeCSS) {
-      applyDevModeCSSToNode(entry, devModeCSS);
-    }
-
-    if (node.type === 'TEXT' && entry.text) {
-      entry.extractedTexts = [entry.text];
-    } else if (isLeafWidget) {
-      // For any atomic leaf widget wrapping child TEXT nodes (e.g. Frame tagged as heading, text-editor,
-      // button, counter, icon-box, image-box, icon-list, nav-menu, price-table, call-to-action, testimonial,
-      // flip-box, progress, alert, blockquote, etc.), extract every descendant TEXT node with its full Dev Mode CSS!
-      const textNodes = collectTextDescendants(node);
-      if (textNodes.length > 0) {
-        const extractedList = [];
-        for (const tn of textNodes) {
-          const tObj = await extractTextWithDevMode(tn);
-          if (tObj && safeStr(tObj.characters).trim().length > 0) {
-            tObj.nodeName = safeStr(tn.name, '');
-            tObj.link = extractLink(tn) || '';
-            extractedList.push(tObj);
-          }
-        }
-        if (extractedList.length > 0) {
-          entry.extractedTexts = extractedList;
-          if (!entry.text) {
-            entry.text = extractedList[0];
-          }
-          if (!entry.content.characters) {
-            entry.content.characters = extractedList[0].characters;
-          }
-        }
-      }
-    }
-
-    if (choice.widget === 'button') {
-      const bIcon = extractButtonIcon(node);
-      if (bIcon) entry.buttonIcon = bIcon;
-      if (!entry.content.characters) {
-        entry.content.characters = (entry.text && entry.text.characters) || entry.content.name || 'Button';
-      }
-    }
-
-    if (choice.widget === 'nav-menu' || choice.widget === 'mega-menu') {
-      const extractedList = entry.extractedTexts || [];
-      const menuItems = extractedList
-        .map((t) => ({
-          name: safeStr(t.characters || t.nodeName).trim(),
-          link: t.link || '#',
-        }))
-        .filter((item) => item.name.length > 0);
-
-      entry.content.menuItems = menuItems;
-    }
-
-    if (choice.widget === 'icon-list') {
-      const extractedList = entry.extractedTexts || [];
-      const listItems = extractedList
-        .map((t, idx) => {
-          let text = safeStr(t.characters || t.nodeName).trim();
-          text = text.replace(/^[\u2713\u2714\u2022\u00b7\u25cf\u25cb\u2013\u2014\-*]\s*/, '');
-          return {
-            id: `item_${idx + 1}`,
-            text,
-            link: t.link || '',
-            color: t.color || null,
-          };
-        })
-        .filter((item) => item.text.length > 0);
-
-      entry.content.iconList = listItems;
-      const visualNode = findFirstVisualDescendant(node);
-      if (visualNode) {
-        entry.content.iconColor = extractSolidColor(visualNode.fills) || extractSolidColor(visualNode.strokes) || null;
-        entry.content.iconSize = Math.round(safeNum(visualNode.width, 0)) || null;
-      }
-    }
-
-    if (choice.widget === 'icon-box' || choice.widget === 'image-box') {
-      const extractedList = entry.extractedTexts || [];
-      if (extractedList.length > 0) {
-        entry.content.title_text = safeStr(extractedList[0].characters).trim();
-        entry.content.titleTypography = extractedList[0];
-        entry.text = extractedList[0];
-      }
-      if (extractedList.length > 1) {
-        entry.content.description_text = extractedList
-          .slice(1)
-          .map((t) => safeStr(t.characters).trim())
-          .filter(Boolean)
-          .join('\n');
-        entry.content.descriptionTypography = extractedList[1];
-      }
-      entry.content.position = (layout.direction === 'row') ? 'left' : 'top';
-
-      const visualNode = findFirstVisualDescendant(node);
-      if (visualNode) {
-        entry.content.iconSize = Math.round(safeNum(visualNode.width, 40)) || 40;
-        entry.content.iconColor = extractSolidColor(visualNode.fills) || extractSolidColor(visualNode.strokes) || null;
-        if (typeof visualNode.exportAsync === 'function') {
-          if (hasImageFill(visualNode)) {
-            pendingExports.push({ kind: 'raster', node: visualNode, id });
-          } else {
-            pendingExports.push({ kind: 'svg', node: visualNode, id });
-          }
-        }
-      }
-    }
-
-    if (choice.widget === 'counter' || choice.widget === 'countdown') {
-      const extractedList = entry.extractedTexts || (entry.text ? [entry.text] : []);
-      const numItem = extractedList.find((t) => /\d/.test(safeStr(t.characters))) || extractedList[0] || null;
-      const titleItem = extractedList.find((t) => t !== numItem) || null;
-      if (numItem) {
-        entry.content.counterNumber = safeStr(numItem.characters).trim();
-        entry.content.numberTypography = numItem;
-      }
-      if (titleItem) {
-        entry.content.counterTitle = safeStr(titleItem.characters).trim();
-        entry.content.titleTypography = titleItem;
-      }
-    }
-
-    if (choice.widget === 'social-icons' || choice.widget === 'share-buttons') {
-      const socialItems = [];
-      for (const child of rawKids) {
-        const cStyle = extractStyle(child);
-        const cLayout = extractLayout(child, node);
-        if (typeof child.getCSSAsync === 'function') {
-          try {
-            const cCss = await child.getCSSAsync();
-            if (cCss) applyDevModeCSSToNode({ style: cStyle, layout: cLayout }, cCss);
-          } catch (e) { }
-        }
-        socialItems.push({
-          id: child.id,
-          name: safeStr(child.name, 'social'),
-          link: extractLink(child) || '#',
-          background: cStyle.background || null,
-          borderColor: cStyle.borderColor || null,
-          radius: cStyle.radius || null,
-          width: cLayout.width || 40,
-        });
-      }
-      entry.content.socialItems = socialItems;
-    }
-
-    if (['accordion', 'nested-accordion', 'toggle', 'tabs', 'nested-tabs'].includes(choice.widget)) {
-      const accordionItems = [];
-      for (const child of rawKids) {
-        const textNodes = collectTextDescendants(child);
-        if (textNodes.length === 0) continue;
-        const titleNode = textNodes[0];
-        const bodyNodes = textNodes.slice(1);
-
-        const titleText = safeStr(titleNode.characters || titleNode.name).trim();
-        const titleTypography = await extractTextWithDevMode(titleNode);
-
-        let bodyText = '';
-        let bodyTypography = null;
-        if (bodyNodes.length > 0) {
-          bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
-          bodyTypography = await extractTextWithDevMode(bodyNodes[0]);
-        }
-
-        const itemEntry = {
-          sourceNodeId: child.id,
-          layout: extractLayout(child, node),
-          style: extractStyle(child),
-        };
-        if (typeof child.getCSSAsync === 'function') {
-          try {
-            const cCss = await child.getCSSAsync();
-            if (cCss) applyDevModeCSSToNode(itemEntry, cCss);
-          } catch (e) { }
-        }
-
-        accordionItems.push({
-          id: child.id,
-          title: titleText || safeStr(child.name, `Item ${accordionItems.length + 1}`),
-          body: bodyText,
-          titleTypography,
-          bodyTypography,
-          padding: itemEntry.layout.padding,
-          borderWidth: itemEntry.style.borderWidth,
-          borderColor: itemEntry.style.borderColor,
-          background: itemEntry.style.background,
-        });
-      }
-      entry.content.accordionItems = accordionItems;
-    }
-
-    if (choice.widget === 'form' || choice.widget === 'login' || choice.widget === 'search-form') {
-      const formFields = [];
-      let submitLabel = 'Send Message';
-      for (const child of rawKids) {
-        const lower = safeStr(child.name).toLowerCase();
-        const cEntry = {
-          layout: extractLayout(child, node),
-          style: extractStyle(child),
-        };
-        if (typeof child.getCSSAsync === 'function') {
-          try {
-            const cCss = await child.getCSSAsync();
-            if (cCss) applyDevModeCSSToNode(cEntry, cCss);
-          } catch (e) { }
-        }
-
-        if (lower.includes('btn') || lower.includes('button') || lower.includes('submit')) {
-          const btnTexts = collectTextDescendants(child);
-          if (btnTexts.length > 0) {
-            submitLabel = safeStr(btnTexts[0].characters || btnTexts[0].name).trim();
-            entry.content.buttonTypography = await extractTextWithDevMode(btnTexts[0]);
-          }
-          entry.content.buttonStyle = cEntry.style;
-          entry.content.buttonPadding = cEntry.layout.padding;
-          continue;
-        }
-        let fieldType = 'text';
-        if (lower.includes('email') || lower.includes('mail')) fieldType = 'email';
-        else if (lower.includes('phone') || lower.includes('tel') || lower.includes('số điện thoại')) fieldType = 'tel';
-        else if (lower.includes('message') || lower.includes('comment') || lower.includes('nội dung') || (Number(child.height) || 0) >= 90) fieldType = 'textarea';
-
-        const childTextNodes = collectTextDescendants(child);
-        const texts = childTextNodes.map((t) => safeStr(t.characters || t.name).trim()).filter(Boolean);
-        if (!entry.content.fieldTypography && childTextNodes.length > 0) {
-          entry.content.fieldTypography = await extractTextWithDevMode(childTextNodes[0]);
-        }
-        if (!entry.content.fieldStyle && (cEntry.style.background || cEntry.style.borderColor || cEntry.style.radius)) {
-          entry.content.fieldStyle = cEntry.style;
-        }
-        const label = texts[0] || safeStr(child.name, `Field ${formFields.length + 1}`);
-        formFields.push({
-          id: `field_${formFields.length + 1}`,
-          type: fieldType,
-          label,
-          placeholder: texts[1] || label,
-          required: fieldType === 'email' ? 'true' : '',
-        });
-      }
-      entry.content.formFields = formFields;
-      entry.content.submitLabel = submitLabel;
-    }
-
-    const isVisualAssetWidget = [
-      'icon',
-      'image',
-      'theme-site-logo',
-      'site-logo',
-      'theme-post-featured-image',
-      'html',
-    ].includes(choice.widget);
-
-    if (isVisualAssetWidget && typeof node.exportAsync === 'function') {
-      if (hasImageFill(node)) {
-        pendingExports.push({ kind: 'raster', node, id });
-      } else {
-        // Multi-color SVG icon, logo frame, vector graphic, or illustrated shape
-        pendingExports.push({ kind: 'svg', node, id });
-      }
-    } else if (hasImageFill(node) && typeof node.exportAsync === 'function') {
-      pendingExports.push({ kind: 'raster', node, id });
-    }
-
-    nodes[id] = entry;
-    return id;
-  };
-
-  const roots = [];
-  for (const rootNode of selection) {
-    const rid = await visit(rootNode, { insideAtomic: false, path: [], parentNode: null, isTopRoot: isRootSelection });
-    if (rid !== null) roots.push(rid);
-  }
-
-  if (roots.length === 0) {
-    throw new Error('Không có layer hiển thị nào để trích xuất.');
-  }
-
-  // Preserve the user-selected root frame(s) exactly as selected on canvas (never drop Container 1)
-  const finalRoots = roots;
-
-  // Process SVG and Raster exports with SHA-256 deduplication
-  const seenHashes = new Map();
-  const fmt = safeStr(imageFormat, 'PNG').toUpperCase() === 'JPG' ? 'JPG' : 'PNG';
-  const mime = fmt === 'JPG' ? 'image/jpeg' : 'image/png';
-  const scale = safeNum(imageScale, 2) === 1 ? 1 : 2;
-
-  for (const item of pendingExports) {
-    try {
-      if (item.kind === 'svg') {
-        const svgBytes = await item.node.exportAsync({ format: 'SVG' });
-        const svgString = utf8Decode(svgBytes);
-        const hash = await sha256(svgBytes);
-        nodes[item.id].svg = {
-          sha256: hash,
-          markup: svgString,
-          color: extractSolidColor(item.node.fills) || '#1E293B',
-        };
-        if (!seenHashes.has(hash)) {
-          const asset = {
-            assetId: `svg-${item.node.id}`,
-            kind: 'svg',
-            sha256: hash,
-            mime: 'image/svg+xml',
-            byteLength: svgBytes.byteLength,
-            base64: bytesToBase64(svgBytes),
-            markup: svgString,
-          };
-          assets[hash] = asset;
-          assetPayloads.push(asset);
-          seenHashes.set(hash, asset);
-        }
-      } else {
-        const imgBytes = await item.node.exportAsync({
-          format: fmt,
-          constraint: { type: 'SCALE', value: scale },
-        });
-        const hash = await sha256(imgBytes);
-        const b64 = bytesToBase64(imgBytes);
-        const dataUri = `data:${mime};base64,${b64}`;
-
-        nodes[item.id].raster = { sha256: hash, mime, dataUri };
-        if (nodes[item.id].widget === 'image') {
-          nodes[item.id].image = { sha256: hash, mime, dataUri };
-        } else {
-          nodes[item.id].style.backgroundImage = hash;
-          nodes[item.id].style.backgroundImageDataUri = dataUri;
-        }
-
-        if (!seenHashes.has(hash)) {
-          const asset = {
-            assetId: `img-${item.node.id}`,
-            kind: 'image',
-            sha256: hash,
-            mime,
-            byteLength: imgBytes.byteLength,
-            base64: b64,
-          };
-          assets[hash] = asset;
-          assetPayloads.push(asset);
-          seenHashes.set(hash, asset);
-        }
-      }
-    } catch (err) {
-      warnings.push({
-        code: 'asset-export-failed',
-        nodeId: item.node.id,
-        message: `Could not export asset for "${safeStr(item.node.name)}": ${err && err.message ? err.message : err}`,
-      });
-    }
-  }
-
-  const document = {
-    kind: 'f2e.document',
-    schemaVersion: '1.0.0',
-    revision: uuid(),
-    title: safeStr(selection[0] && selection[0].name, 'Figma Design'),
-    source: {
-      provider: 'figma-plugin',
-      fileKey,
-      rootNodeId: safeStr(selection[0] && selection[0].id, ''),
-    },
-    roots: finalRoots,
-    nodes,
-    assets,
-    tokens: designTokens,
-    warnings,
-  };
-
-  return { document, assetPayloads };
-}function detectColorRole(name) {
+ * Design System & Site Settings extraction (Local Variables/Styles + Dev Mode auto-synthesis).
+ */
+function detectColorRole(name) {
   const lower = safeStr(name).toLowerCase();
   if (/(^|[-_/ ])(primary|brand|main)([-_/ ]|$)/i.test(lower)) return 'primary';
   if (/(^|[-_/ ])(secondary)([-_/ ]|$)/i.test(lower)) return 'secondary';
   if (/(^|[-_/ ])(text|body|content|foreground)([-_/ ]|$)/i.test(lower)) return 'text';
   if (/(^|[-_/ ])(accent|highlight)([-_/ ]|$)/i.test(lower)) return 'accent';
   return 'custom';
-}function detectTypographyRole(name) {
+}
+function detectTypographyRole(name) {
   const lower = safeStr(name).toLowerCase();
   if (/^h1\b|heading[\s_/-]?1/i.test(lower)) return 'h1';
   if (/^h2\b|heading[\s_/-]?2/i.test(lower)) return 'h2';
@@ -2537,7 +2511,8 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
     }
   }
   return null;
-}async function extractLocalDesignSystem(figmaApi, activeSelection = null) {
+}
+async function extractLocalDesignSystem(figmaApi, activeSelection = null) {
   const colors = [];
   const typography = [];
   const selection = Array.isArray(activeSelection)
@@ -2605,13 +2580,322 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
             : Math.round(safeNum(ts.lineHeight.value, 24));
           entry.lineHeightUnit = ts.lineHeight.unit === 'PERCENT' ? 'em' : 'px';
         }
-        if (ts.letterSpacing && typeof ts.letterSpacing === 'object' && ts.letterSpacing.unit === 'PIXELS') {
-          entry.letterSpacing = Math.round(safeNum(ts.letterSpacing.value, 0) * 10) / 10;
+        if (ts.letterSpacing && typeof ts.letterSpacing === 'object') {
+          const rawLs = safeNum(ts.letterSpacing.value, 0);
+          if (rawLs !== 0) {
+            if (ts.letterSpacing.unit === 'PERCENT') {
+              entry.letterSpacing = Math.round((rawLs / 100) * 1000) / 1000;
+              entry.letterSpacingUnit = 'em';
+            } else if (ts.letterSpacing.unit === 'PIXELS') {
+              entry.letterSpacing = Math.round(rawLs * 10) / 10;
+              entry.letterSpacingUnit = 'px';
+            }
+          }
         }
         typography.push(entry);
       }
     }
   } catch (e) { }
+
+  // Auto-Synthesize Design System from Dev Mode CSS & Active Selection when Local Styles/Variables are sparse
+  const parseHexRgb = (hex) => {
+    const clean = String(hex || '').replace('#', '').trim();
+    if (clean.length === 3) {
+      return [
+        parseInt(clean[0] + clean[0], 16),
+        parseInt(clean[1] + clean[1], 16),
+        parseInt(clean[2] + clean[2], 16),
+      ];
+    }
+    if (clean.length >= 6) {
+      return [
+        parseInt(clean.slice(0, 2), 16),
+        parseInt(clean.slice(2, 4), 16),
+        parseInt(clean.slice(4, 6), 16),
+      ];
+    }
+    return [0, 0, 0];
+  };
+
+  const getColorMetrics = (hex) => {
+    const [r, g, b] = parseHexRgb(hex);
+    const rn = r / 255;
+    const gn = g / 255;
+    const bn = b / 255;
+    const max = Math.max(rn, gn, bn);
+    const min = Math.min(rn, gn, bn);
+    const sat = max === 0 ? 0 : (max - min) / max;
+    const lum = 0.2126 * rn + 0.7152 * gn + 0.0722 * bn;
+    return { sat, lum };
+  };
+
+  const normalizeHex6 = (raw) => {
+    if (!raw || typeof raw !== 'string') return null;
+    const c = normalizeCssColor(raw) || raw.trim();
+    if (!c) return null;
+    const rgbMatch = /^rgba?\(\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)\s*,\s*(\d+(?:\.\d+)?)/i.exec(c);
+    if (rgbMatch) {
+      const clamp255 = (n) => Math.max(0, Math.min(255, Math.round(Number(n) || 0)));
+      return `#${[clamp255(rgbMatch[1]), clamp255(rgbMatch[2]), clamp255(rgbMatch[3])]
+        .map((v) => v.toString(16).padStart(2, '0'))
+        .join('')}`.toUpperCase();
+    }
+    if (!c.startsWith('#')) return null;
+    const hex = c.slice(1).toUpperCase();
+    if (hex.length === 3) return `#${hex[0]}${hex[0]}${hex[1]}${hex[1]}${hex[2]}${hex[2]}`;
+    if (hex.length === 6) return `#${hex}`;
+    if (hex.length === 8) return `#${hex.slice(0, 6)}`;
+    return null;
+  };
+
+  const extractVarNameFromCssVal = (rawVal) => {
+    const m = /var\(\s*--([a-zA-Z0-9_-]+)/.exec(String(rawVal || ''));
+    if (!m) return null;
+    return m[1]
+      .replace(/[-_]+/g, ' ')
+      .replace(/\b\w/g, (ch) => ch.toUpperCase())
+      .trim();
+  };
+
+  const scanRoots = selection.length > 0
+    ? selection
+    : (figmaApi && figmaApi.currentPage && Array.isArray(figmaApi.currentPage.children)
+      ? figmaApi.currentPage.children.slice(0, 2)
+      : []);
+
+  const colorStats = new Map();
+  const typoStats = new Map();
+  let scannedNodes = 0;
+  let cssCalls = 0;
+
+  const recordColor = (rawHex, usage, varName = null) => {
+    const hex = normalizeHex6(rawHex);
+    if (!hex) return;
+    let rec = colorStats.get(hex);
+    if (!rec) {
+      const m = getColorMetrics(hex);
+      rec = { hex, count: 0, textCount: 0, btnCount: 0, bgCount: 0, borderCount: 0, varName: null, sat: m.sat, lum: m.lum };
+      colorStats.set(hex, rec);
+    }
+    rec.count += 1;
+    if (usage === 'text') rec.textCount += 1;
+    else if (usage === 'btn') rec.btnCount += 1;
+    else if (usage === 'bg') rec.bgCount += 1;
+    else if (usage === 'border') rec.borderCount += 1;
+    if (varName && !rec.varName) rec.varName = varName;
+  };
+
+  const scanNodeForDesignSystem = async (n, depth = 0) => {
+    if (!n || n.visible === false || scannedNodes >= 140 || depth > 8) return;
+    scannedNodes += 1;
+
+    const lowerName = safeStr(n.name).toLowerCase();
+    const isBtn = lowerName.includes('button') || lowerName.includes('btn') || lowerName.includes('cta');
+
+    let css = null;
+    if (typeof n.getCSSAsync === 'function' && cssCalls < 65) {
+      cssCalls += 1;
+      try {
+        css = await n.getCSSAsync();
+      } catch (e) { }
+    }
+
+    if (n.type === 'TEXT') {
+      const cssColor = css && css['color'];
+      const textHex = normalizeHex6(cssColor) || extractSolidColor(n.fills);
+      if (textHex) {
+        recordColor(textHex, isBtn ? 'btn' : 'text', extractVarNameFromCssVal(cssColor));
+      }
+
+      const fn = n.fontName && typeof n.fontName === 'object' ? n.fontName : null;
+      const cssFontFamily = css && css['font-family']
+        ? String(css['font-family']).split(',')[0].replace(/['"]/g, '').trim()
+        : null;
+      const cssFontSize = css && css['font-size'] ? parseFloat(css['font-size']) : null;
+      const cssFontWeight = css && css['font-weight'] ? String(parseInt(css['font-weight'], 10) || '') : null;
+
+      const fontFamily = cssFontFamily || (fn ? safeStr(fn.family, 'Inter') : 'Inter');
+      const fontSize = Math.round(cssFontSize || safeNum(n.fontSize, 16));
+      const fontWeight = cssFontWeight || (fn ? fontWeightOf(fn.style) : '400');
+
+      let lineHeight;
+      let lineHeightUnit;
+      if (css && css['line-height'] && css['line-height'] !== 'normal') {
+        const lhClean = String(css['line-height']).replace(/\/\*[\s\S]*?\*\//g, '').trim();
+        const lhNum = parseFloat(lhClean);
+        if (!Number.isNaN(lhNum) && lhNum > 0) {
+          if (lhClean.endsWith('%')) {
+            lineHeight = Math.round(lhNum) / 100;
+            lineHeightUnit = 'em';
+          } else {
+            lineHeight = Math.round(lhNum);
+            lineHeightUnit = 'px';
+          }
+        }
+      } else if (n.lineHeight && typeof n.lineHeight === 'object' && n.lineHeight.unit !== 'AUTO') {
+        lineHeight = n.lineHeight.unit === 'PERCENT'
+          ? Math.round(safeNum(n.lineHeight.value, 140)) / 100
+          : Math.round(safeNum(n.lineHeight.value, 24));
+        lineHeightUnit = n.lineHeight.unit === 'PERCENT' ? 'em' : 'px';
+      }
+
+      const tKey = `${fontFamily.toLowerCase()}|${fontSize}|${fontWeight}`;
+      let tRec = typoStats.get(tKey);
+      if (!tRec) {
+        tRec = {
+          fontFamily,
+          fontSize,
+          fontWeight,
+          lineHeight,
+          lineHeightUnit,
+          count: 0,
+          sample: safeStr(n.characters || n.name).trim().slice(0, 28),
+        };
+        typoStats.set(tKey, tRec);
+      }
+      tRec.count += 1;
+    } else {
+      // Frame / Vector / Shape colors from Dev Mode CSS + fills/strokes
+      const bgRaw = css && (css['background'] || css['background-color']);
+      if (bgRaw && !String(bgRaw).includes('gradient')) {
+        recordColor(bgRaw, isBtn ? 'btn' : 'bg', extractVarNameFromCssVal(bgRaw));
+      } else if (bgRaw && String(bgRaw).includes('gradient')) {
+        const colorMatches = String(bgRaw).match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/gi) || [];
+        for (const cm of colorMatches.slice(0, 2)) {
+          recordColor(cm, isBtn ? 'btn' : 'bg', extractVarNameFromCssVal(bgRaw));
+        }
+      } else {
+        const solidBg = extractSolidColor(n.fills);
+        if (solidBg) recordColor(solidBg, isBtn ? 'btn' : 'bg');
+      }
+
+      const strokeRaw = css && (css['stroke'] || css['border'] || css['border-color']);
+      if (strokeRaw) {
+        const cm = String(strokeRaw).match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/i);
+        if (cm) recordColor(cm[0], 'border', extractVarNameFromCssVal(strokeRaw));
+      } else {
+        const solidStroke = extractSolidColor(n.strokes);
+        if (solidStroke) recordColor(solidStroke, 'border');
+      }
+    }
+
+    for (const child of visibleChildren(n)) {
+      if (scannedNodes >= 140) break;
+      await scanNodeForDesignSystem(child, depth + 1);
+    }
+  };
+
+  for (const r of scanRoots) {
+    await scanNodeForDesignSystem(r, 0);
+  }
+
+  // Merge auto-synthesized Dev Mode colors when file has no Local Variables / Paint Styles
+  const existingColorHexes = new Set(colors.map((c) => normalizeHex6(c.value)).filter(Boolean));
+  const usedColorRoles = new Set(colors.map((c) => c.role).filter((r) => r && r !== 'custom'));
+
+  if (colors.length === 0) {
+    const sortedScannedColors = [...colorStats.values()]
+      .filter((c) => !existingColorHexes.has(c.hex))
+      .sort((a, b) => {
+        const aScore = a.btnCount * 5 + (a.sat >= 0.25 && a.lum > 0.16 ? 4 : 0) + a.count;
+        const bScore = b.btnCount * 5 + (b.sat >= 0.25 && b.lum > 0.16 ? 4 : 0) + b.count;
+        return bScore - aScore;
+      });
+
+    // Assign semantic roles smartly from Dev Mode colors
+    const brandCandidates = sortedScannedColors.filter(
+      (c) => c.sat >= 0.25 && c.lum >= 0.16 && c.lum <= 0.88 && (c.btnCount > 0 || c.bgCount > 0 || c.borderCount > 0 || c.sat >= 0.45)
+    );
+    const darkTextCandidates = sortedScannedColors
+      .filter((c) => c.textCount > 0 && c.lum <= 0.35)
+      .sort((a, b) => b.textCount - a.textCount || a.lum - b.lum);
+
+    const roleAssignments = new Map();
+    if (!usedColorRoles.has('primary') && brandCandidates[0]) {
+      roleAssignments.set(brandCandidates[0].hex, { role: 'primary', label: brandCandidates[0].varName || 'Primary Brand' });
+      usedColorRoles.add('primary');
+    }
+    if (!usedColorRoles.has('text') && darkTextCandidates[0] && !roleAssignments.has(darkTextCandidates[0].hex)) {
+      roleAssignments.set(darkTextCandidates[0].hex, { role: 'text', label: darkTextCandidates[0].varName || 'Body Text' });
+      usedColorRoles.add('text');
+    }
+    const remainingBrand = brandCandidates.filter((c) => !roleAssignments.has(c.hex));
+    if (!usedColorRoles.has('secondary') && remainingBrand[0]) {
+      roleAssignments.set(remainingBrand[0].hex, { role: 'secondary', label: remainingBrand[0].varName || 'Secondary Brand' });
+      usedColorRoles.add('secondary');
+    }
+    if (!usedColorRoles.has('accent') && remainingBrand[1]) {
+      roleAssignments.set(remainingBrand[1].hex, { role: 'accent', label: remainingBrand[1].varName || 'Accent' });
+      usedColorRoles.add('accent');
+    }
+
+    for (const c of sortedScannedColors.slice(0, 12)) {
+      const assigned = roleAssignments.get(c.hex);
+      let fallbackName = c.varName;
+      if (!fallbackName) {
+        if (c.hex === '#FFFFFF') fallbackName = 'Surface White';
+        else if (c.hex === '#000000') fallbackName = 'Ink Black';
+        else if (c.borderCount > c.bgCount && c.borderCount > c.textCount) fallbackName = 'Border Neutral';
+        else if (c.lum > 0.9) fallbackName = 'Surface Tint';
+        else if (c.lum < 0.25) fallbackName = 'Dark Slate';
+        else fallbackName = `Color ${c.hex}`;
+      }
+      colors.push({
+        name: assigned ? assigned.label : fallbackName,
+        value: c.hex,
+        role: assigned ? assigned.role : 'custom',
+        source: 'devmode',
+      });
+      existingColorHexes.add(c.hex);
+    }
+  }
+
+  // Merge auto-synthesized Dev Mode typography when Local Text Styles are missing
+  if (typography.length === 0) {
+    const existingTypoKeys = new Set(
+      typography.map((t) => `${safeStr(t.fontFamily).toLowerCase()}|${t.fontSize}|${t.fontWeight}`)
+    );
+    const usedTypoRoles = new Set(typography.map((t) => t.role).filter((r) => r && r !== 'custom'));
+
+    const sortedScannedTypos = [...typoStats.values()]
+      .filter((t) => !existingTypoKeys.has(`${t.fontFamily.toLowerCase()}|${t.fontSize}|${t.fontWeight}`))
+      .sort((a, b) => b.fontSize - a.fontSize || Number(b.fontWeight) - Number(a.fontWeight));
+
+    for (const t of sortedScannedTypos.slice(0, 10)) {
+      let role = 'custom';
+      let label = `${t.fontFamily} ${t.fontSize}px`;
+      if (t.fontSize >= 36 && !usedTypoRoles.has('h1')) {
+        role = 'h1';
+        label = 'Heading 1 (H1)';
+      } else if (t.fontSize >= 28 && !usedTypoRoles.has('h2')) {
+        role = 'h2';
+        label = 'Heading 2 (H2)';
+      } else if (t.fontSize >= 22 && !usedTypoRoles.has('h3')) {
+        role = 'h3';
+        label = 'Heading 3 (H3)';
+      } else if (t.fontSize >= 18 && Number(t.fontWeight) >= 600 && !usedTypoRoles.has('h4')) {
+        role = 'h4';
+        label = 'Heading 4 (H4)';
+      } else if (t.fontSize >= 14 && t.fontSize <= 17 && Number(t.fontWeight) <= 500 && !usedTypoRoles.has('body')) {
+        role = 'body';
+        label = 'Body Regular';
+      } else if (t.fontSize >= 12 && t.fontSize <= 15 && Number(t.fontWeight) >= 500 && !usedTypoRoles.has('link')) {
+        role = 'link';
+        label = 'Label / Link';
+      }
+      if (role !== 'custom') usedTypoRoles.add(role);
+
+      typography.push({
+        name: label,
+        role,
+        fontSize: t.fontSize,
+        fontFamily: t.fontFamily,
+        fontWeight: t.fontWeight,
+        ...(t.lineHeight ? { lineHeight: t.lineHeight, lineHeightUnit: t.lineHeightUnit || 'px' } : {}),
+        source: 'devmode',
+      });
+    }
+  }
 
   // Extract Theme Styles (Typography H1-H6, Buttons, Form Fields)
   const themeStyles = {
@@ -2629,6 +2913,7 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
         lineHeight: t.lineHeight,
         lineHeightUnit: t.lineHeightUnit,
         letterSpacing: t.letterSpacing,
+        letterSpacingUnit: t.letterSpacingUnit,
       };
     }
   }
@@ -2747,26 +3032,1567 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
   }
 
   return { colors, typography, themeStyles, settings };
-}function findFirstVisualDescendant(node, depth = 0) {
+}
+
+
+  // ── Module: src/extraction/extractor.js ──
+/**
+ * Core Extraction Pipeline for Figma Plugin API
+ * - Safely guards against Figma `Symbol(figma.mixed)` values on every property
+ * - Extracts native Auto-Layout OR falls back to Virtual Auto-Layout Inference
+ * - Extracts child positioning (`layoutPositioning === 'ABSOLUTE'`, `x`, `y`, `layoutSizingHorizontal`, `layoutSizingVertical`, `layoutGrow`, `layoutAlign`)
+ * - Extracts solid & linear/radial gradient backgrounds, strokes (linked & per-side),
+ *   corner radii (uniform & 4-corner), drop/inner shadows, opacity, clipContent
+ * - Extracts full typography (font family, weight, size, line-height, letter-spacing, transform, color)
+ * - Exports Vector/Icon/Logo groups as clean inline SVG strings + SHA-256 hash
+ * - Exports Image nodes as PNG/JPG (1x/2x) + Base64 & SHA-256 hash
+ */
+
+/**
+ * Full extraction of selected Figma nodes into the F2E Intermediate Representation (IR)
+ */
+async function extractDesignSelection(selection, options = {}) {
+  const {
+    fileKey = 'local-figma',
+    imageFormat = 'PNG',
+    imageScale = 2,
+    useDevModeCss = true,
+    responsiveFrames = { tablet: null, mobile: null },
+    designTokens = { colors: [], typography: [] },
+    isRootSelection = true,
+    onProgress = null,
+  } = options;
+
+  const nodes = {};
+  const assets = {};
+  const assetPayloads = [];
+  const warnings = [];
+  const pendingExports = [];
+
+  // Fast synchronous node count for accurate percentage progress
+  let totalVisibleNodes = 0;
+  if (typeof onProgress === 'function') {
+    const countNodes = (n) => {
+      if (!n || n.visible === false) return;
+      totalVisibleNodes += 1;
+      for (const c of visibleChildren(n)) countNodes(c);
+    };
+    for (const rootNode of selection) countNodes(rootNode);
+  }
+  let visitedNodes = 0;
+
+  const visit = async (node, context = {}) => {
+    const { insideAtomic = false, path = [], parentNode = null, isTopRoot = false } = context;
+    if (!node || node.visible === false) return null;
+
+    visitedNodes += 1;
+    if (typeof onProgress === 'function' && (isTopRoot || visitedNodes === 1 || visitedNodes % 8 === 0 || visitedNodes >= totalVisibleNodes)) {
+      onProgress('nodes', Math.min(visitedNodes, Math.max(1, totalVisibleNodes)), Math.max(1, totalVisibleNodes), safeStr(node.name));
+    }
+
+    let choice = resolveWidget(node);
+    // Guard: If top-level root artboard is heuristic-skip, fallback to container so export doesn't fail
+    if (isTopRoot && choice.widget === 'skip' && choice.source !== 'override') {
+      choice = { widget: 'container', source: 'root-fallback' };
+    }
+    if (choice.widget === 'skip') return null;
+    if (insideAtomic) return null;
+
+    const id = `f2e:${fileKey}:${node.id}`;
+    let devModeCSS = null;
+    if (useDevModeCss && typeof node.getCSSAsync === 'function') {
+      try {
+        devModeCSS = await node.getCSSAsync();
+      } catch (e) { }
+    }
+
+    const layout = extractLayout(node, parentNode);
+    const style = extractStyle(node);
+    if (devModeCSS) {
+      if (devModeCSS['border-image-source'] || devModeCSS['border-image']) {
+        style.devModeBorderImage = devModeCSS['border-image-source'] || devModeCSS['border-image'];
+      }
+      if (devModeCSS['border']) {
+        style.devModeBorder = devModeCSS['border'];
+      }
+    }
+
+    // Skip empty decorative background placeholder frames (`bg`) that have no fill, no image, no border, and no children
+    let rawKids = visibleChildren(node);
+    if (
+      !isTopRoot &&
+      rawKids.length === 0 &&
+      node.type !== 'TEXT' &&
+      choice.widget === 'container' &&
+      !style.background &&
+      !style.gradient &&
+      !style.borderColor &&
+      !hasImageFill(node)
+    ) {
+      return null;
+    }
+
+    if (Array.isArray(layout.orderedIds) && layout.orderedIds.length === rawKids.length) {
+      const byId = new Map(rawKids.map((k) => [k.id, k]));
+      rawKids = layout.orderedIds.map((oid) => byId.get(oid)).filter(Boolean);
+    }
+
+    // Atomic leaf widgets consume their own subtree directly (do not produce child Elementor elements)
+    const isLeafWidget = isAtomicLeafWidget(choice.widget);
+
+    // Detect composite background layers (e.g. BG + Mask + Line + Main + Overlay behind Menu/Text/Group)
+    let hasCompositeBg = false;
+    let compositeFgNodes = [];
+    if (!isLeafWidget && rawKids.length >= 2) {
+      const { bgChildren, fgChildren, bgIds } = detectCompositeBackgroundChildren(node);
+      if (bgChildren.length > 0 && fgChildren.length > 0) {
+        hasCompositeBg = true;
+        compositeFgNodes = fgChildren;
+        rawKids = rawKids.filter((c) => !bgIds.has(c.id));
+        if (layout.inferred) {
+          const fgInferred = inferVirtualLayout(node, rawKids);
+          Object.assign(layout, fgInferred);
+          if (Array.isArray(fgInferred.orderedIds) && fgInferred.orderedIds.length === rawKids.length) {
+            const byId = new Map(rawKids.map((k) => [k.id, k]));
+            rawKids = fgInferred.orderedIds.map((oid) => byId.get(oid)).filter(Boolean);
+          }
+        }
+      }
+    }
+
+    const childrenIds = [];
+    if (!isLeafWidget) {
+      for (const child of rawKids) {
+        if (resolveWidget(child).widget === 'background') continue;
+        const childName = safeStr(child.name).trim().toLowerCase();
+        const cid = await visit(child, {
+          insideAtomic: false,
+          path: [...path, childName],
+          parentNode: node,
+          isTopRoot: false,
+        });
+        if (cid !== null) childrenIds.push(cid);
+      }
+    }
+
+    const rawLayerName = safeStr(node.name, 'Layer');
+    const cleanName = rawLayerName.replace(/\[[a-z0-9_-]+\]\s*/i, '').trim() || rawLayerName;
+
+    const entry = {
+      id,
+      sourceNodeId: node.id,
+      type: safeStr(node.type, 'FRAME').toLowerCase(),
+      widget: choice.widget === 'container-grid' ? 'container' : choice.widget,
+      widgetSource: choice.source,
+      children: childrenIds,
+      layout: choice.widget === 'container-grid' ? { ...layout, mode: 'grid' } : layout,
+      style,
+      content: {
+        name: cleanName,
+        rawName: rawLayerName,
+      },
+      responsive: {},
+    };
+
+    for (const vp of ['tablet', 'mobile']) {
+      if (responsiveFrames[vp]) {
+        const matched = matchResponsiveOverride(responsiveFrames[vp], path, node.type);
+        if (matched) entry.responsive[vp] = matched;
+      }
+    }
+
+    const extractTextWithDevMode = async (tn) => {
+      if (!tn) return null;
+      const typo = extractTypography(tn);
+      if (!typo) return null;
+      if (useDevModeCss && typeof tn.getCSSAsync === 'function') {
+        try {
+          const tCss = await tn.getCSSAsync();
+          if (tCss && Object.keys(tCss).length > 0) {
+            applyDevModeCSSToNode({ type: 'text', text: typo, style: {}, layout: {} }, tCss);
+          }
+        } catch (e) { }
+      }
+      return typo;
+    };
+
+    const link = extractLink(node);
+    if (link) entry.link = link;
+
+    if (node.type === 'TEXT') {
+      entry.text = extractTypography(node);
+      entry.content.characters = entry.text.characters;
+    }
+
+    // Apply outer node's Dev Mode CSS first so FRAME box styles do not overwrite child text typography
+    if (devModeCSS) {
+      applyDevModeCSSToNode(entry, devModeCSS);
+    }
+
+    if (node.type === 'TEXT' && entry.text) {
+      entry.extractedTexts = [entry.text];
+    } else if (isLeafWidget) {
+      // For any atomic leaf widget wrapping child TEXT nodes (e.g. Frame tagged as heading, text-editor,
+      // button, counter, icon-box, image-box, icon-list, nav-menu, price-table, call-to-action, testimonial,
+      // flip-box, progress, alert, blockquote, etc.), extract every descendant TEXT node with its full Dev Mode CSS!
+      const textNodes = collectTextDescendants(node);
+      if (textNodes.length > 0) {
+        const extractedList = [];
+        for (const tn of textNodes) {
+          const tObj = await extractTextWithDevMode(tn);
+          if (tObj && safeStr(tObj.characters).trim().length > 0) {
+            tObj.nodeName = safeStr(tn.name, '');
+            tObj.link = extractLink(tn) || '';
+            extractedList.push(tObj);
+          }
+        }
+        if (extractedList.length > 0) {
+          entry.extractedTexts = extractedList;
+          if (!entry.text) {
+            entry.text = extractedList[0];
+          }
+          if (!entry.content.characters) {
+            entry.content.characters = extractedList[0].characters;
+          }
+        }
+      }
+    }
+
+    if (choice.widget === 'button') {
+      const bIcon = extractButtonIcon(node);
+      if (bIcon) entry.buttonIcon = bIcon;
+      if (!entry.content.characters) {
+        entry.content.characters = (entry.text && entry.text.characters) || entry.content.name || 'Button';
+      }
+    }
+
+    if (choice.widget === 'nav-menu' || choice.widget === 'mega-menu') {
+      const extractedList = entry.extractedTexts || [];
+      const menuItems = extractedList
+        .map((t) => ({
+          name: safeStr(t.characters || t.nodeName).trim(),
+          link: t.link || '#',
+        }))
+        .filter((item) => item.name.length > 0);
+
+      entry.content.menuItems = menuItems;
+    }
+
+    if (choice.widget === 'icon-list') {
+      const extractedList = entry.extractedTexts || [];
+      const listItems = extractedList
+        .map((t, idx) => {
+          let text = safeStr(t.characters || t.nodeName).trim();
+          text = text.replace(/^[\u2713\u2714\u2022\u00b7\u25cf\u25cb\u2013\u2014\-*]\s*/, '');
+          return {
+            id: `item_${idx + 1}`,
+            text,
+            link: t.link || '',
+            color: t.color || null,
+          };
+        })
+        .filter((item) => item.text.length > 0);
+
+      const findDeepVectorColor = async (vNode, depth = 0) => {
+        if (!vNode || depth > 5) return null;
+        const direct = extractSolidColor(vNode.strokes) || extractSolidColor(vNode.fills);
+        if (direct) return direct;
+        if (typeof vNode.getCSSAsync === 'function' && useDevModeCss) {
+          try {
+            const vCss = await vNode.getCSSAsync();
+            const c = vCss && (normalizeCssColor(vCss['stroke']) || normalizeCssColor(vCss['fill']));
+            if (c) return c;
+          } catch (e) { }
+        }
+        for (const k of visibleChildren(vNode)) {
+          const found = await findDeepVectorColor(k, depth + 1);
+          if (found) return found;
+        }
+        return null;
+      };
+
+      entry.content.iconList = listItems;
+      const visualNode = findFirstVisualDescendant(node);
+      if (visualNode) {
+        entry.content.iconColor = await findDeepVectorColor(visualNode);
+        entry.content.iconSize = Math.round(safeNum(visualNode.width, 0)) || null;
+      }
+    }
+
+    if (choice.widget === 'icon-box' || choice.widget === 'image-box') {
+      const extractedList = entry.extractedTexts || [];
+      if (extractedList.length > 0) {
+        entry.content.title_text = safeStr(extractedList[0].characters).trim();
+        entry.content.titleTypography = extractedList[0];
+        entry.text = extractedList[0];
+      }
+      if (extractedList.length > 1) {
+        entry.content.description_text = extractedList
+          .slice(1)
+          .map((t) => safeStr(t.characters).trim())
+          .filter(Boolean)
+          .join('\n');
+        entry.content.descriptionTypography = extractedList[1];
+      }
+      entry.content.position = (layout.direction === 'row') ? 'left' : 'top';
+
+      const visualNode = findFirstVisualDescendant(node);
+      if (visualNode) {
+        entry.content.iconSize = Math.round(safeNum(visualNode.width, 40)) || 40;
+        entry.content.iconColor = extractSolidColor(visualNode.fills) || extractSolidColor(visualNode.strokes) || null;
+        if (typeof visualNode.exportAsync === 'function') {
+          if (hasImageFill(visualNode) || (collectTextDescendants(visualNode).length === 0 && hasDescendantImageFill(visualNode))) {
+            pendingExports.push({
+              kind: 'raster',
+              node: visualNode,
+              id,
+              onResult: (ref) => {
+                entry.image = ref;
+                entry.raster = ref;
+              },
+            });
+          } else {
+            pendingExports.push({ kind: 'svg', node: visualNode, id });
+          }
+        }
+      }
+    }
+
+    if (choice.widget === 'counter' || choice.widget === 'countdown') {
+      const extractedList = entry.extractedTexts || (entry.text ? [entry.text] : []);
+      const numItem = extractedList.find((t) => /\d/.test(safeStr(t.characters))) || extractedList[0] || null;
+      const titleItem = extractedList.find((t) => t !== numItem) || null;
+      if (numItem) {
+        entry.content.counterNumber = safeStr(numItem.characters).trim();
+        entry.content.numberTypography = numItem;
+      }
+      if (titleItem) {
+        entry.content.counterTitle = safeStr(titleItem.characters).trim();
+        entry.content.titleTypography = titleItem;
+      }
+    }
+
+    if (choice.widget === 'social-icons' || choice.widget === 'share-buttons') {
+      const socialItems = [];
+      for (const child of rawKids) {
+        const cStyle = extractStyle(child);
+        const cLayout = extractLayout(child, node);
+        if (useDevModeCss && typeof child.getCSSAsync === 'function') {
+          try {
+            const cCss = await child.getCSSAsync();
+            if (cCss) applyDevModeCSSToNode({ style: cStyle, layout: cLayout }, cCss);
+          } catch (e) { }
+        }
+        socialItems.push({
+          id: child.id,
+          name: safeStr(child.name, 'social'),
+          link: extractLink(child) || '#',
+          background: cStyle.background || null,
+          borderColor: cStyle.borderColor || null,
+          radius: cStyle.radius || null,
+          width: cLayout.width || 40,
+        });
+      }
+      entry.content.socialItems = socialItems;
+    }
+
+    if (['image-gallery', 'image-carousel', 'gallery', 'media-carousel'].includes(choice.widget)) {
+      let imgNodes = hasImageFill(node)
+        ? [node]
+        : collectVisualImageDescendants(node, { includeVectors: false });
+      if (imgNodes.length === 0) {
+        imgNodes = collectVisualImageDescendants(node, { includeVectors: true, minVectorSize: 25 });
+      }
+      if (imgNodes.length > 0) {
+        entry.extractedImages = new Array(imgNodes.length).fill(null);
+        imgNodes.forEach((imgNode, idx) => {
+          if (typeof imgNode.exportAsync === 'function') {
+            pendingExports.push({
+              kind: 'raster',
+              node: imgNode,
+              id,
+              onResult: (ref) => {
+                entry.extractedImages[idx] = ref;
+              },
+            });
+          }
+        });
+      }
+    }
+
+    if (['call-to-action', 'testimonial', 'flip-box', 'price-table'].includes(choice.widget)) {
+      const imgNodes = collectVisualImageDescendants(node, { includeVectors: false });
+      if (imgNodes.length > 0) {
+        entry.extractedImages = new Array(imgNodes.length).fill(null);
+        imgNodes.forEach((imgNode, idx) => {
+          if (typeof imgNode.exportAsync === 'function') {
+            pendingExports.push({
+              kind: 'raster',
+              node: imgNode,
+              id,
+              onResult: (ref) => {
+                entry.extractedImages[idx] = ref;
+              },
+            });
+          }
+        });
+      }
+      if (choice.widget === 'call-to-action') {
+        const btnChild = rawKids.find((c) => c && c.type !== 'TEXT' && resolveWidget(c).widget === 'button');
+        if (btnChild) {
+          const btnTexts = collectTextDescendants(btnChild);
+          if (btnTexts.length > 0) {
+            entry.content.ctaButtonText = safeStr(btnTexts[0].characters).trim();
+          }
+        }
+      }
+    }
+
+    if (['slides', 'testimonial-carousel', 'reviews'].includes(choice.widget)) {
+      const slides = [];
+      entry.extractedImages = [];
+      for (const slideChild of rawKids) {
+        if (!slideChild || slideChild.visible === false) continue;
+        const slideTextNodes = collectTextDescendants(slideChild);
+        const slideTexts = [];
+        for (const tn of slideTextNodes) {
+          const tObj = await extractTextWithDevMode(tn);
+          if (tObj && safeStr(tObj.characters).trim().length > 0) {
+            tObj.nodeName = safeStr(tn.name, '');
+            tObj.link = extractLink(tn) || '';
+            slideTexts.push(tObj);
+          }
+        }
+        const slideStyle = extractStyle(slideChild);
+        if (useDevModeCss && typeof slideChild.getCSSAsync === 'function') {
+          try {
+            const sCss = await slideChild.getCSSAsync();
+            if (sCss) applyDevModeCSSToNode({ type: 'frame', style: slideStyle, layout: {} }, sCss);
+          } catch (e) { }
+        }
+        const slideObj = {
+          id: slideChild.id,
+          name: safeStr(slideChild.name, 'Slide'),
+          texts: slideTexts,
+          background: slideStyle.background || null,
+          image: null,
+        };
+        slides.push(slideObj);
+
+        if (hasImageFill(slideChild) && typeof slideChild.exportAsync === 'function') {
+          const slideFgNodes = visibleChildren(slideChild);
+          pendingExports.push({
+            kind: slideFgNodes.length > 0 ? 'composite-bg' : 'raster',
+            node: slideChild,
+            id,
+            fgNodes: slideFgNodes,
+            hasDirectImageFill: true,
+            onResult: (ref) => {
+              slideObj.image = ref;
+              entry.extractedImages.push(ref);
+            },
+          });
+        } else {
+          const descImg = collectVisualImageDescendants(slideChild, { includeVectors: false })[0];
+          if (descImg && typeof descImg.exportAsync === 'function') {
+            pendingExports.push({
+              kind: 'raster',
+              node: descImg,
+              id,
+              onResult: (ref) => {
+                slideObj.image = ref;
+                entry.extractedImages.push(ref);
+              },
+            });
+          }
+        }
+      }
+      entry.content.slides = slides;
+    }
+
+    if (['accordion', 'nested-accordion', 'toggle', 'tabs', 'nested-tabs'].includes(choice.widget)) {
+      const accordionItems = [];
+
+      const extractExpandIconStyle = async (containerNode) => {
+        const kids = visibleChildren(containerNode);
+        for (const k of kids) {
+          if (!k || k.type === 'TEXT') continue;
+          const kTexts = collectTextDescendants(k);
+          if (kTexts.length > 0) continue;
+          const kName = safeStr(k.name).toLowerCase();
+          const kw = Math.round(safeNum(k.width, 0));
+          const kh = Math.round(safeNum(k.height, 0));
+          const isIconLike =
+            kName.includes('plus') ||
+            kName.includes('minus') ||
+            kName.includes('chevron') ||
+            kName.includes('arrow') ||
+            kName.includes('icon') ||
+            (kw > 0 && kw <= 48 && kh > 0 && kh <= 48);
+          if (!isIconLike) continue;
+
+          const kEntry = { layout: extractLayout(k, containerNode), style: extractStyle(k) };
+          if (useDevModeCss && typeof k.getCSSAsync === 'function') {
+            try {
+              const kCss = await k.getCSSAsync();
+              if (kCss) applyDevModeCSSToNode(kEntry, kCss);
+            } catch (e) { }
+          }
+          // Find stroke/fill color of the inner vector icon (e.g. "Plus" stroke: #16A34A)
+          let iconStrokeColor = kEntry.style.borderColor || null;
+          const innerKids = visibleChildren(k);
+          for (const ik of innerKids) {
+            const c = extractSolidColor(ik.strokes) || extractSolidColor(ik.fills);
+            if (c) {
+              iconStrokeColor = c;
+              break;
+            }
+            if (useDevModeCss && typeof ik.getCSSAsync === 'function') {
+              try {
+                const ikCss = await ik.getCSSAsync();
+                const sc = ikCss && (normalizeCssColor(ikCss['stroke']) || normalizeCssColor(ikCss['fill']) || normalizeCssColor(ikCss['color']));
+                if (sc) {
+                  iconStrokeColor = sc;
+                  break;
+                }
+              } catch (e) { }
+            }
+          }
+          return {
+            width: kEntry.layout.width || kw || 32,
+            height: kEntry.layout.height || kh || 32,
+            background: kEntry.style.background || null,
+            radius: kEntry.style.radius || null,
+            color: iconStrokeColor || extractSolidColor(k.strokes) || extractSolidColor(k.fills) || null,
+          };
+        }
+        return null;
+      };
+
+      // Check if this node is a single FAQ card (direct children include a TEXT node + icon, e.g. "FAQ 1" -> [Question, Plus wrap])
+      const hasDirectTextChild = rawKids.some((c) => c && c.type === 'TEXT');
+      if (hasDirectTextChild) {
+        const textNodes = collectTextDescendants(node);
+        if (textNodes.length > 0) {
+          const titleNode = textNodes[0];
+          const bodyNodes = textNodes.slice(1);
+          const titleText = safeStr(titleNode.characters || titleNode.name).trim();
+          const titleTypography = await extractTextWithDevMode(titleNode);
+          let bodyText = '';
+          let bodyTypography = null;
+          if (bodyNodes.length > 0) {
+            bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
+            bodyTypography = await extractTextWithDevMode(bodyNodes[0]);
+          }
+          const expandIconStyle = await extractExpandIconStyle(node);
+          accordionItems.push({
+            id: node.id,
+            title: titleText || safeStr(node.name, 'Item 1'),
+            body: bodyText,
+            titleTypography,
+            bodyTypography,
+            padding: entry.layout.padding,
+            borderWidth: entry.style.borderWidth,
+            borderColor: entry.style.borderColor,
+            background: entry.style.background,
+            radius: entry.style.radius,
+            expandIconStyle,
+          });
+        }
+      } else {
+        for (const child of rawKids) {
+          const textNodes = collectTextDescendants(child);
+          if (textNodes.length === 0) continue;
+          const titleNode = textNodes[0];
+          const bodyNodes = textNodes.slice(1);
+
+          const titleText = safeStr(titleNode.characters || titleNode.name).trim();
+          const titleTypography = await extractTextWithDevMode(titleNode);
+
+          let bodyText = '';
+          let bodyTypography = null;
+          if (bodyNodes.length > 0) {
+            bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
+            bodyTypography = await extractTextWithDevMode(bodyNodes[0]);
+          }
+
+          const itemEntry = {
+            sourceNodeId: child.id,
+            layout: extractLayout(child, node),
+            style: extractStyle(child),
+          };
+          if (useDevModeCss && typeof child.getCSSAsync === 'function') {
+            try {
+              const cCss = await child.getCSSAsync();
+              if (cCss) applyDevModeCSSToNode(itemEntry, cCss);
+            } catch (e) { }
+          }
+          const expandIconStyle = await extractExpandIconStyle(child);
+
+          accordionItems.push({
+            id: child.id,
+            title: titleText || safeStr(child.name, `Item ${accordionItems.length + 1}`),
+            body: bodyText,
+            titleTypography,
+            bodyTypography,
+            padding: itemEntry.layout.padding,
+            borderWidth: itemEntry.style.borderWidth,
+            borderColor: itemEntry.style.borderColor,
+            background: itemEntry.style.background,
+            radius: itemEntry.style.radius,
+            expandIconStyle,
+          });
+        }
+      }
+      entry.content.accordionItems = accordionItems;
+    }
+
+    if (choice.widget === 'form' || choice.widget === 'login' || choice.widget === 'search-form') {
+      const formFields = [];
+      let submitLabel = 'Send Message';
+
+      const isPureRedAsterisk = (color) => {
+        if (!color || typeof color !== 'string') return false;
+        const c = color.trim().toUpperCase();
+        return c === '#FF0000' || c === '#F00' || c === '#EF4444' || c === '#DC2626' || c === '#E11D48';
+      };
+
+      const isButtonLikeNode = (n) => {
+        if (!n || n.type === 'TEXT') return false;
+        const tCount = collectTextDescendants(n).length;
+        if (tCount === 0 || tCount > 2) return false;
+        const lower = safeStr(n.name).toLowerCase();
+        if (lower.includes('btn') || lower.includes('button') || lower.includes('submit') || lower.includes('cta')) return true;
+        const resolved = resolveWidget(n);
+        return resolved && resolved.widget === 'button';
+      };
+
+      const isInputBoxLike = (k) => {
+        if (!k || k.type === 'TEXT') return false;
+        const kName = safeStr(k.name).toLowerCase();
+        if (kName.includes('label')) return false;
+        const st = extractStyle(k);
+        return Boolean(
+          st.background ||
+          st.borderColor ||
+          st.radius ||
+          kName.includes('input') ||
+          kName.includes('textarea') ||
+          kName.includes('select') ||
+          kName.includes('box') ||
+          kName.includes('field')
+        );
+      };
+
+      const findInputBoxNode = (fieldNode) => {
+        const kids = visibleChildren(fieldNode);
+        // Look for a styled child box (has background, border, or radius and is not a label/TEXT node)
+        for (const k of kids) {
+          if (isInputBoxLike(k)) return k;
+        }
+        return fieldNode;
+      };
+
+      const isSingleFieldPair = (nodeToCheck, kids) => {
+        if (!kids || kids.length !== 2) return false;
+        if (nodeToCheck.layoutMode === 'HORIZONTAL') return false;
+        const [first, second] = kids;
+        const firstTexts = collectTextDescendants(first);
+        const secondTexts = collectTextDescendants(second);
+        if (firstTexts.length === 0 || firstTexts.length > 2) return false;
+        if (secondTexts.length > 2) return false;
+        const firstName = safeStr(first.name).toLowerCase();
+        const firstStyle = first.type === 'TEXT' ? {} : extractStyle(first);
+        const firstLooksLikeLabel =
+          first.type === 'TEXT' ||
+          firstName.includes('label') ||
+          firstName.includes('title') ||
+          (!firstStyle.background && !firstStyle.borderColor && !firstStyle.radius);
+        return firstLooksLikeLabel && isInputBoxLike(second);
+      };
+
+      const parseSingleField = async (fieldNode, parentRef, widthPct = '100') => {
+        const lowerName = safeStr(fieldNode.name).toLowerCase();
+        const childTextNodes = collectTextDescendants(fieldNode);
+        const texts = childTextNodes.map((t) => safeStr(t.characters || t.name).trim()).filter(Boolean);
+        if (texts.length === 0) return;
+
+        // If label is split across two text nodes (e.g. "Họ và tên" + "*"), combine them cleanly
+        let label = texts[0];
+        let placeholderIdx = 1;
+        if (texts.length >= 2 && texts[1] === '*') {
+          label = `${texts[0]} *`;
+          placeholderIdx = 2;
+        }
+        const placeholder = texts[placeholderIdx] || label.replace(/\s*\*$/, '').trim();
+        const isRequired = label.includes('*') || lowerName.includes('required');
+        const cleanLabel = label.replace(/\s*\*$/, '').trim() || label;
+        const combinedSearch = `${lowerName} ${cleanLabel.toLowerCase()} ${placeholder.toLowerCase()}`;
+
+        const inputBox = findInputBoxNode(fieldNode);
+        const inputBoxEntry = {
+          layout: extractLayout(inputBox, fieldNode),
+          style: extractStyle(inputBox),
+        };
+        if (useDevModeCss && typeof inputBox.getCSSAsync === 'function') {
+          try {
+            const ibCss = await inputBox.getCSSAsync();
+            if (ibCss) applyDevModeCSSToNode(inputBoxEntry, ibCss);
+          } catch (e) { }
+        }
+        const inputHeight = Number(inputBoxEntry.layout.height || inputBox.height || 0);
+
+        let fieldType = 'text';
+        if (combinedSearch.includes('email') || combinedSearch.includes('mail')) {
+          fieldType = 'email';
+        } else if (combinedSearch.includes('phone') || combinedSearch.includes('tel') || combinedSearch.includes('điện thoại') || combinedSearch.includes('sđt')) {
+          fieldType = 'tel';
+        } else if (combinedSearch.includes('số lượng') || combinedSearch.includes('quantity')) {
+          fieldType = 'number';
+        } else if (
+          combinedSearch.includes('message') ||
+          combinedSearch.includes('comment') ||
+          combinedSearch.includes('nội dung') ||
+          combinedSearch.includes('ghi chú') ||
+          combinedSearch.includes('nhu cầu') ||
+          combinedSearch.includes('mô tả') ||
+          inputHeight >= 80
+        ) {
+          fieldType = 'textarea';
+        }
+
+        // Extract label typography (from label text, ignoring pure red '*' color)
+        if (!entry.content.labelTypography && childTextNodes[0]) {
+          const lblT = await extractTextWithDevMode(childTextNodes[0]);
+          if (lblT) {
+            if (isPureRedAsterisk(lblT.color)) lblT.color = '#000000';
+            entry.content.labelTypography = lblT;
+          }
+        }
+        // Extract input field typography (from placeholder/value text inside input box, NEVER the red '*')
+        const inputTextNode = childTextNodes[placeholderIdx] || childTextNodes[childTextNodes.length - 1];
+        if (!entry.content.fieldTypography && inputTextNode) {
+          const fldT = await extractTextWithDevMode(inputTextNode);
+          if (fldT) {
+            if (isPureRedAsterisk(fldT.color)) fldT.color = '#000000';
+            entry.content.fieldTypography = fldT;
+          }
+        }
+        if (!entry.content.fieldStyle && (inputBoxEntry.style.background || inputBoxEntry.style.borderColor || inputBoxEntry.style.radius)) {
+          entry.content.fieldStyle = inputBoxEntry.style;
+        }
+
+        formFields.push({
+          id: `field_${formFields.length + 1}`,
+          type: fieldType,
+          label: cleanLabel,
+          placeholder,
+          required: isRequired || fieldType === 'email' ? 'true' : '',
+          width: widthPct,
+        });
+      };
+
+      const walkFormChildren = async (kids, parentRef, depth = 0) => {
+        for (const child of kids) {
+          if (!child || child.visible === false) continue;
+
+          if (isButtonLikeNode(child)) {
+            const btnEntry = { layout: extractLayout(child, parentRef), style: extractStyle(child) };
+            if (useDevModeCss && typeof child.getCSSAsync === 'function') {
+              try {
+                const bCss = await child.getCSSAsync();
+                if (bCss) applyDevModeCSSToNode(btnEntry, bCss);
+              } catch (e) { }
+            }
+            const btnTexts = collectTextDescendants(child);
+            if (btnTexts.length > 0) {
+              submitLabel = safeStr(btnTexts[0].characters || btnTexts[0].name).trim();
+              entry.content.buttonTypography = await extractTextWithDevMode(btnTexts[0]);
+            }
+            entry.content.buttonStyle = btnEntry.style;
+            entry.content.buttonPadding = btnEntry.layout.padding;
+            continue;
+          }
+
+          const grandKids = visibleChildren(child);
+          const grandFrameKids = grandKids.filter((gk) => gk.type !== 'TEXT' && collectTextDescendants(gk).length > 0);
+          const allTextsInChild = collectTextDescendants(child);
+
+          // Case 0: Single field structured as [LabelFrame("Họ và tên" + "*"), InputBoxFrame("Nhập...")]
+          if (isSingleFieldPair(child, grandKids)) {
+            await parseSingleField(child, parentRef, '100');
+            continue;
+          }
+
+          // Case 1: Wrapper container holding multiple field rows or a 2-column horizontal row of fields
+          if (depth < 3 && grandFrameKids.length >= 2) {
+            const isHorizontalRow = child.layoutMode === 'HORIZONTAL';
+            if (isHorizontalRow) {
+              const nonBtnCols = grandFrameKids.filter((gk) => !isButtonLikeNode(gk));
+              const colPct = nonBtnCols.length === 2 ? '50' : (nonBtnCols.length === 3 ? '33' : '100');
+              for (const colField of grandKids) {
+                if (isButtonLikeNode(colField)) {
+                  await walkFormChildren([colField], child, depth + 1);
+      } else {
+                  await parseSingleField(colField, child, colPct);
+                }
+              }
+              continue;
+            }
+            // Vertical wrapper (e.g. "Fields" group containing multiple fields)
+            if (allTextsInChild.length >= 3 || grandFrameKids.every((gk) => collectTextDescendants(gk).length >= 1)) {
+              await walkFormChildren(grandKids, child, depth + 1);
+              continue;
+            }
+          }
+
+          // Case 2: Single field node (e.g. Field -> [Label, Input Box])
+          await parseSingleField(child, parentRef, '100');
+        }
+      };
+
+      await walkFormChildren(rawKids, node, 0);
+      entry.content.formFields = formFields;
+      entry.content.submitLabel = submitLabel;
+    }
+
+    const isVisualAssetWidget = [
+      'icon',
+      'image',
+      'theme-site-logo',
+      'site-logo',
+      'theme-post-featured-image',
+      'html',
+    ].includes(choice.widget);
+
+    if (hasCompositeBg && typeof node.exportAsync === 'function') {
+      pendingExports.push({ kind: 'composite-bg', node, id, fgNodes: compositeFgNodes });
+    } else if (isVisualAssetWidget && typeof node.exportAsync === 'function') {
+      if (hasImageFill(node) || (collectTextDescendants(node).length === 0 && hasDescendantImageFill(node))) {
+        pendingExports.push({ kind: 'raster', node, id });
+      } else {
+        // Multi-color SVG icon, logo frame, vector graphic, or illustrated shape
+        pendingExports.push({ kind: 'svg', node, id });
+      }
+    } else if (hasImageFill(node) && typeof node.exportAsync === 'function') {
+      if (!isLeafWidget && rawKids.length > 0) {
+        pendingExports.push({ kind: 'composite-bg', node, id, fgNodes: rawKids, hasDirectImageFill: true });
+      } else {
+        pendingExports.push({ kind: 'raster', node, id });
+      }
+    }
+
+    nodes[id] = entry;
+    return id;
+  };
+
+  const roots = [];
+  for (const rootNode of selection) {
+    const rid = await visit(rootNode, { insideAtomic: false, path: [], parentNode: null, isTopRoot: isRootSelection });
+    if (rid !== null) roots.push(rid);
+  }
+
+  if (roots.length === 0) {
+    throw new Error('Không có layer hiển thị nào để trích xuất.');
+  }
+
+  // Preserve the user-selected root frame(s) exactly as selected on canvas (never drop Container 1)
+  const finalRoots = roots;
+
+  // Process SVG and Raster exports with SHA-256 deduplication
+  const seenHashes = new Map();
+  const fmt = safeStr(imageFormat, 'PNG').toUpperCase() === 'JPG' ? 'JPG' : 'PNG';
+  const mime = fmt === 'JPG' ? 'image/jpeg' : 'image/png';
+  const scale = safeNum(imageScale, 2) === 1 ? 1 : 2;
+
+  const recordRasterAsset = async (item, imgBytes, prefix = 'img') => {
+    const hash = await sha256(imgBytes);
+    const b64 = bytesToBase64(imgBytes);
+    const dataUri = `data:${mime};base64,${b64}`;
+    const ref = { sha256: hash, mime, dataUri };
+
+    if (typeof item.onResult === 'function') {
+      item.onResult(ref);
+    } else {
+      nodes[item.id].raster = ref;
+      if (['image', 'theme-site-logo', 'site-logo', 'theme-post-featured-image'].includes(nodes[item.id].widget)) {
+        nodes[item.id].image = ref;
+      } else {
+        nodes[item.id].style.backgroundImage = hash;
+        nodes[item.id].style.backgroundImageDataUri = dataUri;
+      }
+    }
+
+    if (!seenHashes.has(hash)) {
+      const asset = {
+        assetId: `${prefix}-${item.node.id}`,
+        kind: 'image',
+        sha256: hash,
+        mime,
+        byteLength: imgBytes.byteLength,
+        base64: b64,
+      };
+      assets[hash] = asset;
+      assetPayloads.push(asset);
+      seenHashes.set(hash, asset);
+    }
+  };
+
+  const getSingleCleanImageHashBytes = async (targetNode) => {
+    if (typeof figma === 'undefined' || typeof figma.getImageByHash !== 'function') return null;
+    const visFills = Array.isArray(targetNode.fills)
+      ? targetNode.fills.filter((f) => f && f.visible !== false)
+      : [];
+    if (visFills.length !== 1) return null;
+    const f = visFills[0];
+    if (!f || f.type !== 'IMAGE' || !f.imageHash) return null;
+    if (f.scaleMode && f.scaleMode !== 'FILL' && f.scaleMode !== 'FIT') return null;
+    try {
+      const imgHandle = figma.getImageByHash(f.imageHash);
+      if (imgHandle && typeof imgHandle.getBytesAsync === 'function') {
+        const bytes = await imgHandle.getBytesAsync();
+        if (bytes && bytes.byteLength > 0) return bytes;
+      }
+    } catch (e) { }
+    return null;
+  };
+
+  for (let expIdx = 0; expIdx < pendingExports.length; expIdx += 1) {
+    const item = pendingExports[expIdx];
+    if (typeof onProgress === 'function') {
+      onProgress('assets', expIdx + 1, pendingExports.length, safeStr(item.node && item.node.name));
+    }
+    try {
+      if (item.kind === 'svg') {
+        const svgBytes = await item.node.exportAsync({ format: 'SVG' });
+        const svgString = utf8Decode(svgBytes);
+        // Reactive safeguard: if Figma emitted an <svg><image href="data:image/..."/></svg>, re-export as raster
+        if (/<image\b[^>]*\b(?:xlink:)?href\s*=\s*["']data:image\//i.test(svgString) && typeof item.node.exportAsync === 'function') {
+          const fallbackBytes = await item.node.exportAsync({
+            format: fmt,
+            constraint: { type: 'SCALE', value: scale },
+          });
+          await recordRasterAsset(item, fallbackBytes, 'img');
+          continue;
+        }
+        const hash = await sha256(svgBytes);
+        nodes[item.id].svg = {
+          sha256: hash,
+          markup: svgString,
+          color: extractSolidColor(item.node.fills) || '#1E293B',
+        };
+        if (!seenHashes.has(hash)) {
+          const asset = {
+            assetId: `svg-${item.node.id}`,
+            kind: 'svg',
+            sha256: hash,
+            mime: 'image/svg+xml',
+            byteLength: svgBytes.byteLength,
+            base64: bytesToBase64(svgBytes),
+            markup: svgString,
+          };
+          assets[hash] = asset;
+          assetPayloads.push(asset);
+          seenHashes.set(hash, asset);
+        }
+      } else if (item.kind === 'composite-bg') {
+        // Fast path: single clean IMAGE fill on container -> extract raw image bytes via getImageByHash without mutating canvas
+        let imgBytes = item.hasDirectImageFill ? await getSingleCleanImageHashBytes(item.node) : null;
+
+        if (!imgBytes) {
+          // Non-destructive composite background baking: lock HUG Auto-Layout dimensions,
+          // clear node strokes/effects/opacity (or strip CSS copies if read-only on INSTANCE),
+          // temporarily hide foreground nodes, export, and restore everything in `finally`.
+          const targetNode = item.node;
+          const prevVisibility = (item.fgNodes || []).map((n) => [n, n.visible]);
+          const prevLayoutState = {
+            hasLayout: Boolean(targetNode.layoutMode && targetNode.layoutMode !== 'NONE'),
+            pMode: targetNode.primaryAxisSizingMode,
+            cMode: targetNode.counterAxisSizingMode,
+            sH: targetNode.layoutSizingHorizontal,
+            sV: targetNode.layoutSizingVertical,
+            w: targetNode.width,
+            h: targetNode.height,
+          };
+          const prevStrokes = targetNode.strokes;
+          const prevEffects = targetNode.effects;
+          const prevOpacity = targetNode.opacity;
+          let clearedStrokes = false;
+          let clearedEffects = false;
+          let clearedOpacity = false;
+
+          try {
+            if (prevLayoutState.hasLayout) {
+              try {
+                if (prevLayoutState.pMode === 'AUTO') targetNode.primaryAxisSizingMode = 'FIXED';
+                if (prevLayoutState.cMode === 'AUTO') targetNode.counterAxisSizingMode = 'FIXED';
+                if (prevLayoutState.sH === 'HUG') targetNode.layoutSizingHorizontal = 'FIXED';
+                if (prevLayoutState.sV === 'HUG') targetNode.layoutSizingVertical = 'FIXED';
+              } catch (e) { }
+            }
+
+            try {
+              if (Array.isArray(prevStrokes) && prevStrokes.length > 0) {
+                targetNode.strokes = [];
+                if (Array.isArray(targetNode.strokes) && targetNode.strokes.length === 0) clearedStrokes = true;
+              } else {
+                clearedStrokes = true;
+              }
+            } catch (e) { }
+
+            try {
+              if (Array.isArray(prevEffects) && prevEffects.length > 0) {
+                targetNode.effects = [];
+                if (Array.isArray(targetNode.effects) && targetNode.effects.length === 0) clearedEffects = true;
+              } else {
+                clearedEffects = true;
+              }
+            } catch (e) { }
+
+            try {
+              if (typeof prevOpacity === 'number' && prevOpacity < 1) {
+                targetNode.opacity = 1;
+                if (targetNode.opacity === 1) clearedOpacity = true;
+              } else {
+                clearedOpacity = true;
+              }
+            } catch (e) { }
+
+            let allHidden = true;
+            for (const [fg] of prevVisibility) {
+              try {
+                fg.visible = false;
+                if (fg.visible !== false) allHidden = false;
+              } catch (e) {
+                allHidden = false;
+              }
+            }
+
+            if (!allHidden) {
+              const directFallback = await getSingleCleanImageHashBytes(targetNode);
+              if (directFallback) {
+                imgBytes = directFallback;
+              } else {
+                warnings.push({
+                  code: 'composite-bg-instance-fg-visible',
+                  nodeId: targetNode.id,
+                  message: `Could not hide foreground child inside "${safeStr(targetNode.name)}" (possibly locked INSTANCE) during composite background export.`,
+                });
+              }
+            }
+
+            if (!imgBytes) {
+              imgBytes = await targetNode.exportAsync({
+                format: fmt,
+                constraint: { type: 'SCALE', value: scale },
+              });
+            }
+          } finally {
+            for (const [fg, wasVisible] of prevVisibility) {
+              try { fg.visible = wasVisible; } catch (e) { }
+            }
+            try { if (clearedStrokes && prevStrokes !== undefined) targetNode.strokes = prevStrokes; } catch (e) { }
+            try { if (clearedEffects && prevEffects !== undefined) targetNode.effects = prevEffects; } catch (e) { }
+            try { if (clearedOpacity && prevOpacity !== undefined) targetNode.opacity = prevOpacity; } catch (e) { }
+            if (prevLayoutState.hasLayout) {
+              try {
+                if (prevLayoutState.pMode !== undefined) targetNode.primaryAxisSizingMode = prevLayoutState.pMode;
+                if (prevLayoutState.cMode !== undefined) targetNode.counterAxisSizingMode = prevLayoutState.cMode;
+                if (prevLayoutState.sH !== undefined) targetNode.layoutSizingHorizontal = prevLayoutState.sH;
+                if (prevLayoutState.sV !== undefined) targetNode.layoutSizingVertical = prevLayoutState.sV;
+              } catch (e) { }
+            }
+          }
+
+          if (!item.onResult && nodes[item.id] && nodes[item.id].style) {
+            const st = nodes[item.id].style;
+            if (!clearedStrokes) {
+              delete st.borderWidth;
+              delete st.borderColor;
+              delete st.borderGradient;
+              delete st.devModeBorder;
+              delete st.devModeBorderImage;
+            }
+            if (!clearedEffects) {
+              delete st.boxShadow;
+              delete st.devModeBoxShadow;
+            }
+            if (!clearedOpacity) {
+              delete st.opacity;
+            }
+          }
+        }
+
+        await recordRasterAsset(item, imgBytes, 'bg');
+      } else {
+        const imgBytes = await item.node.exportAsync({
+          format: fmt,
+          constraint: { type: 'SCALE', value: scale },
+        });
+        await recordRasterAsset(item, imgBytes, 'img');
+      }
+    } catch (err) {
+      warnings.push({
+        code: 'asset-export-failed',
+        nodeId: item.node.id,
+        message: `Could not export asset for "${safeStr(item.node.name)}": ${err && err.message ? err.message : err}`,
+      });
+    }
+  }
+
+  for (const n of Object.values(nodes)) {
+    if (n && Array.isArray(n.extractedImages)) {
+      n.extractedImages = n.extractedImages.filter(Boolean);
+    }
+  }
+
+  const document = {
+    kind: 'f2e.document',
+    schemaVersion: '1.0.0',
+    revision: uuid(),
+    title: safeStr(selection[0] && selection[0].name, 'Figma Design'),
+    source: {
+      provider: 'figma-plugin',
+      fileKey,
+      rootNodeId: safeStr(selection[0] && selection[0].id, ''),
+    },
+    roots: finalRoots,
+    nodes,
+    assets,
+    tokens: designTokens,
+    warnings,
+  };
+
+  return { document, assetPayloads };
+}
+
+const VISUAL_NAME_TOKENS = new Set(['icon', 'ic', 'svg', 'logo', 'img', 'image', 'pic', 'photo', 'avatar', 'thumb', 'thumbnail']);
+function collectVisualImageDescendants(node, options = {}, depth = 0) {
+  if (!node || depth > 4) return [];
+  const { includeVectors = true, minVectorSize = 0 } = options;
+  const out = [];
+  for (const child of visibleChildren(node)) {
+    if (!child || child.type === 'TEXT') continue;
+    if (hasImageFill(child)) {
+      out.push(child);
+      continue;
+    }
+    if (collectTextDescendants(child).length === 0 && hasDescendantImageFill(child)) {
+      out.push(child);
+      continue;
+    }
+    if (includeVectors && isVectorGraphic(child)) {
+      const w = Number(child.width) || 0;
+      const h = Number(child.height) || 0;
+      if (minVectorSize <= 0 || w >= minVectorSize || h >= minVectorSize) {
+        out.push(child);
+        continue;
+      }
+    }
+    out.push(...collectVisualImageDescendants(child, options, depth + 1));
+  }
+  return out;
+}
+function findFirstVisualDescendant(node, depth = 0) {
   if (!node || depth > 4) return null;
   const kids = visibleChildren(node);
   for (const child of kids) {
     if (child.type === 'TEXT') continue;
     if (hasImageFill(child)) return child;
+    const hasChildTexts = collectTextDescendants(child).length > 0;
+    if (!hasChildTexts && hasDescendantImageFill(child)) return child;
     if (isVectorGraphic(child)) return child;
     const t = child.type;
     if (t === 'VECTOR' || t === 'LINE' || t === 'ELLIPSE' || t === 'POLYGON' || t === 'STAR' || t === 'BOOLEAN_OPERATION') {
       return child;
     }
-    const lower = safeStr(child.name).toLowerCase();
-    if (['icon', 'ic', 'svg', 'logo', 'img', 'image', 'pic'].some((kw) => lower.includes(kw))) {
-      return child;
+    if (!hasChildTexts) {
+      const tokens = safeStr(child.name).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      if (tokens.some((tok) => VISUAL_NAME_TOKENS.has(tok))) {
+        return child;
+      }
     }
     const found = findFirstVisualDescendant(child, depth + 1);
     if (found) return found;
   }
   return null;
 }
+
+
+
+  // ── Module: src/exporters/compiler-helpers.js ──
+/**
+ * Shared Elementor v3/v4 compiler helpers (box values, typography, box styles, subtree collectors).
+ */
+function boxValue(box, isLinked = false) {
+  const t = Math.round(Number(box && box.top) || 0);
+  const r = Math.round(Number(box && box.right) || 0);
+  const b = Math.round(Number(box && box.bottom) || 0);
+  const l = Math.round(Number(box && box.left) || 0);
+  return {
+    unit: (box && box.unit) || 'px',
+    top: String(t),
+    right: String(r),
+    bottom: String(b),
+    left: String(l),
+    isLinked: Boolean(box && box.isLinked !== undefined ? box.isLinked : (isLinked || (t === r && r === b && b === l))),
+  };
+}
+function scaleBox(box, factor, cap) {
+  if (box && box.unit && box.unit !== 'px') {
+    return {
+      top: Number(box.top) || 0,
+      right: Number(box.right) || 0,
+      bottom: Number(box.bottom) || 0,
+      left: Number(box.left) || 0,
+      isLinked: Boolean(box.isLinked),
+      unit: box.unit,
+    };
+  }
+  return {
+    top: Math.min(cap, Math.round((Number(box && box.top) || 0) * factor)),
+    right: Math.min(cap, Math.round((Number(box && box.right) || 0) * factor)),
+    bottom: Math.min(cap, Math.round((Number(box && box.bottom) || 0) * factor)),
+    left: Math.min(cap, Math.round((Number(box && box.left) || 0) * factor)),
+    isLinked: false,
+    unit: 'px',
+  };
+}
+function flexGapValue(layout) {
+  const main = Math.round(Number(layout && layout.gap) || 0);
+  // If Figma gap is massive (>160px) because designer used fixed itemSpacing instead of SPACE_BETWEEN,
+  // clamp gap to 24px and let justify: space-between handle distribution!
+  const effectiveMain = main > 160 ? 24 : main;
+  const cross = layout && layout.wrap && typeof layout.rowGap === 'number' ? Math.round(layout.rowGap) : effectiveMain;
+  const isRow = ((layout && layout.direction) || 'column') === 'row';
+  const col = isRow ? effectiveMain : cross;
+  const row = isRow ? cross : effectiveMain;
+  return {
+    unit: 'px',
+    size: row,
+    column: String(col),
+    row: String(row),
+    isLinked: col === row,
+  };
+}
+function applyGlobalColor() {
+  // Exact Figma hex colors are preserved directly on Elementor controls.
+  // Verified Active Kit `__globals__` IDs are bound server-side by WordPress `GlobalStyles::bindGlobalsToElements()`.
+}
+function appendCustomCss(settings, cssBlock) {
+  if (!settings || !cssBlock || !String(cssBlock).trim()) return;
+  const block = String(cssBlock).trim();
+  settings.custom_css = settings.custom_css ? `${settings.custom_css}\n${block}` : block;
+}
+
+/**
+ * Zero-Loss Dev Mode Residual CSS Passthrough:
+ * Emits Figma Dev Mode properties that Elementor has no native UI control for
+ * (multi-stop gradients, multi-layer box-shadow, backdrop-filter, filter, mix-blend-mode,
+ * transform, aspect-ratio, clip-path, opacity, -webkit-text-stroke) into `custom_css`.
+ */
+function applyDevModeResidualCss(settings, style = {}, targetSelector = 'selector') {
+  if (!settings || !style) return;
+  const decls = [];
+  if (style.devModeBackgroundCss && !style.backgroundImage && !/url\(\s*</i.test(style.devModeBackgroundCss)) {
+    decls.push(`  background: ${style.devModeBackgroundCss};`);
+  }
+  if (style.devModeBoxShadow) {
+    decls.push(`  box-shadow: ${style.devModeBoxShadow};`);
+  }
+  if (typeof style.opacity === 'number' && style.opacity >= 0 && style.opacity < 1) {
+    decls.push(`  opacity: ${style.opacity};`);
+  }
+  if (style.devModeExtraCss && typeof style.devModeExtraCss === 'object') {
+    for (const [prop, val] of Object.entries(style.devModeExtraCss)) {
+      if (!val) continue;
+      // Avoid emitting -webkit-text-stroke on outer container if handled on text selector
+      if (targetSelector === 'selector' && prop.startsWith('-webkit-text-stroke')) continue;
+      decls.push(`  ${prop}: ${val};`);
+    }
+  }
+  if (decls.length > 0) {
+    appendCustomCss(settings, `${targetSelector} {\n${decls.join('\n')}\n}`);
+  }
+}
+function applyTextShadowAndEffects(settings, text = {}, selectorTarget = 'selector') {
+  if (!settings || !text) return;
+  if (text.textShadow && typeof text.textShadow === 'object') {
+    settings.text_shadow_text_shadow_type = 'yes';
+    settings.text_shadow_text_shadow = {
+      horizontal: Math.round(Number(text.textShadow.horizontal) || 0),
+      vertical: Math.round(Number(text.textShadow.vertical) || 0),
+      blur: Math.round(Number(text.textShadow.blur) || 0),
+      color: text.textShadow.color || 'rgba(0,0,0,0.25)',
+    };
+  }
+  if (text.textStrokeCss) {
+    appendCustomCss(settings, `${selectorTarget} {\n  -webkit-text-stroke: ${text.textStrokeCss};\n}`);
+  }
+}
+function applyCommonBoxStyle(settings, style = {}, resolveMedia, options = {}) {
+  if (style.gradient) {
+    settings.background_background = 'gradient';
+    settings.background_gradient_type = style.gradient.type;
+    settings.background_color = style.gradient.color1;
+    settings.background_color_stop = { unit: '%', size: style.gradient.stop1, sizes: [] };
+    settings.background_color_b = style.gradient.color2;
+    settings.background_color_b_stop = { unit: '%', size: style.gradient.stop2, sizes: [] };
+    settings.background_gradient_angle = { unit: 'deg', size: style.gradient.angle, sizes: [] };
+  } else if (style.background) {
+    settings.background_background = 'classic';
+    settings.background_color = style.background;
+  }
+
+  if (style.backgroundImage && resolveMedia) {
+    const media = resolveMedia(style.backgroundImage, style.backgroundImageDataUri);
+    if (media.url) {
+      settings.background_background = 'classic';
+      settings.background_image = media;
+      settings.background_size = style.backgroundSize || 'cover';
+      settings.background_position = style.backgroundPosition || 'center center';
+      settings.background_repeat = style.backgroundRepeat || 'no-repeat';
+    }
+  }
+
+  if (style.radius) {
+    settings.border_radius = boxValue(style.radius);
+  }
+
+  const bt = Math.round(Number(style.borderWidth && style.borderWidth.top) || 0);
+  const br = Math.round(Number(style.borderWidth && style.borderWidth.right) || 0);
+  const bb = Math.round(Number(style.borderWidth && style.borderWidth.bottom) || 0);
+  const bl = Math.round(Number(style.borderWidth && style.borderWidth.left) || 0);
+  const hasAnyBorderWidth = bt > 0 || br > 0 || bb > 0 || bl > 0;
+  const isVerticalDividerOnly = bt === 0 && bb === 0 && (br > 0 || bl > 0);
+
+  if (hasAnyBorderWidth && style.borderColor) {
+    settings.border_border = style.borderStyle || 'solid';
+    settings.border_width = boxValue(style.borderWidth);
+    settings.border_color = style.borderColor;
+    // When a column divider border is right-only or left-only on Desktop, clear it on Mobile where columns stack vertically
+    if (isVerticalDividerOnly) {
+      settings.border_width_mobile = boxValue({ top: 0, right: 0, bottom: 0, left: 0 }, true);
+    }
+  }
+
+  // Linear Gradient Border Solution:
+  // Elementor does not natively support linear-gradient on border-color.
+  // Preserve EXACT per-side border widths (`border-width: T R B L !important;`) so 1-sided borders
+  // (e.g. `border-right: 1px solid`) NEVER turn into 4-sided full box borders!
+  if (options.linearBorder !== false && style.borderGradient && hasAnyBorderWidth) {
+    const g = style.borderGradient;
+    const gradCss = style.devModeBorderImage && style.devModeBorderImage.startsWith('linear-gradient')
+      ? style.devModeBorderImage
+      : `linear-gradient(${g.angle}deg, ${g.color1} ${g.stop1}%, ${g.color2} ${g.stop2}%)`;
+    const bgSolid = style.background || '#ffffff';
+    const bgLayer = style.gradient
+      ? `linear-gradient(${style.gradient.angle}deg, ${style.gradient.color1} ${style.gradient.stop1}%, ${style.gradient.color2} ${style.gradient.stop2}%)`
+      : `linear-gradient(${bgSolid}, ${bgSolid})`;
+    const bwCss = (bt === br && br === bb && bb === bl) ? `${bt}px` : `${bt}px ${br}px ${bb}px ${bl}px`;
+    const allFourSides = bt > 0 && br > 0 && bb > 0 && bl > 0;
+
+    let borderSnippet = '';
+    if (style.radius && allFourSides) {
+      borderSnippet = `selector {\n  border-style: solid !important;\n  border-color: transparent !important;\n  border-width: ${bwCss} !important;\n  background-image: ${bgLayer}, ${gradCss} !important;\n  background-origin: border-box !important;\n  background-clip: padding-box, border-box !important;\n}`;
+    } else {
+      borderSnippet = `selector {\n  border-style: solid !important;\n  border-width: ${bwCss} !important;\n  border-image: ${gradCss} 1 !important;\n}`;
+      if (isVerticalDividerOnly) {
+        borderSnippet += `\n@media (max-width: 767px) {\n  selector { border-width: 0 !important; }\n}`;
+      }
+    }
+    appendCustomCss(settings, borderSnippet);
+  }
+
+  if (style.boxShadow) {
+    settings.box_shadow_box_shadow_type = 'yes';
+    settings.box_shadow_box_shadow = style.boxShadow;
+    if (style.boxShadow.position === 'inset') {
+      settings.box_shadow_box_shadow_position = 'inset';
+    }
+  }
+
+  applyDevModeResidualCss(settings, style, 'selector');
+}
+function applyTypographySettings(settings, prefix, text = {}, responsive = {}) {
+  if (!text) return;
+  settings[`${prefix}_typography`] = 'custom';
+  if (text.fontFamily) settings[`${prefix}_font_family`] = text.fontFamily;
+  if (text.fontWeight) settings[`${prefix}_font_weight`] = String(text.fontWeight);
+  if (text.fontStyle) settings[`${prefix}_font_style`] = text.fontStyle;
+  if (text.transform) settings[`${prefix}_text_transform`] = text.transform;
+  if (text.decoration) settings[`${prefix}_text_decoration`] = text.decoration;
+
+  const size = Number(text.fontSize) || 16;
+  settings[`${prefix}_font_size`] = { unit: 'px', size, sizes: [] };
+
+  // Rule-based responsive typography scaling matching professional Elementor dev standards
+  let tabletSize;
+  let mobileSize;
+  if (responsive && responsive.tablet && responsive.tablet.fontSize) {
+    tabletSize = responsive.tablet.fontSize;
+  } else if (size >= 40) {
+    tabletSize = Math.round(size * 0.78);
+  } else if (size >= 28) {
+    tabletSize = Math.round(size * 0.82);
+  } else if (size >= 20) {
+    tabletSize = Math.round(size * 0.88);
+  } else if (size >= 15) {
+    tabletSize = Math.max(14, size - 1);
+  } else {
+    tabletSize = size;
+  }
+
+  if (responsive && responsive.mobile && responsive.mobile.fontSize) {
+    mobileSize = responsive.mobile.fontSize;
+  } else if (size >= 40) {
+    mobileSize = Math.max(22, Math.round(size * 0.60));
+  } else if (size >= 28) {
+    mobileSize = Math.max(18, Math.round(size * 0.70));
+  } else if (size >= 20) {
+    mobileSize = Math.max(16, Math.round(size * 0.80));
+  } else if (size >= 15) {
+    mobileSize = Math.max(13, size - 1);
+  } else {
+    mobileSize = size;
+  }
+
+  settings[`${prefix}_font_size_tablet`] = { unit: 'px', size: Number(tabletSize), sizes: [] };
+  settings[`${prefix}_font_size_mobile`] = { unit: 'px', size: Number(mobileSize), sizes: [] };
+
+  if (text.lineHeight) {
+    settings[`${prefix}_line_height`] = {
+      unit: text.lineHeightUnit || 'px',
+      size: Number(text.lineHeight),
+      sizes: [],
+    };
+  }
+  if (typeof text.letterSpacing === 'number' && text.letterSpacing !== 0) {
+    settings[`${prefix}_letter_spacing`] = {
+      unit: text.letterSpacingUnit || 'px',
+      size: Number(text.letterSpacing),
+      sizes: [],
+    };
+  }
+}
+function inferHeadingTag(node) {
+  const name = String((node.content && (node.content.rawName || node.content.name)) || '').toLowerCase();
+  const match = /\bh([1-6])\b/.exec(name);
+  if (match) return `h${match[1]}`;
+  const size = Number(node.text && node.text.fontSize) || 24;
+  if (size >= 44) return 'h1';
+  if (size >= 32) return 'h2';
+  if (size >= 24) return 'h3';
+  if (size >= 20) return 'h4';
+  return 'h5';
+}
+function getTextGradientCss(text) {
+  if (!text) return null;
+  if (typeof text.gradientCss === 'string' && text.gradientCss.includes('gradient')) {
+    return text.gradientCss.trim();
+  }
+  if (text.gradient && text.gradient.color1 && text.gradient.color2) {
+    const g = text.gradient;
+    return `linear-gradient(${g.angle ?? 180}deg, ${g.color1} ${g.stop1 ?? 0}%, ${g.color2} ${g.stop2 ?? 100}%)`;
+  }
+  return null;
+}
+function buildTextClipRule(selectorTarget, gradCss) {
+  return `${selectorTarget} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+}
+function collectSubtreeTexts(node, nodes) {
+  if (!node) return [];
+  if (Array.isArray(node.extractedTexts) && node.extractedTexts.length > 0 && (!node.children || node.children.length === 0)) {
+    return node.extractedTexts.map((t, idx) => ({
+      id: `${node.id}-txt-${idx}`,
+      text: t,
+      responsive: node.responsive,
+    }));
+  }
+  const out = [];
+  const walk = (n) => {
+    if (!n) return;
+    if (n.text && n.text.characters) out.push(n);
+    for (const cid of n.children || []) walk(nodes[cid]);
+  };
+  walk(node);
+  return out;
+}
+function scopeSvgIds(svgMarkup, scopeSuffix) {
+  if (typeof svgMarkup !== 'string' || !svgMarkup.includes('<svg')) return svgMarkup || '';
+  const suffix = String(scopeSuffix || 'f2e').replace(/[^a-zA-Z0-9_-]/g, '');
+  if (!suffix) return svgMarkup;
+
+  const ids = [];
+  const idAttrRegex = /\bid\s*=\s*(["'])([^"']+)\1/g;
+  let match;
+  while ((match = idAttrRegex.exec(svgMarkup)) !== null) {
+    if (match[2] && !ids.includes(match[2])) {
+      ids.push(match[2]);
+    }
+  }
+  if (ids.length === 0) return svgMarkup;
+
+  ids.sort((a, b) => b.length - a.length);
+  const escRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  let out = svgMarkup;
+  for (const oldId of ids) {
+    const newId = `${oldId}_${suffix}`;
+    const eId = escRegex(oldId);
+    out = out
+      .replace(new RegExp(`(\\bid\\s*=\\s*)(["'])${eId}\\2`, 'g'), `$1$2${newId}$2`)
+      .replace(new RegExp(`url\\(\\s*(["']?)#${eId}\\1\\s*\\)`, 'g'), `url(#${newId})`)
+      .replace(new RegExp(`((?:xlink:)?href\\s*=\\s*)(["'])#${eId}\\2`, 'g'), `$1$2#${newId}$2`);
+  }
+  return out;
+}
+function svgMarkupToDataUri(markup) {
+  if (!markup || typeof markup !== 'string') return '';
+  return `data:image/svg+xml;base64,${bytesToBase64(utf8Bytes(markup))}`;
+}
+function collectSubtreeImages(node, nodes) {
+  if (!node) return [];
+  if (Array.isArray(node.extractedImages) && node.extractedImages.length > 0) {
+    return node.extractedImages.filter(Boolean);
+  }
+  const out = [];
+  const seen = new Set();
+  const pushUnique = (imgObj) => {
+    if (!imgObj || (!imgObj.sha256 && !imgObj.dataUri)) return;
+    const key = `${imgObj.sha256 || ''}|${(imgObj.dataUri || '').slice(0, 48)}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push(imgObj);
+  };
+  const walk = (n) => {
+    if (!n) return;
+    if (Array.isArray(n.extractedImages) && n.extractedImages.length > 0) {
+      for (const ei of n.extractedImages) pushUnique(ei);
+    }
+    if (n.image) pushUnique(n.image);
+    if (n.raster) pushUnique(n.raster);
+    if (!n.image && !n.raster && n.style && n.style.backgroundImage) {
+      pushUnique({ sha256: n.style.backgroundImage, dataUri: n.style.backgroundImageDataUri || '' });
+    }
+    if (!n.image && !n.raster && !(n.style && n.style.backgroundImage) && n.svg) {
+      pushUnique({
+        sha256: n.svg.sha256 || '',
+        dataUri: n.svg.markup ? svgMarkupToDataUri(n.svg.markup) : '',
+      });
+    }
+    for (const cid of n.children || []) walk(nodes[cid]);
+  };
+  walk(node);
+  return out;
+}
+function escapeHtml(str) {
+  return String(str || '')
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;');
+}
+
 
 
   // ── Module: src/exporters/fidelity-verifier.js ──
@@ -2848,134 +4674,184 @@ const UNVERIFIED_GLOBAL_IDS = new Set([
       }
     }
 
-    // ── 2. Auto-Heal `icon-box` with Raw `<svg>` String or Single-Text Card ──
+    // ── 2. Auto-Heal `icon-box` with Raster Asset or Raw `<svg>` String ──
     if (el.elType === 'widget' && el.widgetType === 'icon-box') {
       const selIcon = settings.selected_icon;
-      const hasRawSvg = selIcon && selIcon.library === 'svg' && typeof selIcon.value === 'string' && selIcon.value.includes('<svg');
-      const hasOnlyOneText = !settings.description_text || String(settings.description_text).trim() === '';
-      const hasRealSvgPaths = hasRawSvg && /<(path|circle|rect|polygon|polyline|line|g|ellipse)\b/i.test(selIcon.value);
+      const isStringRasterOrUrl = selIcon && selIcon.library === 'svg' && typeof selIcon.value === 'string' && !selIcon.value.includes('<svg') && selIcon.value.trim() !== '';
+      const isObjRaster = selIcon && selIcon.library === 'svg' && selIcon.value && typeof selIcon.value === 'object' && selIcon.value.url && /^data:image\/(png|jpeg|jpg|webp|gif)|(\.(png|jpe?g|webp|gif)(\?|$))/i.test(selIcon.value.url);
 
-      if (hasRawSvg && (hasOnlyOneText || hasRealSvgPaths)) {
-        const svgMarkup = selIcon.value.trim();
-        const wMatch = svgMarkup.match(/\bwidth=["'](\d+(?:\.\d+)?)/i);
-        const hMatch = svgMarkup.match(/\bheight=["'](\d+(?:\.\d+)?)/i);
-        const iconW = wMatch ? Math.round(parseFloat(wMatch[1])) : 40;
-        const iconH = hMatch ? Math.round(parseFloat(hMatch[1])) : 40;
-        const isRowBox = settings.position === 'left' || settings.position === 'right';
+      if (isStringRasterOrUrl || isObjRaster) {
+        const imgObj = typeof selIcon.value === 'object'
+          ? { id: selIcon.value.id || '', url: selIcon.value.url }
+          : { id: '', url: selIcon.value };
+        el.widgetType = 'image-box';
+        settings.image = imgObj;
+        settings.thumbnail_size = 'full';
+        if (settings.icon_space !== undefined && settings.image_space === undefined) {
+          settings.image_space = settings.icon_space;
+          delete settings.icon_space;
+        }
+        if (typeof settings.custom_css === 'string') {
+          settings.custom_css = settings.custom_css.replace(/\.elementor-icon-box-title/g, '.elementor-image-box-title');
+        }
+        delete settings.selected_icon;
+        delete settings.primary_color;
+        delete settings.icon_size;
+        recordFix(nodeId, title, 'Chuyển đổi Icon Box chứa ảnh raster sang Image Box hợp lệ');
+      } else {
+        const hasRawSvg = selIcon && selIcon.library === 'svg' && typeof selIcon.value === 'string' && selIcon.value.includes('<svg');
+        const hasOnlyOneText = !settings.description_text || String(settings.description_text).trim() === '';
+        const hasRealSvgPaths = hasRawSvg && /<(path|circle|rect|polygon|polyline|line|g|ellipse)\b/i.test(selIcon.value);
 
-        const iconWidget = {
-          id: shortId(`${el.id}-svg`),
-          elType: 'widget',
-          widgetType: 'html',
-          isInner: false,
-          settings: {
-            html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${iconW}px;height:${iconH}px;line-height:0;">${svgMarkup}</div>`,
-            _element_width: 'auto',
-            _flex_size: 'none',
-            _title: `${title} Icon`,
-          },
-          elements: [],
-        };
+        if (hasRawSvg && (hasOnlyOneText || hasRealSvgPaths)) {
+          const svgWidgetId = shortId(`${el.id}-svg`);
+          const svgMarkup = scopeSvgIds(selIcon.value.trim(), svgWidgetId);
+          const wMatch = svgMarkup.match(/\bwidth=["'](\d+(?:\.\d+)?)/i);
+          const hMatch = svgMarkup.match(/\bheight=["'](\d+(?:\.\d+)?)/i);
+          const iconW = wMatch ? Math.round(parseFloat(wMatch[1])) : 40;
+          const iconH = hMatch ? Math.round(parseFloat(hMatch[1])) : 40;
+          const isRowBox = settings.position === 'left' || settings.position === 'right';
 
-        const titleColor = settings.title_color || '#000000';
-        const fontFamily = settings.title_typography_font_family || 'Inter';
-        const fontWeight = String(settings.title_typography_font_weight || (hasOnlyOneText ? '400' : '600'));
-        const fontSize = settings.title_typography_font_size || { unit: 'px', size: 16, sizes: [] };
-        const fontSizeTablet = settings.title_typography_font_size_tablet || { unit: 'px', size: 15, sizes: [] };
-        const fontSizeMobile = settings.title_typography_font_size_mobile || { unit: 'px', size: 15, sizes: [] };
-        const lineHeight = settings.title_typography_line_height || { unit: 'px', size: 24, sizes: [] };
-        const rawTitle = String(settings.title_text || '').trim();
+          const iconWidget = {
+            id: svgWidgetId,
+            elType: 'widget',
+            widgetType: 'html',
+            isInner: false,
+            settings: {
+              html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${iconW}px;height:${iconH}px;line-height:0;">${svgMarkup}</div>`,
+              _element_width: 'auto',
+              _flex_size: 'none',
+              _title: `${title} Icon`,
+            },
+            elements: [],
+          };
 
-        const textWidget = {
-          id: shortId(`${el.id}-txt`),
-          elType: 'widget',
-          widgetType: 'text-editor',
-          isInner: false,
-          settings: {
-            editor: `<p style="margin:0;">${rawTitle}</p>`,
-            align: 'left',
-            text_color: titleColor,
-            typography_typography: 'custom',
-            typography_font_family: fontFamily,
-            typography_font_weight: fontWeight,
-            typography_font_style: 'normal',
-            typography_font_size: fontSize,
-            typography_font_size_tablet: fontSizeTablet,
-            typography_font_size_mobile: fontSizeMobile,
-            typography_line_height: lineHeight,
-            _title: `${title} Text`,
-          },
-          elements: [],
-        };
+          const titleColor = settings.title_color || '#000000';
+          const fontFamily = settings.title_typography_font_family || 'Inter';
+          const fontWeight = String(settings.title_typography_font_weight || (hasOnlyOneText ? '400' : '600'));
+          const fontSize = settings.title_typography_font_size || { unit: 'px', size: 16, sizes: [] };
+          const fontSizeTablet = settings.title_typography_font_size_tablet || { unit: 'px', size: 15, sizes: [] };
+          const fontSizeMobile = settings.title_typography_font_size_mobile || { unit: 'px', size: 15, sizes: [] };
+          const lineHeight = settings.title_typography_line_height || { unit: 'px', size: 24, sizes: [] };
+          const rawTitle = String(settings.title_text || '').trim();
 
-        const childElements = [iconWidget, textWidget];
-
-        if (!hasOnlyOneText) {
-          const rawDesc = String(settings.description_text || '').trim();
-          childElements.push({
-            id: shortId(`${el.id}-desc`),
+          const textWidget = {
+            id: shortId(`${el.id}-txt`),
             elType: 'widget',
             widgetType: 'text-editor',
             isInner: false,
             settings: {
-              editor: `<p style="margin:0;">${rawDesc}</p>`,
+              editor: `<p style="margin:0;">${escapeHtml(rawTitle)}</p>`,
               align: 'left',
-              text_color: settings.description_color || 'rgba(0,0,0,0.7)',
+              text_color: titleColor,
               typography_typography: 'custom',
-              typography_font_family: settings.description_typography_font_family || fontFamily,
-              typography_font_weight: String(settings.description_typography_font_weight || '400'),
-              typography_font_size: settings.description_typography_font_size || { unit: 'px', size: 14, sizes: [] },
-              typography_line_height: settings.description_typography_line_height || { unit: 'px', size: 20, sizes: [] },
-              _title: `${title} Description`,
+              typography_font_family: fontFamily,
+              typography_font_weight: fontWeight,
+              typography_font_style: 'normal',
+              typography_font_size: fontSize,
+              typography_font_size_tablet: fontSizeTablet,
+              typography_font_size_mobile: fontSizeMobile,
+              typography_line_height: lineHeight,
+              _title: `${title} Text`,
             },
             elements: [],
-          });
-        }
-
-        const itemGap = (irNode && irNode.layout && typeof irNode.layout.gap === 'number') ? irNode.layout.gap : 24;
-        const irPad = (irNode && irNode.layout && irNode.layout.padding) || { top: 0, right: 0, bottom: 0, left: 0 };
-        const irBw = irNode && irNode.style && irNode.style.borderWidth;
-        const irBc = irNode && irNode.style && irNode.style.borderColor;
-
-        el.elType = 'container';
-        delete el.widgetType;
-        el.isInner = true;
-        el.settings = {
-          container_type: 'flex',
-          flex_direction: isRowBox ? 'row' : 'column',
-          flex_gap: { unit: 'px', size: itemGap, column: String(itemGap), row: String(itemGap), isLinked: true },
-          flex_justify_content: 'flex-start',
-          flex_align_items: isRowBox ? 'center' : 'flex-start',
-          content_width: 'full',
-          padding: {
-            unit: 'px',
-            top: String(irPad.top || 0),
-            right: String(irPad.right || 0),
-            bottom: String(irPad.bottom || 0),
-            left: String(irPad.left || 0),
-            isLinked: irPad.top === irPad.right && irPad.right === irPad.bottom && irPad.bottom === irPad.left,
-          },
-          margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true },
-          _flex_size: settings._flex_size || 'grow',
-          _f2e_node_id: nodeId,
-          _title: title,
-        };
-        if (irBw && irBc) {
-          el.settings.border_border = 'solid';
-          el.settings.border_width = {
-            unit: 'px',
-            top: String(irBw.top || 0),
-            right: String(irBw.right || 0),
-            bottom: String(irBw.bottom || 0),
-            left: String(irBw.left || 0),
-            isLinked: Boolean(irBw.isLinked),
           };
-          el.settings.border_color = irBc;
-        }
-        el.elements = childElements;
-        el._healedFromIconBox = true;
 
-        recordFix(nodeId, title, 'Chuyển đổi Icon Box chứa Inline SVG thành Flexbox Container (SVG + Text) để hiển thị 100% icon vector và căn lề trái');
+          const childElements = [iconWidget, textWidget];
+
+          if (!hasOnlyOneText) {
+            const rawDesc = String(settings.description_text || '').trim();
+            const descHtml = rawDesc
+              .split(/\n+/)
+              .map((line) => `<p style="margin:0;">${escapeHtml(line)}</p>`)
+              .join('');
+            childElements.push({
+              id: shortId(`${el.id}-desc`),
+              elType: 'widget',
+              widgetType: 'text-editor',
+              isInner: false,
+              settings: {
+                editor: descHtml || '<p style="margin:0;"></p>',
+                align: 'left',
+                text_color: settings.description_color || 'rgba(0,0,0,0.7)',
+                typography_typography: 'custom',
+                typography_font_family: settings.description_typography_font_family || fontFamily,
+                typography_font_weight: String(settings.description_typography_font_weight || '400'),
+                typography_font_size: settings.description_typography_font_size || { unit: 'px', size: 14, sizes: [] },
+                typography_line_height: settings.description_typography_line_height || { unit: 'px', size: 20, sizes: [] },
+                _title: `${title} Description`,
+              },
+              elements: [],
+            });
+          }
+
+          const itemGap = (irNode && irNode.layout && typeof irNode.layout.gap === 'number') ? irNode.layout.gap : 24;
+          const irPad = (irNode && irNode.layout && irNode.layout.padding) || { top: 0, right: 0, bottom: 0, left: 0 };
+          const irBw = irNode && irNode.style && irNode.style.borderWidth;
+          const irBc = irNode && irNode.style && irNode.style.borderColor;
+          const prevSettings = settings;
+
+          el.elType = 'container';
+          delete el.widgetType;
+          el.isInner = true;
+          el.settings = {
+            container_type: 'flex',
+            flex_direction: isRowBox ? 'row' : 'column',
+            flex_gap: { unit: 'px', size: itemGap, column: String(itemGap), row: String(itemGap), isLinked: true },
+            flex_justify_content: 'flex-start',
+            flex_align_items: isRowBox ? 'center' : 'flex-start',
+            content_width: 'full',
+            padding: {
+              unit: 'px',
+              top: String(irPad.top || 0),
+              right: String(irPad.right || 0),
+              bottom: String(irPad.bottom || 0),
+              left: String(irPad.left || 0),
+              isLinked: irPad.top === irPad.right && irPad.right === irPad.bottom && irPad.bottom === irPad.left,
+            },
+            margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true },
+            _flex_size: prevSettings._flex_size || 'grow',
+            _f2e_node_id: nodeId,
+            _title: title,
+          };
+          if (prevSettings._background_background) {
+            el.settings.background_background = prevSettings._background_background;
+            if (prevSettings._background_color) el.settings.background_color = prevSettings._background_color;
+            if (prevSettings._background_gradient_type) el.settings.background_gradient_type = prevSettings._background_gradient_type;
+            if (prevSettings._background_color_stop) el.settings.background_color_stop = prevSettings._background_color_stop;
+            if (prevSettings._background_color_b) el.settings.background_color_b = prevSettings._background_color_b;
+            if (prevSettings._background_color_b_stop) el.settings.background_color_b_stop = prevSettings._background_color_b_stop;
+            if (prevSettings._background_gradient_angle) el.settings.background_gradient_angle = prevSettings._background_gradient_angle;
+            if (prevSettings._background_image) el.settings.background_image = prevSettings._background_image;
+          }
+          if (prevSettings._border_radius) {
+            el.settings.border_radius = prevSettings._border_radius;
+          }
+          if (prevSettings._box_shadow_box_shadow_type) {
+            el.settings.box_shadow_box_shadow_type = prevSettings._box_shadow_box_shadow_type;
+            if (prevSettings._box_shadow_box_shadow) el.settings.box_shadow_box_shadow = prevSettings._box_shadow_box_shadow;
+            if (prevSettings._box_shadow_box_shadow_position) el.settings.box_shadow_box_shadow_position = prevSettings._box_shadow_box_shadow_position;
+          }
+          if (prevSettings.custom_css) {
+            el.settings.custom_css = prevSettings.custom_css;
+          }
+          if (irBw && irBc) {
+            el.settings.border_border = 'solid';
+            el.settings.border_width = {
+              unit: 'px',
+              top: String(irBw.top || 0),
+              right: String(irBw.right || 0),
+              bottom: String(irBw.bottom || 0),
+              left: String(irBw.left || 0),
+              isLinked: Boolean(irBw.isLinked),
+            };
+            el.settings.border_color = irBc;
+          }
+          el.elements = childElements;
+          el._healedFromIconBox = true;
+
+          recordFix(nodeId, title, 'Chuyển đổi Icon Box chứa Inline SVG thành Flexbox Container (SVG + Text) để hiển thị 100% icon vector và căn lề trái');
+        }
       }
     }
 
@@ -3024,7 +4900,7 @@ const UNVERIFIED_GLOBAL_IDS = new Set([
               widgetType: 'text-editor',
               isInner: false,
               settings: {
-                editor: `<p style="margin:0;">${it.body || it.title || ''}</p>`,
+                editor: `<p style="margin:0;">${escapeHtml(it.body || it.title || '')}</p>`,
                 align: 'left',
               },
               elements: [],
@@ -3077,7 +4953,7 @@ const UNVERIFIED_GLOBAL_IDS = new Set([
           counterHealed = true;
         }
         if (gradCss && (!settings.custom_css || !settings.custom_css.includes('background-clip'))) {
-          settings.custom_css = `selector .elementor-counter-number-wrapper, selector .elementor-counter-number {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+          appendCustomCss(settings, `selector .elementor-counter-number-wrapper, selector .elementor-counter-number {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`);
           counterHealed = true;
         }
         if (counterHealed) {
@@ -3086,7 +4962,7 @@ const UNVERIFIED_GLOBAL_IDS = new Set([
       } else if ((el.widgetType === 'heading' || el.widgetType === 'text-editor') && gradCss) {
         if (!settings.custom_css || !settings.custom_css.includes('background-clip')) {
           const targetSel = el.widgetType === 'heading' ? 'selector .elementor-heading-title' : 'selector';
-          settings.custom_css = `${targetSel} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+          appendCustomCss(settings, `${targetSel} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`);
           recordFix(nodeId, title, 'Bổ sung hiệu ứng chữ chuyển màu (background-clip: text) từ Figma Dev Mode');
         }
       }
@@ -3181,11 +5057,21 @@ const UNVERIFIED_GLOBAL_IDS = new Set([
       }
     }
 
+    if (Array.isArray(el.elements)) {
+      for (const child of el.elements) {
+        if (child && '_healedFromIconBox' in child) {
+          delete child._healedFromIconBox;
+        }
+      }
+    }
     return el;
   };
 
   for (let i = 0; i < list.length; i += 1) {
     list[i] = healElement(list[i], null);
+    if (list[i] && '_healedFromIconBox' in list[i]) {
+      delete list[i]._healedFromIconBox;
+    }
   }
 
   return {
@@ -3193,6 +5079,997 @@ const UNVERIFIED_GLOBAL_IDS = new Set([
     report,
   };
 }
+
+
+  // ── Module: src/exporters/elementor-v4.js ──
+/**
+ * Elementor v4 Atomic Widgets Compiler (`e-flexbox`, `e-heading`, `e-paragraph`, `e-button`, `e-image`, `e-svg`).
+ */
+
+
+function buildV4ImageSrcProp(media) {
+  if (media && Number(media.id) > 0) {
+    return {
+      $$type: 'image-src',
+      value: {
+        id: { $$type: 'image-attachment-id', value: Number(media.id) },
+        url: null,
+      },
+    };
+  }
+  if (media && media.url) {
+    return {
+      $$type: 'image-src',
+      value: {
+        id: null,
+        url: { $$type: 'url', value: media.url },
+      },
+    };
+  }
+  return null;
+}
+function compileElementorV4(doc, options = {}) {
+  const { attachmentMap = {} } = options;
+  const nodes = doc.nodes || {};
+
+  const resolveMedia = (sha, fallbackDataUri = '') => {
+    if (sha && attachmentMap[sha] && attachmentMap[sha].url) {
+      return { id: Number(attachmentMap[sha].id) || 0, url: attachmentMap[sha].url };
+    }
+    return { id: 0, url: fallbackDataUri || '' };
+  };
+
+  const buildV4Node = (nodeId) => {
+    const node = nodes[nodeId];
+    if (!node) return null;
+
+    const cleanId = String(node.sourceNodeId || nodeId).replace(/[^a-zA-Z0-9_-]/g, '-');
+    const classId = `e-${cleanId}-${shortId(cleanId)}`;
+    const wType = mapToV4WidgetType(node);
+
+    const settings = {
+      classes: {
+        $$type: 'classes',
+        value: [classId],
+      },
+      _f2e_node_id: node.sourceNodeId || node.id,
+    };
+
+    if (wType === 'e-heading') {
+      settings.title = { $$type: 'string', value: (node.content && (node.content.characters || node.content.name)) || 'Heading' };
+      settings.tag = { $$type: 'string', value: inferHeadingTag(node) };
+    } else if (wType === 'e-paragraph') {
+      settings.paragraph = { $$type: 'string', value: (node.content && node.content.characters) || '' };
+    } else if (wType === 'e-button') {
+      settings.text = { $$type: 'string', value: (node.content && (node.content.characters || node.content.name)) || 'Button' };
+      settings.link = { $$type: 'link', value: { url: node.link || '#', target: '_self' } };
+    } else if (wType === 'e-image') {
+      const imgRef = node.image || node.raster || node.svg;
+      const fallbackUri = (imgRef && imgRef.dataUri) || (node.svg && node.svg.markup ? svgMarkupToDataUri(node.svg.markup) : '');
+      const media = imgRef ? resolveMedia(imgRef.sha256, fallbackUri) : { id: 0, url: fallbackUri };
+      const srcProp = buildV4ImageSrcProp(media) || {
+        $$type: 'image-src',
+        value: { id: null, url: { $$type: 'url', value: '' } },
+      };
+      settings.image = {
+        $$type: 'image',
+        value: {
+          src: srcProp,
+          size: { $$type: 'string', value: 'full' },
+        },
+      };
+    } else if (wType === 'e-svg') {
+      const svgRef = node.svg || node.image || node.raster;
+      const fallbackUri = (node.svg && node.svg.markup ? svgMarkupToDataUri(node.svg.markup) : '') || (svgRef && svgRef.dataUri) || '';
+      const media = svgRef ? resolveMedia(svgRef.sha256, fallbackUri) : { id: 0, url: fallbackUri };
+      settings.svg = {
+        $$type: 'svg-src',
+        value: media && Number(media.id) > 0
+          ? { id: { $$type: 'image-attachment-id', value: Number(media.id) }, url: null }
+          : { id: null, url: { $$type: 'url', value: (media && media.url) || '' } },
+      };
+    }
+
+    const variants = [buildV4Variant('desktop', node.layout, node.style, node.text, resolveMedia)];
+    if (node.responsive && node.responsive.tablet) {
+      variants.push(buildV4Variant('tablet', node.responsive.tablet, {}, node.responsive.tablet, resolveMedia));
+    }
+    if (node.responsive && node.responsive.mobile) {
+      variants.push(buildV4Variant('mobile', node.responsive.mobile, {}, node.responsive.mobile, resolveMedia));
+    }
+
+    const children = [];
+    for (const cid of node.children || []) {
+      const builtChild = buildV4Node(cid);
+      if (builtChild) children.push(builtChild);
+    }
+
+    return {
+      id: shortId(node.id),
+      elType: wType === 'e-flexbox' ? 'e-flexbox' : 'widget',
+      widgetType: wType,
+      isInner: false,
+      settings,
+      elements: children,
+      styles: {
+        [classId]: {
+          id: classId,
+          label: 'local',
+          type: 'class',
+          variants,
+        },
+      },
+      editor_settings: [],
+      version: '0.0',
+    };
+  };
+
+  const content = (doc.roots || []).map((rid) => buildV4Node(rid)).filter(Boolean);
+  return {
+    title: doc.title || 'Figma Design (Elementor v4)',
+    type: 'e-flexbox',
+    version: '0.4',
+    page_settings: [],
+    content,
+  };
+}
+
+function mapToV4WidgetType(nodeOrWidget) {
+  const widget = typeof nodeOrWidget === 'string' ? nodeOrWidget : (nodeOrWidget && nodeOrWidget.widget);
+  const node = typeof nodeOrWidget === 'object' ? nodeOrWidget : null;
+  switch (widget) {
+    case 'heading': return 'e-heading';
+    case 'text-editor': return 'e-paragraph';
+    case 'button': return 'e-button';
+    case 'image':
+    case 'theme-post-featured-image':
+      return 'e-image';
+    case 'theme-site-logo':
+    case 'site-logo':
+      return (node && node.svg && !node.raster && !node.image) ? 'e-svg' : 'e-image';
+    case 'icon': return 'e-svg';
+    default: return 'e-flexbox';
+  }
+}
+
+function buildV4Variant(breakpoint, layout = {}, style = {}, text = {}, resolveMedia = null) {
+  const props = {};
+  if (layout.direction) {
+    props['flex-direction'] = { $$type: 'string', value: layout.direction };
+  }
+  if (typeof layout.gap === 'number') {
+    props.gap = { $$type: 'size', value: { size: layout.gap, unit: 'px', isLinked: true } };
+  }
+  if (layout.padding) {
+    const pUnit = layout.padding.unit || 'px';
+    props.padding = {
+      $$type: 'dimensions',
+      value: {
+        'block-start': { $$type: 'size', value: { size: Number(layout.padding.top) || 0, unit: pUnit } },
+        'inline-end': { $$type: 'size', value: { size: Number(layout.padding.right) || 0, unit: pUnit } },
+        'block-end': { $$type: 'size', value: { size: Number(layout.padding.bottom) || 0, unit: pUnit } },
+        'inline-start': { $$type: 'size', value: { size: Number(layout.padding.left) || 0, unit: pUnit } },
+      },
+    };
+  }
+  if (style.background || (style.backgroundImage && resolveMedia)) {
+    const bgVal = {};
+    if (style.background) {
+      bgVal.color = { $$type: 'color', value: style.background };
+    }
+    if (style.backgroundImage && resolveMedia) {
+      const bgMedia = resolveMedia(style.backgroundImage, style.backgroundImageDataUri);
+      const bgSrc = buildV4ImageSrcProp(bgMedia);
+      if (bgSrc) {
+        bgVal['background-overlay'] = {
+          $$type: 'background-overlay',
+          value: [
+            {
+              $$type: 'background-image-overlay',
+              value: {
+                image: {
+                  $$type: 'image',
+                  value: {
+                    src: bgSrc,
+                    size: { $$type: 'string', value: 'full' },
+                  },
+                },
+                size: { $$type: 'string', value: style.backgroundSize || 'cover' },
+                position: { $$type: 'string', value: style.backgroundPosition || 'center center' },
+                repeat: { $$type: 'string', value: style.backgroundRepeat || 'no-repeat' },
+              },
+            },
+          ],
+        };
+      }
+    }
+    if (Object.keys(bgVal).length > 0) {
+      props.background = { $$type: 'background', value: bgVal };
+    }
+  }
+  if (text && text.color) {
+    props.color = { $$type: 'color', value: text.color };
+  }
+  if (text && text.fontSize) {
+    props['font-size'] = { $$type: 'size', value: { size: text.fontSize, unit: 'px' } };
+  }
+  if (text && text.fontFamily) {
+    props['font-family'] = { $$type: 'string', value: text.fontFamily };
+  }
+  return {
+    meta: { breakpoint, state: null },
+    props,
+  };
+}
+
+
+
+  // ── Module: src/exporters/nested-widgets.js ──
+/**
+ * Elementor Nested Container Widgets (`nested-accordion`, `nested-tabs`).
+ */
+function buildNestedAccordion(node, nodes, allocId, buildElement) {
+  const items = [];
+  const panels = [];
+  const extractedItems = (node.content && Array.isArray(node.content.accordionItems)) ? node.content.accordionItems : [];
+  const childIds = Array.isArray(node.children) ? node.children : [];
+
+  let firstTitleTypo = null;
+  let activeTitleColor = null;
+  let normalTitleColor = null;
+  let firstBodyTypo = null;
+  let firstBodyText = '';
+  let rowPadding = null;
+  let rowBorderWidth = null;
+  let rowBorderColor = null;
+  let rowBackground = null;
+  let rowRadius = null;
+  let expandIconStyle = null;
+  const leadingIcons = [];
+
+  const findLeadingIconSvg = (irChild) => {
+    if (!irChild) return null;
+    const queue = [...(irChild.children || [])];
+    while (queue.length > 0) {
+      const cid = queue.shift();
+      const cn = nodes[cid];
+      if (!cn) continue;
+      if (cn.svg && cn.svg.markup) {
+        const w = Number(cn.layout && cn.layout.width) || 40;
+        const h = Number(cn.layout && cn.layout.height) || 40;
+        const nm = String((cn.content && cn.content.name) || '').toLowerCase();
+        // Skip small right-hand expand/collapse plus/minus icon (<= 36px or named plus/minus/arrow/chevron)
+        if ((w <= 36 && h <= 36 && (nm.includes('plus') || nm.includes('minus') || nm.includes('chevron') || nm.includes('arrow'))) || nm === 'icon/plus' || nm === 'icon/minus') {
+          continue;
+        }
+        return { markup: cn.svg.markup, width: w, height: h };
+      }
+      if (Array.isArray(cn.children)) queue.push(...cn.children);
+    }
+    return null;
+  };
+
+  // Map childIds by sourceNodeId/id and build filtered fallback list (excluding decorative icons/dividers/spacers)
+  const childBySourceId = new Map();
+  const fallbackChildren = [];
+  for (const cid of childIds) {
+    const cn = nodes[cid];
+    if (!cn) continue;
+    if (cn.sourceNodeId) childBySourceId.set(String(cn.sourceNodeId), cn);
+    childBySourceId.set(String(cn.id || cid), cn);
+    const cTexts = collectSubtreeTexts(cn, nodes);
+    if (cTexts.length === 0 && (cn.widget === 'icon' || cn.widget === 'divider' || cn.widget === 'spacer')) {
+      continue;
+    }
+    fallbackChildren.push(cn);
+  }
+
+  // When extractedItems are present, iterate ONLY over them (never turn icon-only children like "Plus wrap" into fake accordion items!)
+  const useExtracted = extractedItems.length > 0;
+  const count = useExtracted ? extractedItems.length : fallbackChildren.length;
+  for (let i = 0; i < count; i += 1) {
+    const ext = useExtracted ? (extractedItems[i] || null) : null;
+    let child = null;
+    if (ext) {
+      const nodeSourceId = String(node.sourceNodeId || node.id || '');
+      if (ext.id && String(ext.id) === nodeSourceId) {
+        child = node;
+      } else if (ext.id && childBySourceId.has(String(ext.id))) {
+        child = childBySourceId.get(String(ext.id));
+      } else {
+        child = fallbackChildren[i] || null;
+      }
+    } else {
+      child = fallbackChildren[i] || null;
+    }
+    const cid = (child && child.id) || (ext && ext.id) || childIds[i];
+    const childTexts = child ? collectSubtreeTexts(child, nodes) : [];
+
+    const titleNodeTypo = (ext && ext.titleTypography) || (childTexts[0] && childTexts[0].text) || null;
+    const bodyNodeTypo = (ext && ext.bodyTypography) || (childTexts[1] && childTexts[1].text) || null;
+
+    const title = (ext && ext.title)
+      || (childTexts[0] && childTexts[0].text && childTexts[0].text.characters)
+      || (child && child.content && child.content.name)
+      || `Item #${i + 1}`;
+
+    const bodyText = (ext && ext.body)
+      || (childTexts.length > 1
+        ? childTexts.slice(1).map((t) => (t.text && t.text.characters) || '').filter(Boolean).join('\n')
+        : '');
+
+    if (titleNodeTypo) {
+      if (!firstTitleTypo) firstTitleTypo = titleNodeTypo;
+      if (items.length === 0 && titleNodeTypo.color && !activeTitleColor) {
+        activeTitleColor = titleNodeTypo.color;
+      } else if (items.length > 0 && titleNodeTypo.color && !normalTitleColor) {
+        normalTitleColor = titleNodeTypo.color;
+      }
+    }
+    if (bodyNodeTypo && !firstBodyTypo) firstBodyTypo = bodyNodeTypo;
+    if (bodyText && !firstBodyText) firstBodyText = bodyText;
+
+    const pad = (ext && ext.padding) || (child && child.layout && child.layout.padding);
+    if (pad && !rowPadding && (pad.top || pad.bottom || pad.left || pad.right)) {
+      rowPadding = pad;
+    }
+    const bw = (ext && ext.borderWidth) || (child && child.style && child.style.borderWidth);
+    const bc = (ext && ext.borderColor) || (child && child.style && child.style.borderColor);
+    if (bw && bc && !rowBorderWidth) {
+      rowBorderWidth = bw;
+      rowBorderColor = bc;
+    }
+    const bg = (ext && ext.background) || (child && child.style && child.style.background);
+    if (bg && !rowBackground) {
+      rowBackground = bg;
+    }
+    const rad = (ext && ext.radius) || (child && child.style && child.style.radius);
+    if (rad && !rowRadius) {
+      rowRadius = rad;
+    }
+    if (ext && ext.expandIconStyle && !expandIconStyle) {
+      expandIconStyle = ext.expandIconStyle;
+    }
+
+    const iconInfo = findLeadingIconSvg(child);
+    leadingIcons.push(iconInfo);
+
+    const itemId = shortId((ext && ext.id) || cid || `${node.id}-item-${i}`);
+    items.push({ _id: itemId, item_title: title });
+
+    const effectiveBody = bodyText || firstBodyText || title;
+    const bTypo = bodyNodeTypo || firstBodyTypo || {
+      fontFamily: (firstTitleTypo && firstTitleTypo.fontFamily) || 'Inter',
+      fontWeight: '400',
+      fontSize: 16,
+      lineHeight: 24,
+      lineHeightUnit: 'px',
+      color: 'rgba(0, 0, 0, 0.7)',
+    };
+    const leftIndent = iconInfo ? (iconInfo.width + 16) : (leadingIcons[0] ? (leadingIcons[0].width + 16) : 0);
+    const bodyPadLeft = leftIndent > 0 ? leftIndent : ((rowPadding && rowPadding.left) || 0);
+    const bodyPadRight = (rowPadding && rowPadding.right) || 0;
+
+    const bodyHtml = String(effectiveBody || '')
+      .split(/\n+/)
+      .map((line) => `<p style="margin:0;">${escapeHtml(line)}</p>`)
+      .join('');
+    const textEditorSettings = {
+      editor: bodyHtml || '<p style="margin:0;"></p>',
+      align: 'left',
+      text_color: bTypo.color || 'rgba(0, 0, 0, 0.7)',
+      typography_typography: 'custom',
+      typography_font_family: bTypo.fontFamily || 'Inter',
+      typography_font_weight: String(bTypo.fontWeight || '400'),
+      typography_font_size: { unit: 'px', size: bTypo.fontSize || 16, sizes: [] },
+      typography_font_size_tablet: { unit: 'px', size: bTypo.fontSize || 16, sizes: [] },
+      typography_font_size_mobile: { unit: 'px', size: Math.max(14, (bTypo.fontSize || 16) - 1), sizes: [] },
+      typography_line_height: { unit: bTypo.lineHeightUnit || 'px', size: bTypo.lineHeight || 24, sizes: [] },
+      _title: title,
+    };
+
+    const innerBodyContainer = {
+      id: allocId(`${(ext && ext.id) || cid || node.id}-body-wrap-${i}`),
+      elType: 'container',
+      isInner: true,
+      settings: {
+        container_type: 'flex',
+        flex_direction: 'column',
+        margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+        padding: {
+          unit: 'px',
+          top: '0',
+          right: String(bodyPadRight),
+          bottom: String((rowPadding && rowPadding.bottom) || 20),
+          left: String(bodyPadLeft),
+          isLinked: false,
+        },
+      },
+      elements: [
+        {
+          id: allocId(`${(ext && ext.id) || cid || node.id}-body-txt-${i}`),
+          elType: 'widget',
+          widgetType: 'text-editor',
+          isInner: false,
+          settings: textEditorSettings,
+          elements: [],
+        },
+      ],
+    };
+
+    panels.push({
+      id: allocId(`${(ext && ext.id) || cid || node.id}-panel-${i}`),
+      elType: 'container',
+      isInner: true,
+      isLocked: true,
+      settings: {
+        _title: `item #${i + 1}`,
+        content_width: 'full',
+        margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+        padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+      },
+      elements: [innerBodyContainer],
+    });
+  }
+
+  // Fallback to outer node card styles (e.g. single FAQ card with padding: 20px, bg: #FFF, border: 1px solid #E2E8F0, radius: 14px)
+  if (!rowPadding && node.layout && node.layout.padding && (node.layout.padding.top || node.layout.padding.right || node.layout.padding.bottom || node.layout.padding.left)) {
+    rowPadding = node.layout.padding;
+  }
+  if (!rowBorderWidth && node.style && node.style.borderWidth && node.style.borderColor) {
+    rowBorderWidth = node.style.borderWidth;
+    rowBorderColor = node.style.borderColor;
+  }
+  if (!rowBackground && node.style && node.style.background) {
+    rowBackground = node.style.background;
+  }
+  if (!rowRadius && node.style && node.style.radius) {
+    rowRadius = node.style.radius;
+  }
+
+  const settings = {
+    items,
+    accordion_item_title_position_horizontal: 'stretch',
+    accordion_item_title_icon_position: 'end',
+    faq_schema: '',
+    content_border_border: 'none',
+    _margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+    _padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
+  };
+
+  // Single closed FAQ cards with no expanded body in Figma should default to collapsed
+  if (items.length === 1 && !firstBodyText) {
+    settings.default_state = 'all_collapsed';
+  }
+
+  if (rowPadding) {
+    settings.accordion_padding = boxValue(rowPadding);
+  } else {
+    settings.accordion_padding = { unit: 'px', top: '20', right: '0', bottom: '20', left: '0', isLinked: false };
+  }
+
+  if (rowBackground) {
+    settings.accordion_background_normal_background = 'classic';
+    settings.accordion_background_normal_color = rowBackground;
+    settings.accordion_background_hover_background = 'classic';
+    settings.accordion_background_hover_color = rowBackground;
+    settings.accordion_background_active_background = 'classic';
+    settings.accordion_background_active_color = rowBackground;
+  }
+
+  if (rowBorderWidth && rowBorderColor) {
+    const bwObj = boxValue(rowBorderWidth);
+    settings.accordion_border_normal_border = 'solid';
+    settings.accordion_border_normal_width = bwObj;
+    settings.accordion_border_normal_color = rowBorderColor;
+    settings.accordion_border_hover_border = 'solid';
+    settings.accordion_border_hover_width = bwObj;
+    settings.accordion_border_hover_color = rowBorderColor;
+    settings.accordion_border_active_border = 'solid';
+    settings.accordion_border_active_width = bwObj;
+    settings.accordion_border_active_color = rowBorderColor;
+  }
+
+  if (rowRadius) {
+    settings.accordion_border_radius = boxValue(rowRadius);
+  }
+
+  if (firstTitleTypo) {
+    settings.title_typography_typography = 'custom';
+    settings.title_typography_font_family = firstTitleTypo.fontFamily || 'Inter';
+    settings.title_typography_font_weight = String(firstTitleTypo.fontWeight || '600');
+    settings.title_typography_font_size = { unit: 'px', size: firstTitleTypo.fontSize || 20, sizes: [] };
+    settings.title_typography_font_size_mobile = { unit: 'px', size: Math.max(14, Math.round((firstTitleTypo.fontSize || 20) * 0.75)), sizes: [] };
+    if (firstTitleTypo.lineHeight) {
+      settings.title_typography_line_height = { unit: firstTitleTypo.lineHeightUnit || 'px', size: firstTitleTypo.lineHeight, sizes: [] };
+    }
+  }
+
+  if (normalTitleColor || activeTitleColor || expandIconStyle) {
+    settings.normal_title_color = normalTitleColor || activeTitleColor || '#000000';
+    settings.active_title_color = activeTitleColor || normalTitleColor || '#16A34A';
+    settings.normal_icon_color = (expandIconStyle && expandIconStyle.color) || normalTitleColor || '#475569';
+    settings.active_icon_color = (expandIconStyle && expandIconStyle.color) || activeTitleColor || '#16A34A';
+  }
+
+  const cssRules = [];
+  if (leadingIcons.some(Boolean)) {
+    const iconW = (leadingIcons.find(Boolean) && leadingIcons.find(Boolean).width) || 40;
+    const iconH = (leadingIcons.find(Boolean) && leadingIcons.find(Boolean).height) || 40;
+    const padLeft = iconW + 16;
+    cssRules.push(
+      `selector .e-n-accordion-item-title-text { position: relative; padding-left: ${padLeft}px; display: inline-flex; align-items: center; min-height: ${iconH}px; }`,
+      `selector .e-n-accordion-item-title-text:before { content: ''; position: absolute; width: ${iconW}px; height: ${iconH}px; left: 0; top: 50%; transform: translateY(-50%); background-repeat: no-repeat; background-position: center; background-size: contain; }`
+    );
+    leadingIcons.forEach((ic, idx) => {
+      if (ic && ic.markup) {
+        const encoded = encodeURIComponent(ic.markup.trim().replace(/\s+/g, ' '));
+        cssRules.push(`selector .e-n-accordion-item:nth-child(${idx + 1}) .e-n-accordion-item-title-text:before { background-image: url("data:image/svg+xml;utf8,${encoded}"); }`);
+      }
+    });
+    cssRules.push('selector [aria-expanded="true"] { border: none !important; }');
+  }
+
+  if (expandIconStyle && (expandIconStyle.background || expandIconStyle.radius)) {
+    const iw = expandIconStyle.width || 32;
+    const ih = expandIconStyle.height || 32;
+    const ir = expandIconStyle.radius ? (expandIconStyle.radius.top ?? 16) : 16;
+    const irUnit = (expandIconStyle.radius && expandIconStyle.radius.unit) || 'px';
+    const ibg = expandIconStyle.background ? ` background: ${expandIconStyle.background};` : '';
+    cssRules.push(
+      `selector .e-n-accordion-item-title-icon { width: ${iw}px; height: ${ih}px; border-radius: ${ir}${irUnit};${ibg} display: inline-flex; align-items: center; justify-content: center; flex-shrink: 0; }`
+    );
+  }
+
+  if (cssRules.length > 0) {
+    settings.custom_css = cssRules.join('\n');
+  }
+
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'nested-accordion',
+    isInner: false,
+    settings,
+    elements: panels,
+  };
+}
+function buildNestedTabs(node, nodes, allocId, buildElement) {
+  const tabs = [];
+  const panels = [];
+  const extractedItems = (node.content && Array.isArray(node.content.accordionItems)) ? node.content.accordionItems : [];
+  const childIds = Array.isArray(node.children) ? node.children : [];
+  const count = Math.max(childIds.length, extractedItems.length);
+
+  for (let i = 0; i < count; i += 1) {
+    const cid = childIds[i];
+    const child = cid ? nodes[cid] : null;
+    const ext = extractedItems[i] || null;
+    const childTexts = child ? collectSubtreeTexts(child, nodes) : [];
+    const title = (ext && ext.title)
+      || (childTexts[0] && childTexts[0].text && childTexts[0].text.characters)
+      || (child && child.content && child.content.name)
+      || `Tab ${i + 1}`;
+    tabs.push({ _id: shortId(cid || `${node.id}-tab-${i}`), tab_title: title });
+    if (cid && child) {
+      const panel = buildElement(cid, false, node);
+      if (panel) {
+        panel.elType = 'container';
+        panel.isInner = true;
+        panels.push(panel);
+      }
+    }
+  }
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'nested-tabs',
+    isInner: false,
+    settings: { tabs },
+    elements: panels,
+  };
+}
+
+
+
+  // ── Module: src/exporters/pro-widgets.js ──
+/**
+ * Elementor Pro Widget Builders (`form`, `nav-menu`, `call-to-action`, `price-table`, `flip-box`, `slides`, `loop-grid`).
+ */
+function buildProForm(node, nodes, allocId) {
+  const formFields = [];
+  const content = node.content || {};
+  let submitLabel = content.submitLabel || 'Send Message';
+
+  if (Array.isArray(content.formFields) && content.formFields.length > 0) {
+    for (const [idx, f] of content.formFields.entries()) {
+      formFields.push({
+        _id: shortId(`${node.id}-fld-${idx}`),
+        custom_id: `field_${idx + 1}`,
+        field_type: f.type || 'text',
+        field_label: f.label,
+        placeholder: f.placeholder || f.label,
+        required: f.required ? 'true' : '',
+        width: f.width || '100',
+      });
+    }
+  } else {
+    let idx = 1;
+    for (const cid of node.children || []) {
+      const child = nodes[cid];
+      if (!child) continue;
+      if (child.widget === 'button') {
+        submitLabel = (child.content && (child.content.characters || child.content.name)) || submitLabel;
+        continue;
+      }
+      const texts = collectSubtreeTexts(child, nodes).map((t) => t.text.characters);
+      const label = texts[0] || (child.content && child.content.name) || `Field ${idx}`;
+      const lower = label.toLowerCase();
+      let fieldType = 'text';
+      if (lower.includes('email') || lower.includes('mail')) fieldType = 'email';
+      else if (lower.includes('phone') || lower.includes('tel') || lower.includes('số điện thoại')) fieldType = 'tel';
+      else if (lower.includes('message') || lower.includes('comment') || lower.includes('nội dung') || (Number(child.layout && child.layout.height) || 0) >= 90) fieldType = 'textarea';
+
+      formFields.push({
+        _id: shortId(cid),
+        custom_id: `field_${idx}`,
+        field_type: fieldType,
+        field_label: label,
+        placeholder: texts[1] || label,
+        required: lower.includes('email') || lower.includes('name') ? 'true' : '',
+        width: '100',
+      });
+      idx += 1;
+    }
+  }
+
+  if (formFields.length === 0) {
+    formFields.push(
+      { _id: shortId('f1'), custom_id: 'name', field_type: 'text', field_label: 'Name', placeholder: 'Your Name', width: '100' },
+      { _id: shortId('f2'), custom_id: 'email', field_type: 'email', field_label: 'Email', placeholder: 'your@email.com', required: 'true', width: '100' }
+    );
+  }
+
+  const hasRequired = formFields.some((f) => f.required === 'true');
+  const settings = {
+    form_name: content.name || 'Figma Form',
+    form_fields: formFields,
+    button_text: submitLabel,
+    button_size: 'md',
+    ...(hasRequired ? { mark_required: 'yes' } : {}),
+  };
+
+  if (node.layout && typeof node.layout.gap === 'number') {
+    settings.row_gap = { unit: 'px', size: node.layout.gap, sizes: [] };
+  }
+  const isAsteriskRed = (hex) => {
+    const c = String(hex || '').toUpperCase();
+    return c === '#FF0000' || c === '#EF4444' || c === '#DC2626';
+  };
+  if (content.labelTypography) {
+    if (content.labelTypography.color && !isAsteriskRed(content.labelTypography.color)) {
+      settings.label_color = content.labelTypography.color;
+    }
+    applyTypographySettings(settings, 'label_typography', content.labelTypography, node.responsive);
+  }
+  const fieldTypo = content.fieldTypography || node.text || null;
+  if (fieldTypo) {
+    if (fieldTypo.color && !isAsteriskRed(fieldTypo.color)) {
+      settings.field_text_color = fieldTypo.color;
+    }
+    applyTypographySettings(settings, 'field_typography', fieldTypo, node.responsive);
+  }
+  if (content.fieldStyle) {
+    settings.field_background_color = content.fieldStyle.background || '#FFFFFF';
+    if (content.fieldStyle.borderColor) settings.field_border_color = content.fieldStyle.borderColor;
+    if (content.fieldStyle.borderWidth) settings.field_border_width = boxValue(content.fieldStyle.borderWidth);
+    if (content.fieldStyle.radius) settings.field_border_radius = boxValue(content.fieldStyle.radius);
+  }
+  if (content.buttonTypography) {
+    if (content.buttonTypography.color) settings.button_text_color = content.buttonTypography.color;
+    applyTypographySettings(settings, 'button_typography', content.buttonTypography, node.responsive);
+  }
+  if (content.buttonStyle) {
+    if (content.buttonStyle.background) settings.button_background_color = content.buttonStyle.background;
+    else if (content.buttonStyle.gradient) settings.button_background_color = content.buttonStyle.gradient.color1;
+    if (content.buttonStyle.radius) settings.button_border_radius = boxValue(content.buttonStyle.radius);
+  }
+  if (content.buttonPadding) {
+    settings.button_text_padding = boxValue(content.buttonPadding);
+  }
+
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'form',
+    isInner: false,
+    settings,
+    elements: [],
+  };
+}
+function buildProNavMenu(node, nodes, allocId) {
+  const menuItems = (node.content && node.content.menuItems) || [];
+  const textItems = collectSubtreeTexts(node, nodes);
+  let items = menuItems.map((m) => (typeof m === 'string' ? m : m.name));
+  if (items.length === 0) {
+    items = textItems.map((t) => t.text.characters);
+  }
+  if (items.length === 0) {
+    items = ['Trang chủ', 'Dịch vụ', 'Giới thiệu', 'Liên hệ'];
+  }
+
+  const settings = {
+    layout: (node.layout && node.layout.direction === 'column') ? 'vertical' : 'horizontal',
+    align_items: 'center',
+    pointer: 'underline',
+    _f2e_menu_items: items,
+  };
+
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.padding_horizontal_menu_item = { unit: 'px', size: Math.round(node.layout.gap / 2), sizes: [] };
+  }
+
+  const navTypo = node.text || (textItems[0] && textItems[0].text) || null;
+  if (navTypo) {
+    applyTypographySettings(settings, 'typography', navTypo, node.responsive);
+    if (navTypo.color) {
+      settings.color_menu_item = navTypo.color;
+    }
+  }
+
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'nav-menu',
+    isInner: false,
+    settings,
+    elements: [],
+  };
+}
+function buildProCta(node, nodes, allocId, resolveMedia) {
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const imgs = collectSubtreeImages(node, nodes);
+  const settings = {
+    skin: 'classic',
+    title: texts[0] || (node.content && node.content.name) || 'Call to Action',
+    description: texts[1] || '',
+    button: (node.content && node.content.ctaButtonText) || texts[2] || 'Learn More',
+    bg_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
+  };
+
+  if (textItems[0] && textItems[0].text) {
+    if (textItems[0].text.color) settings.title_color = textItems[0].text.color;
+    applyTypographySettings(settings, 'title_typography', textItems[0].text, node.responsive);
+  }
+  if (textItems[1] && textItems[1].text) {
+    if (textItems[1].text.color) settings.description_color = textItems[1].text.color;
+    applyTypographySettings(settings, 'description_typography', textItems[1].text, node.responsive);
+  }
+  if (textItems[2] && textItems[2].text) {
+    if (textItems[2].text.color) settings.button_text_color = textItems[2].text.color;
+    applyTypographySettings(settings, 'button_typography', textItems[2].text, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.content_bg_color = node.style.background;
+  }
+
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'call-to-action',
+    isInner: false,
+    settings,
+    elements: [],
+  };
+}
+function buildProPriceTable(node, nodes, allocId) {
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const priceNode = textItems.find((t) => /[$€£₫¥]|\d+\s*\/\s*(mo|yr|tháng|năm)/i.test(t.text.characters) || /^\$?\d+$/.test(t.text.characters.trim()));
+  const priceText = (priceNode && priceNode.text.characters) || '49';
+  const numericPrice = priceText.replace(/[^0-9.]/g, '') || '49';
+  const headingNode = textItems[0] || null;
+  const heading = (headingNode && headingNode.text.characters) || (node.content && node.content.name) || 'Pro Plan';
+  const subHeadingNode = (textItems[1] && textItems[1] !== priceNode) ? textItems[1] : null;
+  const btnNode = textItems.length > 2 ? textItems[textItems.length - 1] : null;
+  const excludeSet = new Set([headingNode, subHeadingNode, priceNode, btnNode].filter(Boolean));
+  const featureTexts = textItems
+    .filter((t) => !excludeSet.has(t))
+    .map((t) => t.text.characters)
+    .filter(Boolean);
+  const features = featureTexts.map((ft, idx) => ({
+    _id: shortId(`feat-${idx}`),
+    item_text: ft,
+    selected_icon: { value: 'fas fa-check', library: 'fa-solid' },
+  }));
+
+  const settings = {
+    heading,
+    sub_heading: (subHeadingNode && subHeadingNode.text.characters) || 'Monthly Plan',
+    price: numericPrice,
+    currency_symbol: 'dollar',
+    period: 'Monthly',
+    features_list: features,
+    button_text: (btnNode && btnNode.text.characters) || 'Get Started',
+  };
+
+  if (headingNode && headingNode.text) {
+    if (headingNode.text.color) settings.heading_color = headingNode.text.color;
+    applyTypographySettings(settings, 'heading_typography', headingNode.text, node.responsive);
+  }
+  if (priceNode && priceNode.text) {
+    if (priceNode.text.color) settings.price_color = priceNode.text.color;
+    applyTypographySettings(settings, 'price_typography', priceNode.text, node.responsive);
+  }
+  if (textItems[2] && textItems[2].text) {
+    if (textItems[2].text.color) settings.features_color = textItems[2].text.color;
+    applyTypographySettings(settings, 'features_typography', textItems[2].text, node.responsive);
+  }
+
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'price-table',
+    isInner: false,
+    settings,
+    elements: [],
+  };
+}
+function buildProFlipBox(node, nodes, allocId, resolveMedia) {
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const imgs = collectSubtreeImages(node, nodes);
+  const settings = {
+    title_text_a: texts[0] || (node.content && node.content.name) || 'Front Title',
+    description_text_a: texts[1] || '',
+    title_text_b: texts[2] || texts[0] || 'Back Title',
+    description_text_b: texts[3] || texts[1] || '',
+    button_text: texts[4] || 'Read More',
+  };
+  if (textItems[0] && textItems[0].text) {
+    if (textItems[0].text.color) settings.title_color_a = textItems[0].text.color;
+    applyTypographySettings(settings, 'title_typography_a', textItems[0].text, node.responsive);
+  }
+  if (textItems[1] && textItems[1].text) {
+    if (textItems[1].text.color) settings.description_color_a = textItems[1].text.color;
+    applyTypographySettings(settings, 'description_typography_a', textItems[1].text, node.responsive);
+  }
+  if (node.style && node.style.background) {
+    settings.background_a_background = 'classic';
+    settings.background_a_color = node.style.background;
+  }
+  if (imgs[0] && resolveMedia) {
+    const mediaA = resolveMedia(imgs[0].sha256, imgs[0].dataUri);
+    if (mediaA && mediaA.url) {
+      settings.background_a_background = 'classic';
+      settings.background_a_image = mediaA;
+    }
+  }
+  if (imgs[1] && resolveMedia) {
+    const mediaB = resolveMedia(imgs[1].sha256, imgs[1].dataUri);
+    if (mediaB && mediaB.url) {
+      settings.background_b_background = 'classic';
+      settings.background_b_image = mediaB;
+    }
+  }
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'flip-box',
+    isInner: false,
+    settings,
+    elements: [],
+  };
+}
+function buildProSlides(node, nodes, allocId, resolveMedia) {
+  const slides = [];
+  const extractedSlides = (node.content && Array.isArray(node.content.slides)) ? node.content.slides : [];
+  if (extractedSlides.length > 0) {
+    for (let i = 0; i < extractedSlides.length; i += 1) {
+      const sl = extractedSlides[i];
+      const texts = (sl.texts || []).map((t) => (typeof t === 'string' ? t : t.characters)).filter(Boolean);
+      const media = sl.image && resolveMedia ? resolveMedia(sl.image.sha256, sl.image.dataUri) : { id: '', url: '' };
+      slides.push({
+        _id: shortId(sl.id || `${node.id}-slide-${i}`),
+        heading: texts[0] || sl.name || `Slide ${i + 1}`,
+        description: texts[1] || '',
+        button_text: texts[2] || 'Click Here',
+        background_color: sl.background || '#1E293B',
+        background_image: media,
+      });
+    }
+  } else {
+    for (const cid of node.children || []) {
+      const child = nodes[cid];
+      if (!child) continue;
+      const texts = collectSubtreeTexts(child, nodes).map((t) => t.text.characters);
+      const imgs = collectSubtreeImages(child, nodes);
+      const media = imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' };
+      slides.push({
+        _id: shortId(cid),
+        heading: texts[0] || (child.content && child.content.name) || 'Slide Heading',
+        description: texts[1] || '',
+        button_text: texts[2] || 'Click Here',
+        background_color: (child.style && child.style.background) || '#1E293B',
+        background_image: media,
+      });
+    }
+  }
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'slides',
+    isInner: false,
+    settings: {
+      slides,
+      slides_height: { unit: 'px', size: Math.max(360, Number(node.layout && node.layout.height) || 500), sizes: [] },
+    },
+    elements: [],
+  };
+}
+function buildProLoopGrid(node, allocId, wType = 'loop-grid') {
+  const cols = Number(node.layout && node.layout.columns) || 3;
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: wType,
+    isInner: false,
+    settings: {
+      template_id: '',
+      posts_per_page: 6,
+      columns: String(cols),
+      row_gap: { unit: 'px', size: Number(node.layout && node.layout.gap) || 24, sizes: [] },
+    },
+    elements: [],
+  };
+}
+function buildGenericProWidget(node, nodes, wType, allocId, resolveMedia) {
+  const textItems = collectSubtreeTexts(node, nodes);
+  const texts = textItems.map((t) => t.text.characters);
+  const firstTypo = node.text || (textItems[0] && textItems[0].text) || null;
+  const settings = {};
+  if (wType === 'theme-post-featured-image') {
+    const sha = (node.image && node.image.sha256) || (node.raster && node.raster.sha256) || (node.svg && node.svg.sha256) || '';
+    const fallback = (node.image && node.image.dataUri) || (node.raster && node.raster.dataUri) || (node.svg && node.svg.markup ? svgMarkupToDataUri(node.svg.markup) : '');
+    const media = resolveMedia ? resolveMedia(sha, fallback) : { id: '', url: fallback };
+    settings.image = media;
+    settings.image_size = 'full';
+    if (node.layout && node.layout.width) {
+      settings.width = { unit: 'px', size: Math.round(Number(node.layout.width)), sizes: [] };
+    }
+    if (node.style && node.style.radius) {
+      settings.image_border_radius = boxValue(node.style.radius);
+    }
+  } else if (wType === 'blockquote') {
+    settings.blockquote_content = texts[0] || (node.content && node.content.name) || '';
+    settings.author_name = texts[1] || '';
+    settings.tweet_button_Label = 'Tweet';
+    if (firstTypo) {
+      if (firstTypo.color) settings.content_text_color = firstTypo.color;
+      applyTypographySettings(settings, 'content_typography', firstTypo, node.responsive);
+    }
+  } else if (wType === 'animated-headline') {
+    settings.before_text = texts[0] || '';
+    settings.highlighted_text = texts[1] || (node.content && node.content.name) || '';
+    if (firstTypo) {
+      if (firstTypo.color) settings.title_color = firstTypo.color;
+      applyTypographySettings(settings, 'title_typography', firstTypo, node.responsive);
+    }
+  } else if (firstTypo) {
+    if (firstTypo.color) settings.title_color = firstTypo.color;
+    applyTypographySettings(settings, 'typography', firstTypo, node.responsive);
+  }
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: wType,
+    isInner: false,
+    settings,
+    elements: [],
+  };
+}
+
 
 
   // ── Module: src/exporters/elementor-compiler.js ──
@@ -3216,14 +6093,16 @@ const UNVERIFIED_GLOBAL_IDS = new Set([
  *    when pasted via Clipboard (`Ctrl+V`) or when no WP attachment ID exists yet, so multi-color SVG paths render
  *    with 100% visual accuracy instead of falling back to a generic FontAwesome star!
  */
+
 const FLEX_ALIGN_MAP = {
   MIN: 'flex-start',
   CENTER: 'center',
   MAX: 'flex-end',
   SPACE_BETWEEN: 'space-between',
   BASELINE: 'baseline',
-};function compileElementorV3(doc, options = {}) {
-  const { attachmentMap = {} } = options;
+};
+function compileElementorV3(doc, options = {}) {
+  const { attachmentMap = {}, autoUnwrap = true, linearBorder = true } = options;
   const nodes = doc.nodes || {};
   const usedIds = new Set();
 
@@ -3257,7 +6136,7 @@ const FLEX_ALIGN_MAP = {
         el = buildTextEditor(node, allocId);
         break;
       case 'button':
-        el = buildButton(node, allocId);
+        el = buildButton(node, allocId, { linearBorder });
         break;
       case 'image':
         el = buildImage(node, allocId, resolveMedia);
@@ -3343,7 +6222,7 @@ const FLEX_ALIGN_MAP = {
         el = buildProPriceTable(node, nodes, allocId);
         break;
       case 'flip-box':
-        el = buildProFlipBox(node, nodes, allocId);
+        el = buildProFlipBox(node, nodes, allocId, resolveMedia);
         break;
       case 'slides':
         el = buildProSlides(node, nodes, allocId, resolveMedia);
@@ -3383,13 +6262,13 @@ const FLEX_ALIGN_MAP = {
         el = buildGenericProWidget(node, nodes, wType, allocId, resolveMedia);
         break;
       default:
-        el = buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, resolveMedia);
+        el = buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, resolveMedia, { autoUnwrap, linearBorder });
         break;
     }
 
     if (el && el.settings) {
       applyChildFlexAndPositionSettings(el, node, parentNode, isRoot);
-      applyWidgetWrapperBoxStyles(el, node);
+      applyWidgetWrapperBoxStyles(el, node, resolveMedia);
       el.settings._f2e_node_id = node.sourceNodeId || node.id;
       el.settings._title = node.content && node.content.name ? node.content.name : wType;
     }
@@ -3427,7 +6306,12 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
   const layout = node.layout || {};
   const parentLayout = parentNode.layout || {};
   const parentIsRow = (parentLayout.direction || 'column') === 'row';
-  const parentWidth = Number(parentLayout.width) || 1240;
+  const parentOuterWidth = Number(parentLayout.width) || 1240;
+  const pPadL = Number(parentLayout.padding && parentLayout.padding.left) || 0;
+  const pPadR = Number(parentLayout.padding && parentLayout.padding.right) || 0;
+  const parentWidth = (parentOuterWidth - pPadL - pPadR) > 200
+    ? (parentOuterWidth - pPadL - pPadR)
+    : parentOuterWidth;
 
   // 1. Absolute Positioning inside parent container
   if (layout.position === 'absolute') {
@@ -3526,10 +6410,16 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
         settings.width_mobile = { unit: '%', size: 100, sizes: [] };
       }
     }
+    if (layout.alignSelf && !settings._flex_align_self) {
+      settings._flex_align_self = layout.alignSelf;
+    }
   } else {
     // Widget inside a Row or Column Container
     if (parentIsRow) {
-      if (sizingH === 'FILL') {
+      if (sizingH === 'FILL' || layout.flexGrow === 1) {
+        settings._element_width = 'initial';
+        settings._flex_size = 'grow';
+      } else if (el.widgetType === 'form' && nodeW > 200) {
         settings._element_width = 'initial';
         settings._flex_size = 'grow';
       } else {
@@ -3563,14 +6453,21 @@ const SELF_STYLED_WIDGETS = new Set([
  * Preserves Frame-level box styles (padding, background, gradient, border, border-radius, box-shadow)
  * on Elementor Widgets using Elementor's Advanced wrapper controls (`_padding`, `_background_*`, `_border_*`).
  */
-function applyWidgetWrapperBoxStyles(el, node) {
+function applyWidgetWrapperBoxStyles(el, node, resolveMedia) {
   if (!el || el.elType !== 'widget' || !node) return;
-  if (node.type === 'text' || node.type === 'vector') return;
-  if (SELF_STYLED_WIDGETS.has(el.widgetType)) return;
-
   const settings = el.settings;
   const style = node.style || {};
   const layout = node.layout || {};
+
+  // Apply Dev Mode align-self and residual CSS (opacity, backdrop-filter, filter, mix-blend-mode, transform)
+  // on ALL widgets (including text, button, image) so no Dev Mode visual property is ever silently dropped!
+  if (layout.alignSelf && !settings._flex_align_self) {
+    settings._flex_align_self = layout.alignSelf;
+  }
+  applyDevModeResidualCss(settings, style, 'selector');
+
+  if (node.type === 'text' || node.type === 'vector') return;
+  if (SELF_STYLED_WIDGETS.has(el.widgetType)) return;
 
   if (
     layout.padding &&
@@ -3594,9 +6491,19 @@ function applyWidgetWrapperBoxStyles(el, node) {
       settings._background_color = style.background;
     }
   }
+  if (!settings._background_image && style.backgroundImage && resolveMedia) {
+    const bgMedia = resolveMedia(style.backgroundImage, style.backgroundImageDataUri);
+    if (bgMedia && bgMedia.url) {
+      settings._background_background = 'classic';
+      settings._background_image = bgMedia;
+      settings._background_size = style.backgroundSize || 'cover';
+      settings._background_position = style.backgroundPosition || 'center center';
+      settings._background_repeat = style.backgroundRepeat || 'no-repeat';
+    }
+  }
 
   if (style.borderWidth && style.borderColor && !settings._border_border) {
-    settings._border_border = 'solid';
+    settings._border_border = style.borderStyle || 'solid';
     settings._border_width = boxValue(style.borderWidth);
     settings._border_color = style.borderColor;
   }
@@ -3612,7 +6519,8 @@ function applyWidgetWrapperBoxStyles(el, node) {
       settings._box_shadow_box_shadow_position = 'inset';
     }
   }
-}function compileElementorClipboard(doc, options = {}) {
+}
+function compileElementorClipboard(doc, options = {}) {
   const v3 = compileElementorV3(doc, options);
   return {
     type: 'elementor',
@@ -3620,325 +6528,11 @@ function applyWidgetWrapperBoxStyles(el, node) {
     elements: v3.content,
     fidelityReport: v3.fidelityReport,
   };
-}function compileElementorV4(doc) {
-  const nodes = doc.nodes || {};
-
-  const buildV4Node = (nodeId) => {
-    const node = nodes[nodeId];
-    if (!node) return null;
-
-    const cleanId = String(node.sourceNodeId || nodeId).replace(/[^a-zA-Z0-9_-]/g, '-');
-    const classId = `e-${cleanId}-${shortId(cleanId)}`;
-    const wType = mapToV4WidgetType(node.widget);
-
-    const settings = {
-      classes: {
-        $$type: 'classes',
-        value: [classId],
-      },
-      _f2e_node_id: node.sourceNodeId || node.id,
-    };
-
-    if (wType === 'e-heading') {
-      settings.title = { $$type: 'string', value: (node.content && (node.content.characters || node.content.name)) || 'Heading' };
-      settings.tag = { $$type: 'string', value: inferHeadingTag(node) };
-    } else if (wType === 'e-paragraph') {
-      settings.paragraph = { $$type: 'string', value: (node.content && node.content.characters) || '' };
-    } else if (wType === 'e-button') {
-      settings.text = { $$type: 'string', value: (node.content && (node.content.characters || node.content.name)) || 'Button' };
-      settings.link = { $$type: 'link', value: { url: node.link || '#', target: '_self' } };
-    } else if (wType === 'e-image') {
-      settings.image = { $$type: 'image', value: { url: (node.image && node.image.dataUri) || '', id: 0 } };
-    }
-
-    const variants = [buildV4Variant('desktop', node.layout, node.style, node.text)];
-    if (node.responsive && node.responsive.tablet) {
-      variants.push(buildV4Variant('tablet', node.responsive.tablet, {}, node.responsive.tablet));
-    }
-    if (node.responsive && node.responsive.mobile) {
-      variants.push(buildV4Variant('mobile', node.responsive.mobile, {}, node.responsive.mobile));
-    }
-
-    const children = [];
-    for (const cid of node.children || []) {
-      const builtChild = buildV4Node(cid);
-      if (builtChild) children.push(builtChild);
-    }
-
-    return {
-      id: shortId(node.id),
-      elType: wType === 'e-flexbox' ? 'e-flexbox' : 'widget',
-      widgetType: wType,
-      isInner: false,
-      settings,
-      elements: children,
-      styles: {
-        [classId]: {
-          id: classId,
-          label: 'local',
-          type: 'class',
-          variants,
-        },
-      },
-      editor_settings: [],
-      version: '0.0',
-    };
-  };
-
-  const content = (doc.roots || []).map((rid) => buildV4Node(rid)).filter(Boolean);
-  return {
-    title: doc.title || 'Figma Design (Elementor v4)',
-    type: 'e-flexbox',
-    version: '0.4',
-    page_settings: [],
-    content,
-  };
 }
 
-function mapToV4WidgetType(widget) {
-  switch (widget) {
-    case 'heading': return 'e-heading';
-    case 'text-editor': return 'e-paragraph';
-    case 'button': return 'e-button';
-    case 'image': return 'e-image';
-    case 'icon': return 'e-svg';
-    default: return 'e-flexbox';
-  }
-}
 
-function buildV4Variant(breakpoint, layout = {}, style = {}, text = {}) {
-  const props = {};
-  if (layout.direction) {
-    props['flex-direction'] = { $$type: 'string', value: layout.direction };
-  }
-  if (typeof layout.gap === 'number') {
-    props.gap = { $$type: 'size', value: { size: layout.gap, unit: 'px', isLinked: true } };
-  }
-  if (layout.padding) {
-    props.padding = {
-      $$type: 'size',
-      value: {
-        top: { size: layout.padding.top || 0, unit: 'px' },
-        right: { size: layout.padding.right || 0, unit: 'px' },
-        bottom: { size: layout.padding.bottom || 0, unit: 'px' },
-        left: { size: layout.padding.left || 0, unit: 'px' },
-      },
-    };
-  }
-  if (style.background) {
-    props.backgroundColor = { $$type: 'color', value: style.background };
-  }
-  if (text && text.color) {
-    props.color = { $$type: 'color', value: text.color };
-  }
-  if (text && text.fontSize) {
-    props.fontSize = { $$type: 'size', value: { size: text.fontSize, unit: 'px' } };
-  }
-  if (text && text.fontFamily) {
-    props.fontFamily = { $$type: 'string', value: text.fontFamily };
-  }
-  return {
-    meta: { breakpoint, state: null },
-    props,
-  };
-}
-
-// ── Elementor v3 Builders ──
-
-function boxValue(box, isLinked = false) {
-  const t = Math.round(Number(box && box.top) || 0);
-  const r = Math.round(Number(box && box.right) || 0);
-  const b = Math.round(Number(box && box.bottom) || 0);
-  const l = Math.round(Number(box && box.left) || 0);
-  return {
-    unit: 'px',
-    top: String(t),
-    right: String(r),
-    bottom: String(b),
-    left: String(l),
-    isLinked: Boolean(box && box.isLinked !== undefined ? box.isLinked : (isLinked || (t === r && r === b && b === l))),
-  };
-}
-
-function scaleBox(box, factor, cap) {
-  return {
-    top: Math.min(cap, Math.round((Number(box && box.top) || 0) * factor)),
-    right: Math.min(cap, Math.round((Number(box && box.right) || 0) * factor)),
-    bottom: Math.min(cap, Math.round((Number(box && box.bottom) || 0) * factor)),
-    left: Math.min(cap, Math.round((Number(box && box.left) || 0) * factor)),
-    isLinked: false,
-  };
-}
-
-function flexGapValue(layout) {
-  const main = Math.round(Number(layout && layout.gap) || 0);
-  // If Figma gap is massive (>160px) because designer used fixed itemSpacing instead of SPACE_BETWEEN,
-  // clamp gap to 24px and let justify: space-between handle distribution!
-  const effectiveMain = main > 160 ? 24 : main;
-  const cross = layout && layout.wrap && typeof layout.rowGap === 'number' ? Math.round(layout.rowGap) : effectiveMain;
-  const isRow = ((layout && layout.direction) || 'column') === 'row';
-  const col = isRow ? effectiveMain : cross;
-  const row = isRow ? cross : effectiveMain;
-  return {
-    unit: 'px',
-    size: row,
-    column: String(col),
-    row: String(row),
-    isLinked: col === row,
-  };
-}
-
-function applyGlobalColor() {
-  // Exact Figma hex colors are preserved directly on Elementor controls.
-  // Verified Active Kit `__globals__` IDs are bound server-side by WordPress `GlobalStyles::bindGlobalsToElements()`.
-}
-
-function applyCommonBoxStyle(settings, style = {}, resolveMedia) {
-  if (style.gradient) {
-    settings.background_background = 'gradient';
-    settings.background_gradient_type = style.gradient.type;
-    settings.background_color = style.gradient.color1;
-    settings.background_color_stop = { unit: '%', size: style.gradient.stop1, sizes: [] };
-    settings.background_color_b = style.gradient.color2;
-    settings.background_color_b_stop = { unit: '%', size: style.gradient.stop2, sizes: [] };
-    settings.background_gradient_angle = { unit: 'deg', size: style.gradient.angle, sizes: [] };
-  } else if (style.background) {
-    settings.background_background = 'classic';
-    settings.background_color = style.background;
-  }
-
-  if (style.backgroundImage && resolveMedia) {
-    const media = resolveMedia(style.backgroundImage, style.backgroundImageDataUri);
-    if (media.url) {
-      settings.background_background = 'classic';
-      settings.background_image = media;
-      settings.background_size = 'cover';
-      settings.background_position = 'center center';
-      settings.background_repeat = 'no-repeat';
-    }
-  }
-
-  if (style.radius) {
-    settings.border_radius = boxValue(style.radius);
-  }
-
-  const bt = Math.round(Number(style.borderWidth && style.borderWidth.top) || 0);
-  const br = Math.round(Number(style.borderWidth && style.borderWidth.right) || 0);
-  const bb = Math.round(Number(style.borderWidth && style.borderWidth.bottom) || 0);
-  const bl = Math.round(Number(style.borderWidth && style.borderWidth.left) || 0);
-  const hasAnyBorderWidth = bt > 0 || br > 0 || bb > 0 || bl > 0;
-  const isVerticalDividerOnly = bt === 0 && bb === 0 && (br > 0 || bl > 0);
-
-  if (hasAnyBorderWidth && style.borderColor) {
-    settings.border_border = 'solid';
-    settings.border_width = boxValue(style.borderWidth);
-    settings.border_color = style.borderColor;
-    // When a column divider border is right-only or left-only on Desktop, clear it on Mobile where columns stack vertically
-    if (isVerticalDividerOnly) {
-      settings.border_width_mobile = boxValue({ top: 0, right: 0, bottom: 0, left: 0 }, true);
-    }
-  }
-
-  // Linear Gradient Border Solution:
-  // Elementor does not natively support linear-gradient on border-color.
-  // Preserve EXACT per-side border widths (`border-width: T R B L !important;`) so 1-sided borders
-  // (e.g. `border-right: 1px solid`) NEVER turn into 4-sided full box borders!
-  if (style.borderGradient && hasAnyBorderWidth) {
-    const g = style.borderGradient;
-    const gradCss = style.devModeBorderImage && style.devModeBorderImage.startsWith('linear-gradient')
-      ? style.devModeBorderImage
-      : `linear-gradient(${g.angle}deg, ${g.color1} ${g.stop1}%, ${g.color2} ${g.stop2}%)`;
-    const bgSolid = style.background || '#ffffff';
-    const bgLayer = style.gradient
-      ? `linear-gradient(${style.gradient.angle}deg, ${style.gradient.color1} ${style.gradient.stop1}%, ${style.gradient.color2} ${style.gradient.stop2}%)`
-      : `linear-gradient(${bgSolid}, ${bgSolid})`;
-    const bwCss = (bt === br && br === bb && bb === bl) ? `${bt}px` : `${bt}px ${br}px ${bb}px ${bl}px`;
-    const allFourSides = bt > 0 && br > 0 && bb > 0 && bl > 0;
-
-    let borderSnippet = '';
-    if (style.radius && allFourSides) {
-      borderSnippet = `selector {\n  border-style: solid !important;\n  border-color: transparent !important;\n  border-width: ${bwCss} !important;\n  background-image: ${bgLayer}, ${gradCss} !important;\n  background-origin: border-box !important;\n  background-clip: padding-box, border-box !important;\n}`;
-    } else {
-      borderSnippet = `selector {\n  border-style: solid !important;\n  border-width: ${bwCss} !important;\n  border-image: ${gradCss} 1 !important;\n}`;
-      if (isVerticalDividerOnly) {
-        borderSnippet += `\n@media (max-width: 767px) {\n  selector { border-width: 0 !important; }\n}`;
-      }
-    }
-    settings.custom_css = (settings.custom_css ? settings.custom_css + '\n' : '') + borderSnippet;
-  }
-
-  if (style.boxShadow) {
-    settings.box_shadow_box_shadow_type = 'yes';
-    settings.box_shadow_box_shadow = style.boxShadow;
-    if (style.boxShadow.position === 'inset') {
-      settings.box_shadow_box_shadow_position = 'inset';
-    }
-  }
-}
-
-function applyTypographySettings(settings, prefix, text = {}, responsive = {}) {
-  if (!text) return;
-  settings[`${prefix}_typography`] = 'custom';
-  if (text.fontFamily) settings[`${prefix}_font_family`] = text.fontFamily;
-  if (text.fontWeight) settings[`${prefix}_font_weight`] = String(text.fontWeight);
-  if (text.fontStyle) settings[`${prefix}_font_style`] = text.fontStyle;
-  if (text.transform) settings[`${prefix}_text_transform`] = text.transform;
-  if (text.decoration) settings[`${prefix}_text_decoration`] = text.decoration;
-
-  const size = Number(text.fontSize) || 16;
-  settings[`${prefix}_font_size`] = { unit: 'px', size, sizes: [] };
-
-  // Rule-based responsive typography scaling matching professional Elementor dev standards
-  let tabletSize;
-  let mobileSize;
-  if (responsive && responsive.tablet && responsive.tablet.fontSize) {
-    tabletSize = responsive.tablet.fontSize;
-  } else if (size >= 40) {
-    tabletSize = Math.round(size * 0.78);
-  } else if (size >= 28) {
-    tabletSize = Math.round(size * 0.82);
-  } else if (size >= 20) {
-    tabletSize = Math.round(size * 0.88);
-  } else if (size >= 15) {
-    tabletSize = Math.max(14, size - 1);
-  } else {
-    tabletSize = size;
-  }
-
-  if (responsive && responsive.mobile && responsive.mobile.fontSize) {
-    mobileSize = responsive.mobile.fontSize;
-  } else if (size >= 40) {
-    mobileSize = Math.max(22, Math.round(size * 0.60));
-  } else if (size >= 28) {
-    mobileSize = Math.max(18, Math.round(size * 0.70));
-  } else if (size >= 20) {
-    mobileSize = Math.max(16, Math.round(size * 0.80));
-  } else if (size >= 15) {
-    mobileSize = Math.max(13, size - 1);
-  } else {
-    mobileSize = size;
-  }
-
-  settings[`${prefix}_font_size_tablet`] = { unit: 'px', size: Number(tabletSize), sizes: [] };
-  settings[`${prefix}_font_size_mobile`] = { unit: 'px', size: Number(mobileSize), sizes: [] };
-
-  if (text.lineHeight) {
-    settings[`${prefix}_line_height`] = {
-      unit: text.lineHeightUnit || 'px',
-      size: Number(text.lineHeight),
-      sizes: [],
-    };
-  }
-  if (text.letterSpacing) {
-    settings[`${prefix}_letter_spacing`] = {
-      unit: 'px',
-      size: Number(text.letterSpacing),
-      sizes: [],
-    };
-  }
-}
-
-function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, resolveMedia) {
+function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, resolveMedia, options = {}) {
+  const { autoUnwrap = true, linearBorder = true } = options;
   const layout = node.layout || {};
   const style = node.style || {};
   const settings = {};
@@ -3990,8 +6584,29 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     }
   }
 
-  if (layout.clipsContent) {
+  if (layout.overflow && /^(hidden|auto|scroll|visible)$/.test(layout.overflow)) {
+    settings.overflow = layout.overflow;
+  } else if (layout.clipsContent) {
     settings.overflow = 'hidden';
+  }
+
+  // Preserve Dev Mode `min-height` OR Hero/Banner/Composite-BG height so full-bleed background sections never collapse vertically!
+  const explicitMinH = Number(layout.minHeight) || 0;
+  const nodeH = Math.round(Number(layout.height) || 0);
+  const effectiveMinH = explicitMinH > 0
+    ? explicitMinH
+    : (style.backgroundImage && nodeH >= 120 ? nodeH : 0);
+  if (effectiveMinH > 0) {
+    settings.min_height = { unit: 'px', size: effectiveMinH, sizes: [] };
+    if (effectiveMinH >= 480) {
+      settings.min_height_tablet = { unit: 'px', size: Math.round(effectiveMinH * 0.78), sizes: [] };
+      settings.min_height_mobile = { unit: 'px', size: Math.max(360, Math.round(effectiveMinH * 0.62)), sizes: [] };
+    }
+  }
+
+  if (Number(layout.maxWidth) > 0 && !settings.boxed_width) {
+    settings.content_width = 'boxed';
+    settings.boxed_width = { unit: 'px', size: Math.round(Number(layout.maxWidth)), sizes: [] };
   }
 
   // Important: Top-level root sections get boxed widths and responsive padding matching Dev standards
@@ -4000,8 +6615,8 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     const padR = Number(layout.padding && layout.padding.right) || 0;
     if (padL >= 40 && padR >= 40 && (Number(layout.width) || 0) >= 1100) {
       const innerContentW = Math.max(960, Math.min(1320, (Number(layout.width) || 1440) - padL - padR));
-      const padT = Number(layout.padding && layout.padding.top) || 64;
-      const padB = Number(layout.padding && layout.padding.bottom) || 64;
+      const padT = (layout.padding && typeof layout.padding.top === 'number') ? layout.padding.top : 64;
+      const padB = (layout.padding && typeof layout.padding.bottom === 'number') ? layout.padding.bottom : 64;
       settings.content_width = 'boxed';
       settings.boxed_width = { unit: 'px', size: innerContentW, sizes: [] };
       settings.boxed_width_tablet = { unit: 'px', size: 768, sizes: [] };
@@ -4039,9 +6654,28 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     }
   }
 
-  applyCommonBoxStyle(settings, style, resolveMedia);
-
   // Absorb decorative background child (e.g. child named 'bg', 'background', 'overlay' or pure border frame)
+  // BEFORE applyCommonBoxStyle so absorbed borderGradient, background, radius & borderWidth are emitted cleanly!
+  const mergedStyle = { ...style };
+  const mergeDecorativeChildStyle = (cStyle) => {
+    if (!cStyle) return;
+    if (!mergedStyle.gradient && !mergedStyle.background && !mergedStyle.backgroundImage) {
+      if (cStyle.gradient) mergedStyle.gradient = cStyle.gradient;
+      else if (cStyle.background) mergedStyle.background = cStyle.background;
+      else if (cStyle.backgroundImage) {
+        mergedStyle.backgroundImage = cStyle.backgroundImage;
+        if (cStyle.backgroundImageDataUri) mergedStyle.backgroundImageDataUri = cStyle.backgroundImageDataUri;
+      }
+    }
+    if (!mergedStyle.radius && cStyle.radius) mergedStyle.radius = cStyle.radius;
+    if (!mergedStyle.borderWidth && cStyle.borderWidth) mergedStyle.borderWidth = cStyle.borderWidth;
+    if (!mergedStyle.borderColor && cStyle.borderColor) mergedStyle.borderColor = cStyle.borderColor;
+    if (!mergedStyle.borderStyle && cStyle.borderStyle) mergedStyle.borderStyle = cStyle.borderStyle;
+    if (!mergedStyle.borderGradient && cStyle.borderGradient) mergedStyle.borderGradient = cStyle.borderGradient;
+    if (!mergedStyle.devModeBorderImage && cStyle.devModeBorderImage) mergedStyle.devModeBorderImage = cStyle.devModeBorderImage;
+    if (!mergedStyle.boxShadow && cStyle.boxShadow) mergedStyle.boxShadow = cStyle.boxShadow;
+  };
+
   const childIds = [...(node.children || [])];
   const remainingChildIds = [];
   for (const cid of childIds) {
@@ -4051,49 +6685,14 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
       const isBgName = /^(bg|background|overlay|border|shadow|glow)$/i.test(cName);
       const hasNoText = !child.text && (!child.children || child.children.length === 0);
       if (isBgName && hasNoText) {
-        if (!settings.background_background) {
-          if (child.style?.gradient) {
-            settings.background_background = 'gradient';
-            settings.background_gradient_type = child.style.gradient.type || 'linear';
-            settings.background_color = child.style.gradient.color1;
-            settings.background_color_stop = { unit: '%', size: child.style.gradient.stop1, sizes: [] };
-            settings.background_color_b = child.style.gradient.color2;
-            settings.background_color_b_stop = { unit: '%', size: child.style.gradient.stop2, sizes: [] };
-            settings.background_gradient_angle = { unit: 'deg', size: child.style.gradient.angle || 180, sizes: [] };
-          } else if (child.style?.background) {
-            settings.background_background = 'classic';
-            settings.background_color = child.style.background;
-            applyGlobalColor(settings, 'background_color', child.style.background);
-          } else if (child.style?.backgroundImage && resolveMedia) {
-            const media = resolveMedia(child.style.backgroundImage, child.style.backgroundImageDataUri);
-            if (media.url) {
-              settings.background_background = 'classic';
-              settings.background_image = media;
-              settings.background_size = 'cover';
-              settings.background_position = 'center center';
-              settings.background_repeat = 'no-repeat';
-            }
-          }
-        }
-        if (!settings.border_radius && child.style?.radius) {
-          settings.border_radius = boxValue(child.style.radius);
-        }
-        if (!settings.border_border && child.style?.borderColor && child.style?.borderWidth) {
-          settings.border_border = 'solid';
-          settings.border_width = boxValue(child.style.borderWidth);
-          settings.border_color = child.style.borderColor;
-          applyGlobalColor(settings, 'border_color', child.style.borderColor);
-        }
-        if (child.style?.borderGradient && child.style?.borderWidth) {
-          style.borderGradient = child.style.borderGradient;
-          style.borderWidth = child.style.borderWidth;
-          if (child.style.devModeBorderImage) style.devModeBorderImage = child.style.devModeBorderImage;
-        }
+        mergeDecorativeChildStyle(child.style);
         continue;
       }
     }
     remainingChildIds.push(cid);
   }
+
+  applyCommonBoxStyle(settings, mergedStyle, resolveMedia, { linearBorder });
 
   // ── Auto-Unwrap Redundant Inner Container & Explicit Unwrap Widgets ──
   // 1. First expand any explicitly unwrapped child containers (user selected "unwrap")
@@ -4123,7 +6722,7 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
   // In Elementor, a single container handles both the full-width background and the boxed_width constraint!
   // Unwrapping this redundant inner container avoids doubling the container count (DOM bloat)
   // and matches exactly how senior Elementor developers build sections.
-  while (activeChildIds.length === 1) {
+  while (autoUnwrap !== false && activeChildIds.length === 1) {
     const singleChildId = activeChildIds[0];
     const singleChildNode = nodes[singleChildId];
     if (!singleChildNode) break;
@@ -4133,16 +6732,40 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     if (!isChildContainer) break;
     if (!singleChildNode.children || singleChildNode.children.length === 0) break;
 
-    // Do not unwrap if child has distinct background and parent already has a different background (unless forced unwrap)
+    // Auto-Unwrap Guard:
+    // ONLY auto-unwrap a pure transparent layout wrapper (e.g. Header 1440px -> Container 1200px -> [Logo, Nav, Button]).
+    // NEVER auto-unwrap an inner visual card (e.g. Section #FFF -> Contact band gradient + border + radius + padding 32px)!
     const parentHasBg = Boolean(settings.background_background || settings.background_color);
-    const childHasBg = Boolean(singleChildNode.style && singleChildNode.style.background);
-    if (parentHasBg && childHasBg && settings.background_color !== singleChildNode.style.background && childWType !== 'unwrap') {
-      break;
-    }
     const parentHasBorder = Boolean(settings.border_border || settings.border_width);
-    const childHasBorder = Boolean(singleChildNode.style && (singleChildNode.style.borderColor || singleChildNode.style.borderWidth));
-    if (parentHasBorder && childHasBorder && childWType !== 'unwrap') {
-      break;
+    const parentHasPadding = Boolean(
+      layout.padding && (layout.padding.top > 0 || layout.padding.right > 0 || layout.padding.bottom > 0 || layout.padding.left > 0)
+    );
+
+    const cs = singleChildNode.style || {};
+    const cl = singleChildNode.layout || {};
+    const childHasBg = Boolean(cs.background || cs.gradient || cs.backgroundImage);
+    const childHasBorder = Boolean(cs.borderColor || cs.borderWidth);
+    const childHasRadius = Boolean(cs.radius && (cs.radius.top > 0 || cs.radius.right > 0 || cs.radius.bottom > 0 || cs.radius.left > 0));
+    const childHasShadow = Boolean(cs.boxShadow);
+    const childHasPadding = Boolean(
+      cl.padding && (cl.padding.top > 0 || cl.padding.right > 0 || cl.padding.bottom > 0 || cl.padding.left > 0)
+    );
+    const childIsVisualCard = childHasBg || childHasBorder || childHasRadius || childHasShadow;
+
+    if (childWType !== 'unwrap') {
+      // 1. Both parent and child have backgrounds (classic, gradient, or image) -> distinct visual boxes
+      if (parentHasBg && childHasBg) {
+        const sameSolidBg = !cs.gradient && !cs.backgroundImage && settings.background_background === 'classic' && settings.background_color === cs.background;
+        if (!sameSolidBg) break;
+      }
+      // 2. Child is a styled card (border, radius, shadow, or gradient) inside a padded or styled parent section
+      if (childIsVisualCard && (parentHasBg || parentHasBorder || parentHasPadding)) {
+        break;
+      }
+      // 3. Both parent and child have explicit padding -> unwrapping would destroy one of the paddings
+      if (parentHasPadding && childHasPadding) {
+        break;
+      }
     }
 
     // Inherit boxed width from the inner container
@@ -4236,6 +6859,21 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
               applyGlobalColor(settings, 'background_color', innerChild.style.background);
             }
           }
+          if (!settings.border_radius && innerChild.style?.radius) {
+            settings.border_radius = boxValue(innerChild.style.radius);
+          }
+          if (!settings.border_border && innerChild.style?.borderColor && innerChild.style?.borderWidth) {
+            settings.border_border = innerChild.style.borderStyle || 'solid';
+            settings.border_width = boxValue(innerChild.style.borderWidth);
+            settings.border_color = innerChild.style.borderColor;
+          }
+          if (linearBorder !== false && innerChild.style?.borderGradient && innerChild.style?.borderWidth && !mergedStyle.borderGradient) {
+            mergedStyle.borderGradient = innerChild.style.borderGradient;
+            mergedStyle.borderWidth = innerChild.style.borderWidth;
+            if (innerChild.style.devModeBorderImage) mergedStyle.devModeBorderImage = innerChild.style.devModeBorderImage;
+            if (!mergedStyle.radius && innerChild.style.radius) mergedStyle.radius = innerChild.style.radius;
+            applyCommonBoxStyle(settings, { borderWidth: innerChild.style.borderWidth, borderGradient: innerChild.style.borderGradient, devModeBorderImage: innerChild.style.devModeBorderImage, radius: mergedStyle.radius, background: settings.background_color || mergedStyle.background, gradient: mergedStyle.gradient }, resolveMedia, { linearBorder });
+          }
           continue;
         }
       }
@@ -4267,33 +6905,6 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
   };
 }
 
-function inferHeadingTag(node) {
-  const name = String((node.content && (node.content.rawName || node.content.name)) || '').toLowerCase();
-  const match = /\bh([1-6])\b/.exec(name);
-  if (match) return `h${match[1]}`;
-  const size = Number(node.text && node.text.fontSize) || 24;
-  if (size >= 44) return 'h1';
-  if (size >= 32) return 'h2';
-  if (size >= 24) return 'h3';
-  if (size >= 20) return 'h4';
-  return 'h5';
-}
-
-function getTextGradientCss(text) {
-  if (!text) return null;
-  if (typeof text.gradientCss === 'string' && text.gradientCss.includes('gradient')) {
-    return text.gradientCss.trim();
-  }
-  if (text.gradient && text.gradient.color1 && text.gradient.color2) {
-    const g = text.gradient;
-    return `linear-gradient(${g.angle ?? 180}deg, ${g.color1} ${g.stop1 ?? 0}%, ${g.color2} ${g.stop2 ?? 100}%)`;
-  }
-  return null;
-}
-
-function buildTextClipRule(selectorTarget, gradCss) {
-  return `${selectorTarget} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
-}
 
 function buildHeading(node, allocId) {
   const text = node.text || {};
@@ -4311,8 +6922,9 @@ function buildHeading(node, allocId) {
     }
   }
   applyTypographySettings(settings, 'typography', text, node.responsive);
+  applyTextShadowAndEffects(settings, text, 'selector .elementor-heading-title');
   if (gradCss) {
-    settings.custom_css = buildTextClipRule('selector .elementor-heading-title', gradCss);
+    appendCustomCss(settings, buildTextClipRule('selector .elementor-heading-title', gradCss));
   }
   return {
     id: allocId(node.id),
@@ -4347,8 +6959,9 @@ function buildTextEditor(node, allocId) {
     }
   }
   applyTypographySettings(settings, 'typography', text, node.responsive);
+  applyTextShadowAndEffects(settings, text, 'selector');
   if (gradCss) {
-    settings.custom_css = buildTextClipRule('selector', gradCss);
+    appendCustomCss(settings, buildTextClipRule('selector', gradCss));
   }
   return {
     id: allocId(node.id),
@@ -4360,7 +6973,8 @@ function buildTextEditor(node, allocId) {
   };
 }
 
-function buildButton(node, allocId) {
+function buildButton(node, allocId, options = {}) {
+  const { linearBorder = true } = options;
   const text = node.text || {};
   const style = node.style || {};
   const layout = node.layout || {};
@@ -4422,9 +7036,24 @@ function buildButton(node, allocId) {
   if (layout.padding && (layout.padding.top || layout.padding.right || layout.padding.bottom || layout.padding.left)) {
     settings.text_padding = boxValue(layout.padding);
   }
+  if (linearBorder !== false && style.borderGradient && style.borderWidth) {
+    const bw = style.borderWidth;
+    const bt = Math.round(Number(bw.top) || 0);
+    const br = Math.round(Number(bw.right) || 0);
+    const bb = Math.round(Number(bw.bottom) || 0);
+    const bl = Math.round(Number(bw.left) || 0);
+    if (bt > 0 || br > 0 || bb > 0 || bl > 0) {
+      const g = style.borderGradient;
+      const gradCss = style.devModeBorderImage && style.devModeBorderImage.startsWith('linear-gradient')
+        ? style.devModeBorderImage
+        : `linear-gradient(${g.angle}deg, ${g.color1} ${g.stop1}%, ${g.color2} ${g.stop2}%)`;
+      const bwCss = (bt === br && br === bb && bb === bl) ? `${bt}px` : `${bt}px ${br}px ${bb}px ${bl}px`;
+      appendCustomCss(settings, `selector .elementor-button {\n  border-style: solid !important;\n  border-width: ${bwCss} !important;\n  border-image: ${gradCss} 1 !important;\n}`);
+    }
+  }
   const btnTextGrad = getTextGradientCss(text);
   if (btnTextGrad) {
-    settings.custom_css = buildTextClipRule('selector .elementor-button-text', btnTextGrad);
+    appendCustomCss(settings, buildTextClipRule('selector .elementor-button-text', btnTextGrad));
   }
   return {
     id: allocId(node.id),
@@ -4437,19 +7066,23 @@ function buildButton(node, allocId) {
 }
 
 function buildSiteLogo(node, allocId, resolveMedia) {
-  const sha = (node.image && node.image.sha256) || (node.svg && node.svg.sha256) || '';
-  const media = resolveMedia ? resolveMedia(sha, (node.image && node.image.dataUri) || '') : { id: 0, url: '' };
+  const sha = (node.image && node.image.sha256) || (node.raster && node.raster.sha256) || (node.svg && node.svg.sha256) || '';
+  const fallback = (node.image && node.image.dataUri) || (node.raster && node.raster.dataUri) || '';
+  const media = resolveMedia ? resolveMedia(sha, fallback) : { id: '', url: fallback };
   const w = Math.max(20, Math.round(Number(node.layout && node.layout.width) || 120));
 
   // If live push uploaded to WordPress media library
   if (media && Number(media.id) > 0 && media.url) {
+    const imgRef = { id: Number(media.id), url: media.url };
     return {
       id: allocId(node.id),
       elType: 'widget',
       widgetType: 'theme-site-logo',
       isInner: false,
       settings: {
-        custom_image: { id: Number(media.id), url: media.url },
+        image: imgRef,
+        image_size: 'full',
+        custom_image: imgRef,
         use_custom_image: 'yes',
         width: { unit: 'px', size: w, sizes: [] },
       },
@@ -4457,18 +7090,21 @@ function buildSiteLogo(node, allocId, resolveMedia) {
     };
   }
 
-  // If we have SVG markup (Clipboard Ctrl+V paste or direct SVG)
+  // If we have SVG markup (Clipboard Ctrl+V paste or direct SVG -> base64 data URI)
   if (node.svg && node.svg.markup) {
+    const svgImg = {
+      url: svgMarkupToDataUri(node.svg.markup),
+      id: '',
+    };
     return {
       id: allocId(node.id),
       elType: 'widget',
       widgetType: 'theme-site-logo',
       isInner: false,
       settings: {
-        custom_image: {
-          url: `data:image/svg+xml;utf8,${encodeURIComponent(node.svg.markup)}`,
-          id: '',
-        },
+        image: svgImg,
+        image_size: 'full',
+        custom_image: svgImg,
         use_custom_image: 'yes',
         width: { unit: 'px', size: w, sizes: [] },
       },
@@ -4482,6 +7118,8 @@ function buildSiteLogo(node, allocId, resolveMedia) {
     widgetType: 'theme-site-logo',
     isInner: false,
     settings: {
+      image: media,
+      image_size: 'full',
       custom_image: media,
       use_custom_image: 'yes',
       width: { unit: 'px', size: w, sizes: [] },
@@ -4491,20 +7129,23 @@ function buildSiteLogo(node, allocId, resolveMedia) {
 }
 
 function buildImage(node, allocId, resolveMedia) {
-  const sha = (node.image && node.image.sha256) || (node.svg && node.svg.sha256) || '';
-  const media = resolveMedia ? resolveMedia(sha, (node.image && node.image.dataUri) || '') : { id: 0, url: '' };
+  const elId = allocId(node.id);
+  const sha = (node.image && node.image.sha256) || (node.raster && node.raster.sha256) || (node.svg && node.svg.sha256) || '';
+  const fallback = (node.image && node.image.dataUri) || (node.raster && node.raster.dataUri) || '';
+  const media = resolveMedia ? resolveMedia(sha, fallback) : { id: 0, url: fallback };
   const w = node.layout && node.layout.width ? Number(node.layout.width) : null;
   const h = node.layout && node.layout.height ? Number(node.layout.height) : null;
 
   // If this image is an SVG graphic and not uploaded to WP media (e.g. direct Clipboard Ctrl+V):
   if (node.svg && node.svg.markup && (!media || !media.url)) {
+    const scopedSvg = scopeSvgIds(node.svg.markup, elId);
     return {
-      id: allocId(node.id),
+      id: elId,
       elType: 'widget',
       widgetType: 'html',
       isInner: false,
       settings: {
-        html: `<div class="f2e-image-svg" style="display:inline-flex;align-items:center;${w ? `width:${w}px;` : ''}${h ? `height:${h}px;` : ''}line-height:0;">${node.svg.markup}</div>`,
+        html: `<div class="f2e-image-svg" style="display:inline-flex;align-items:center;${w ? `width:${w}px;` : ''}${h ? `height:${h}px;` : ''}line-height:0;">${scopedSvg}</div>`,
       },
       elements: [],
     };
@@ -4521,7 +7162,7 @@ function buildImage(node, allocId, resolveMedia) {
     settings.image_border_radius = boxValue(node.style.radius);
   }
   return {
-    id: allocId(node.id),
+    id: elId,
     elType: 'widget',
     widgetType: 'image',
     isInner: false,
@@ -4537,6 +7178,7 @@ function buildImage(node, allocId, resolveMedia) {
  *   wrapping the exact `<svg>` markup so it never falls back to a broken FontAwesome star!
  */
 function buildIconOrInlineSvg(node, allocId, resolveMedia) {
+  const elId = allocId(node.id);
   const sha = node.svg && node.svg.sha256 ? node.svg.sha256 : '';
   const media = sha && resolveMedia ? resolveMedia(sha, '') : { id: 0, url: '' };
   const w = Math.max(12, Math.round(Number(node.layout && node.layout.width) || 24));
@@ -4545,7 +7187,7 @@ function buildIconOrInlineSvg(node, allocId, resolveMedia) {
   if (node.svg && node.svg.markup) {
     if (media && Number(media.id) > 0 && media.url && w <= 64 && h <= 64) {
       return {
-        id: allocId(node.id),
+        id: elId,
         elType: 'widget',
         widgetType: 'icon',
         isInner: false,
@@ -4561,17 +7203,18 @@ function buildIconOrInlineSvg(node, allocId, resolveMedia) {
     }
 
     // Render exact inline SVG inside a clean flex wrapper via Elementor HTML widget
-    const svgWMatch = node.svg.markup.match(/\bwidth=["'](\d+(?:\.\d+)?)/i);
-    const svgHMatch = node.svg.markup.match(/\bheight=["'](\d+(?:\.\d+)?)/i);
+    const scopedSvg = scopeSvgIds(node.svg.markup, elId);
+    const svgWMatch = scopedSvg.match(/\bwidth=["'](\d+(?:\.\d+)?)/i);
+    const svgHMatch = scopedSvg.match(/\bheight=["'](\d+(?:\.\d+)?)/i);
     const boxW = Math.max(w, svgWMatch ? Math.round(parseFloat(svgWMatch[1])) : w);
     const boxH = Math.max(h, svgHMatch ? Math.round(parseFloat(svgHMatch[1])) : h);
     return {
-      id: allocId(node.id),
+      id: elId,
       elType: 'widget',
       widgetType: 'html',
       isInner: false,
       settings: {
-        html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${boxW}px;height:${boxH}px;flex-shrink:0;line-height:0;">${node.svg.markup}</div>`,
+        html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${boxW}px;height:${boxH}px;flex-shrink:0;line-height:0;">${scopedSvg}</div>`,
       },
       elements: [],
     };
@@ -4579,7 +7222,7 @@ function buildIconOrInlineSvg(node, allocId, resolveMedia) {
 
   const color = (node.svg && node.svg.color) || (node.style && node.style.background) || '#1E293B';
   return {
-    id: allocId(node.id),
+    id: elId,
     elType: 'widget',
     widgetType: 'icon',
     isInner: false,
@@ -4596,9 +7239,11 @@ function buildIconOrInlineSvg(node, allocId, resolveMedia) {
 }
 
 function buildCustomHtml(node, allocId) {
-  const html = (node.svg && node.svg.markup) || (node.text && node.text.characters) || '';
+  const elId = allocId(node.id);
+  const rawHtml = (node.svg && node.svg.markup) || (node.text && node.text.characters) || '';
+  const html = (node.svg && node.svg.markup) ? scopeSvgIds(rawHtml, elId) : rawHtml;
   return {
-    id: allocId(node.id),
+    id: elId,
     elType: 'widget',
     widgetType: 'html',
     isInner: false,
@@ -4697,35 +7342,6 @@ function buildSpacer(node, allocId) {
   };
 }
 
-function collectSubtreeTexts(node, nodes) {
-  if (!node) return [];
-  if (Array.isArray(node.extractedTexts) && node.extractedTexts.length > 0 && (!node.children || node.children.length === 0)) {
-    return node.extractedTexts.map((t, idx) => ({
-      id: `${node.id}-txt-${idx}`,
-      text: t,
-      responsive: node.responsive,
-    }));
-  }
-  const out = [];
-  const walk = (n) => {
-    if (!n) return;
-    if (n.text && n.text.characters) out.push(n);
-    for (const cid of n.children || []) walk(nodes[cid]);
-  };
-  walk(node);
-  return out;
-}
-
-function collectSubtreeImages(node, nodes) {
-  const out = [];
-  const walk = (n) => {
-    if (!n) return;
-    if (n.image) out.push(n.image);
-    for (const cid of n.children || []) walk(nodes[cid]);
-  };
-  walk(node);
-  return out;
-}
 
 function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
   const content = node.content || {};
@@ -4766,7 +7382,7 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
     applyTypographySettings(settings, 'title_typography', titleTypo, node.responsive);
   }
   if (titleGrad) {
-    settings.custom_css = buildTextClipRule('selector .elementor-icon-box-title, selector .elementor-image-box-title', titleGrad);
+    appendCustomCss(settings, buildTextClipRule('selector .elementor-icon-box-title, selector .elementor-image-box-title', titleGrad));
   }
 
   const descColor = (descTypo && (descTypo.color || (descTypo.gradient && descTypo.gradient.color2))) || null;
@@ -4778,25 +7394,40 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
     applyTypographySettings(settings, 'description_typography', descTypo, node.responsive);
   }
 
+  const sha = (node.raster && node.raster.sha256) || (node.image && node.image.sha256) || (node.svg && node.svg.sha256) || '';
+  const fallback = (node.raster && node.raster.dataUri) || (node.image && node.image.dataUri) || '';
+  const media = resolveMedia ? resolveMedia(sha, fallback) : { id: 0, url: fallback };
+
+  const isRasterAsset = Boolean(
+    node.raster ||
+    node.image ||
+    (media && media.url && /^data:image\/(png|jpeg|jpg|webp|gif)|(\.(png|jpe?g|webp|gif)(\?|$))/i.test(media.url))
+  );
+  const isSvgAsset = Boolean(node.svg) && !isRasterAsset;
+
+  let finalWidgetType = wType;
+  if (wType === 'icon-box' && (isRasterAsset || (!isSvgAsset && media && media.url))) {
+    finalWidgetType = 'image-box';
+  }
+
   if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
-    const spaceKey = wType === 'image-box' ? 'image_space' : 'icon_space';
+    const spaceKey = finalWidgetType === 'image-box' ? 'image_space' : 'icon_space';
     settings[spaceKey] = { unit: 'px', size: node.layout.gap, sizes: [] };
   }
 
-  const sha = (node.raster && node.raster.sha256) || (node.image && node.image.sha256) || (node.svg && node.svg.sha256) || '';
-  const fallback = (node.raster && node.raster.dataUri) || (node.image && node.image.dataUri) || '';
-  const media = resolveMedia ? resolveMedia(sha, fallback) : { id: 0, url: '' };
-
-  if (wType === 'image-box') {
-    if (!media.url) {
-      const imgs = collectSubtreeImages(node, nodes);
-      settings.image = imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: 0, url: '' };
-    } else {
-      settings.image = media;
-    }
-  } else {
+  if (finalWidgetType === 'image-box') {
     if (media && media.url) {
-      settings.selected_icon = { value: media.url, library: 'svg' };
+      settings.image = { id: media.id || '', url: media.url };
+    } else if (node.svg && node.svg.markup) {
+      settings.image = { id: '', url: svgMarkupToDataUri(node.svg.markup) };
+    } else {
+      const imgs = collectSubtreeImages(node, nodes);
+      settings.image = imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' };
+    }
+    settings.thumbnail_size = 'full';
+  } else {
+    if (isSvgAsset && media && Number(media.id) > 0 && media.url) {
+      settings.selected_icon = { value: { id: Number(media.id), url: media.url }, library: 'svg' };
     } else if (node.svg && node.svg.markup) {
       settings.selected_icon = { value: node.svg.markup, library: 'svg' };
     } else {
@@ -4811,31 +7442,45 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
   return {
     id: allocId(node.id),
     elType: 'widget',
-    widgetType: wType,
+    widgetType: finalWidgetType,
     isInner: false,
     settings,
     elements: [],
   };
 }
 
+function inferIconListFaIcon(textStr, iconSize) {
+  const s = String(textStr || '').toLowerCase();
+  if (s.includes('@') && /\S+@\S+\.\S+/.test(s)) return 'fas fa-envelope';
+  if (/(?:\+84|hotline|tel:|phone|\b0\d[\d\s.-]{7,})/.test(s)) return 'fas fa-phone-alt';
+  if (/(?:hà nội|tp\.?\s*hcm|hồ chí minh|đà nẵng|phường|quận|đường|tầng|số\s+\d+|địa chỉ|street|address)/.test(s)) return 'fas fa-map-marker-alt';
+  if (/(?:https?:\/\/|www\.)/.test(s)) return 'fas fa-globe';
+  if (/(?:24\/7|giờ làm|thứ\s+[2-7])/.test(s)) return 'fas fa-clock';
+  return iconSize >= 14 ? 'fas fa-check-circle' : 'fas fa-circle';
+}
+
 function buildIconList(node, nodes, allocId) {
   const items = (node.content && node.content.iconList) || [];
   const texts = collectSubtreeTexts(node, nodes);
+  const iconSize = (node.content && node.content.iconSize && node.content.iconSize <= 32) ? node.content.iconSize : 6;
   let listData = [];
   if (items.length > 0) {
     listData = items.map((it, idx) => ({
       _id: shortId(`il-${idx}`),
       text: it.text,
-      selected_icon: { value: 'fas fa-circle', library: 'fa-solid' },
-      link: it.link ? { url: it.link } : undefined,
+      selected_icon: { value: inferIconListFaIcon(it.text, iconSize), library: 'fa-solid' },
+      ...(it.link ? { link: { url: it.link } } : {}),
     }));
   } else {
     const validTexts = texts.filter((t) => t.text && t.text.characters && t.text.characters.trim().length > 1);
-    listData = validTexts.map((t, idx) => ({
-      _id: shortId(`il-${idx}`),
-      text: t.text.characters.replace(/^[\u2713\u2714\u2022\u00b7\u25cf\u25cb\u2013\u2014\-*]\s*/, ''),
-      selected_icon: { value: 'fas fa-circle', library: 'fa-solid' },
-    }));
+    listData = validTexts.map((t, idx) => {
+      const cleanTxt = t.text.characters.replace(/^[\u2713\u2714\u2022\u00b7\u25cf\u25cb\u2013\u2014\-*]\s*/, '');
+      return {
+        _id: shortId(`il-${idx}`),
+        text: cleanTxt,
+        selected_icon: { value: inferIconListFaIcon(cleanTxt, iconSize), library: 'fa-solid' },
+      };
+    });
   }
 
   const firstTypo = node.text || (texts[0] && texts[0].text) || null;
@@ -4843,7 +7488,6 @@ function buildIconList(node, nodes, allocId) {
   const gap = Math.max(12, Number(node.layout && node.layout.gap) || 24);
   const textColor = (firstTypo && (firstTypo.color || (firstTypo.gradient && firstTypo.gradient.color2))) || '#FFFFFF';
   const iconColor = (node.content && node.content.iconColor) || textColor;
-  const iconSize = (node.content && node.content.iconSize && node.content.iconSize <= 32) ? node.content.iconSize : 6;
 
   const settings = {
     icon_list: listData,
@@ -4940,281 +7584,11 @@ function buildAlert(node, nodes, allocId) {
   };
 }
 
-function buildNestedAccordion(node, nodes, allocId, buildElement) {
-  const items = [];
-  const panels = [];
-  const extractedItems = (node.content && Array.isArray(node.content.accordionItems)) ? node.content.accordionItems : [];
-  const childIds = Array.isArray(node.children) ? node.children : [];
-
-  let firstTitleTypo = null;
-  let activeTitleColor = null;
-  let normalTitleColor = null;
-  let firstBodyTypo = null;
-  let firstBodyText = '';
-  let rowPadding = null;
-  let rowBorderWidth = null;
-  let rowBorderColor = null;
-  const leadingIcons = [];
-
-  const findLeadingIconSvg = (irChild) => {
-    if (!irChild) return null;
-    const queue = [...(irChild.children || [])];
-    while (queue.length > 0) {
-      const cid = queue.shift();
-      const cn = nodes[cid];
-      if (!cn) continue;
-      if (cn.svg && cn.svg.markup) {
-        const w = Number(cn.layout && cn.layout.width) || 40;
-        const h = Number(cn.layout && cn.layout.height) || 40;
-        const nm = String((cn.content && cn.content.name) || '').toLowerCase();
-        // Skip small right-hand expand/collapse plus/minus icon (<= 28px or named plus/minus/arrow/chevron)
-        if ((w <= 26 && h <= 26 && (nm.includes('plus') || nm.includes('minus') || nm.includes('chevron') || nm.includes('arrow'))) || nm === 'icon/plus' || nm === 'icon/minus') {
-          continue;
-        }
-        return { markup: cn.svg.markup, width: w, height: h };
-      }
-      if (Array.isArray(cn.children)) queue.push(...cn.children);
-    }
-    return null;
-  };
-
-  const count = Math.max(childIds.length, extractedItems.length);
-  for (let i = 0; i < count; i += 1) {
-    const cid = childIds[i];
-    const child = cid ? nodes[cid] : null;
-    const ext = extractedItems[i] || null;
-    const childTexts = child ? collectSubtreeTexts(child, nodes) : [];
-
-    const titleNodeTypo = (ext && ext.titleTypography) || (childTexts[0] && childTexts[0].text) || null;
-    const bodyNodeTypo = (ext && ext.bodyTypography) || (childTexts[1] && childTexts[1].text) || null;
-
-    const title = (ext && ext.title)
-      || (childTexts[0] && childTexts[0].text && childTexts[0].text.characters)
-      || (child && child.content && child.content.name)
-      || `Item #${i + 1}`;
-
-    const bodyText = (ext && ext.body)
-      || (childTexts.length > 1
-        ? childTexts.slice(1).map((t) => (t.text && t.text.characters) || '').filter(Boolean).join('\n')
-        : '');
-
-    if (titleNodeTypo) {
-      if (!firstTitleTypo) firstTitleTypo = titleNodeTypo;
-      if (i === 0 && titleNodeTypo.color && !activeTitleColor) {
-        activeTitleColor = titleNodeTypo.color;
-      } else if (i > 0 && titleNodeTypo.color && !normalTitleColor) {
-        normalTitleColor = titleNodeTypo.color;
-      }
-    }
-    if (bodyNodeTypo && !firstBodyTypo) firstBodyTypo = bodyNodeTypo;
-    if (bodyText && !firstBodyText) firstBodyText = bodyText;
-
-    const pad = (ext && ext.padding) || (child && child.layout && child.layout.padding);
-    if (pad && !rowPadding && (pad.top || pad.bottom || pad.left || pad.right)) {
-      rowPadding = pad;
-    }
-    const bw = (ext && ext.borderWidth) || (child && child.style && child.style.borderWidth);
-    const bc = (ext && ext.borderColor) || (child && child.style && child.style.borderColor);
-    if (bw && bc && !rowBorderWidth) {
-      rowBorderWidth = bw;
-      rowBorderColor = bc;
-    }
-
-    const iconInfo = findLeadingIconSvg(child);
-    leadingIcons.push(iconInfo);
-
-    const itemId = shortId(cid || `${node.id}-item-${i}`);
-    items.push({ _id: itemId, item_title: title });
-
-    const effectiveBody = bodyText || firstBodyText || title;
-    const bTypo = bodyNodeTypo || firstBodyTypo || {
-      fontFamily: (firstTitleTypo && firstTitleTypo.fontFamily) || 'Inter',
-      fontWeight: '400',
-      fontSize: 16,
-      lineHeight: 24,
-      lineHeightUnit: 'px',
-      color: 'rgba(0, 0, 0, 0.7)',
-    };
-    const leftIndent = iconInfo ? (iconInfo.width + 16) : (leadingIcons[0] ? (leadingIcons[0].width + 16) : 0);
-
-    const textEditorSettings = {
-      editor: `<p style="margin:0;">${effectiveBody}</p>`,
-      align: 'left',
-      text_color: bTypo.color || 'rgba(0, 0, 0, 0.7)',
-      typography_typography: 'custom',
-      typography_font_family: bTypo.fontFamily || 'Inter',
-      typography_font_weight: String(bTypo.fontWeight || '400'),
-      typography_font_size: { unit: 'px', size: bTypo.fontSize || 16, sizes: [] },
-      typography_font_size_tablet: { unit: 'px', size: bTypo.fontSize || 16, sizes: [] },
-      typography_font_size_mobile: { unit: 'px', size: Math.max(14, (bTypo.fontSize || 16) - 1), sizes: [] },
-      typography_line_height: { unit: bTypo.lineHeightUnit || 'px', size: bTypo.lineHeight || 24, sizes: [] },
-      _title: title,
-    };
-
-    const innerBodyContainer = {
-      id: allocId(`${cid || node.id}-body-wrap-${i}`),
-      elType: 'container',
-      isInner: true,
-      settings: {
-        container_type: 'flex',
-        flex_direction: 'column',
-        margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
-        padding: {
-          unit: 'px',
-          top: '0',
-          right: '0',
-          bottom: String((rowPadding && rowPadding.bottom) || 20),
-          left: String(leftIndent),
-          isLinked: false,
-        },
-      },
-      elements: [
-        {
-          id: allocId(`${cid || node.id}-body-txt-${i}`),
-          elType: 'widget',
-          widgetType: 'text-editor',
-          isInner: false,
-          settings: textEditorSettings,
-          elements: [],
-        },
-      ],
-    };
-
-    panels.push({
-      id: allocId(`${cid || node.id}-panel-${i}`),
-      elType: 'container',
-      isInner: true,
-      isLocked: true,
-      settings: {
-        _title: `item #${i + 1}`,
-        content_width: 'full',
-        margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
-        padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
-      },
-      elements: [innerBodyContainer],
-    });
-  }
-
-  const settings = {
-    items,
-    accordion_item_title_position_horizontal: 'stretch',
-    accordion_item_title_icon_position: 'end',
-    faq_schema: '',
-    content_border_border: 'none',
-    _margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
-    _padding: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: false },
-  };
-
-  if (rowPadding) {
-    settings.accordion_padding = {
-      unit: 'px',
-      top: String(rowPadding.top || 20),
-      right: String(rowPadding.right || 0),
-      bottom: String(rowPadding.bottom || 20),
-      left: String(rowPadding.left || 0),
-      isLinked: false,
-    };
-  } else {
-    settings.accordion_padding = { unit: 'px', top: '20', right: '0', bottom: '20', left: '0', isLinked: false };
-  }
-
-  if (rowBorderWidth && rowBorderColor) {
-    settings.accordion_border_normal_border = 'solid';
-    settings.accordion_border_normal_width = {
-      unit: 'px',
-      top: String(rowBorderWidth.top || 0),
-      right: String(rowBorderWidth.right || 0),
-      bottom: String(rowBorderWidth.bottom || 1),
-      left: String(rowBorderWidth.left || 0),
-      isLinked: false,
-    };
-    settings.accordion_border_normal_color = rowBorderColor;
-  }
-
-  if (firstTitleTypo) {
-    settings.title_typography_typography = 'custom';
-    settings.title_typography_font_family = firstTitleTypo.fontFamily || 'Inter';
-    settings.title_typography_font_weight = String(firstTitleTypo.fontWeight || '600');
-    settings.title_typography_font_size = { unit: 'px', size: firstTitleTypo.fontSize || 20, sizes: [] };
-    settings.title_typography_font_size_mobile = { unit: 'px', size: Math.max(14, Math.round((firstTitleTypo.fontSize || 20) * 0.75)), sizes: [] };
-    if (firstTitleTypo.lineHeight) {
-      settings.title_typography_line_height = { unit: firstTitleTypo.lineHeightUnit || 'px', size: firstTitleTypo.lineHeight, sizes: [] };
-    }
-  }
-
-  if (normalTitleColor || activeTitleColor) {
-    settings.normal_title_color = normalTitleColor || activeTitleColor || '#000000';
-    settings.active_title_color = activeTitleColor || normalTitleColor || '#16A34A';
-    settings.normal_icon_color = normalTitleColor || '#475569';
-    settings.active_icon_color = activeTitleColor || '#16A34A';
-  }
-
-  if (leadingIcons.some(Boolean)) {
-    const iconW = (leadingIcons.find(Boolean) && leadingIcons.find(Boolean).width) || 40;
-    const iconH = (leadingIcons.find(Boolean) && leadingIcons.find(Boolean).height) || 40;
-    const padLeft = iconW + 16;
-    const cssRules = [
-      `selector .e-n-accordion-item-title-text { position: relative; padding-left: ${padLeft}px; display: inline-flex; align-items: center; min-height: ${iconH}px; }`,
-      `selector .e-n-accordion-item-title-text:before { content: ''; position: absolute; width: ${iconW}px; height: ${iconH}px; left: 0; top: 50%; transform: translateY(-50%); background-repeat: no-repeat; background-position: center; background-size: contain; }`,
-    ];
-    leadingIcons.forEach((ic, idx) => {
-      if (ic && ic.markup) {
-        const encoded = encodeURIComponent(ic.markup.trim().replace(/\s+/g, ' '));
-        cssRules.push(`selector .e-n-accordion-item:nth-child(${idx + 1}) .e-n-accordion-item-title-text:before { background-image: url("data:image/svg+xml;utf8,${encoded}"); }`);
-      }
-    });
-    cssRules.push('selector [aria-expanded="true"] { border: none !important; }');
-    settings.custom_css = cssRules.join('\n');
-  }
-
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: 'nested-accordion',
-    isInner: false,
-    settings,
-    elements: panels,
-  };
-}
-
-function buildNestedTabs(node, nodes, allocId, buildElement) {
-  const tabs = [];
-  const panels = [];
-  const extractedItems = (node.content && Array.isArray(node.content.accordionItems)) ? node.content.accordionItems : [];
-  const childIds = Array.isArray(node.children) ? node.children : [];
-  const count = Math.max(childIds.length, extractedItems.length);
-
-  for (let i = 0; i < count; i += 1) {
-    const cid = childIds[i];
-    const child = cid ? nodes[cid] : null;
-    const ext = extractedItems[i] || null;
-    const childTexts = child ? collectSubtreeTexts(child, nodes) : [];
-    const title = (ext && ext.title)
-      || (childTexts[0] && childTexts[0].text && childTexts[0].text.characters)
-      || (child && child.content && child.content.name)
-      || `Tab ${i + 1}`;
-    tabs.push({ _id: shortId(cid || `${node.id}-tab-${i}`), tab_title: title });
-    if (cid && child) {
-      const panel = buildElement(cid, false, node);
-      if (panel) {
-        panel.elType = 'container';
-        panel.isInner = true;
-        panels.push(panel);
-      }
-    }
-  }
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: 'nested-tabs',
-    isInner: false,
-    settings: { tabs },
-    elements: panels,
-  };
-}
 
 function buildGalleryOrCarousel(node, nodes, wType, allocId, resolveMedia) {
-  const imgs = collectSubtreeImages(node, nodes).map((img) => resolveMedia(img.sha256, img.dataUri));
+  const imgs = collectSubtreeImages(node, nodes)
+    .map((img) => resolveMedia(img.sha256, img.dataUri))
+    .filter((m) => m && (m.url || m.id));
   const isCarousel = wType.includes('carousel');
   const settings = isCarousel
     ? { carousel: imgs, slides_to_show: '3', navigation: 'both' }
@@ -5230,8 +7604,15 @@ function buildGalleryOrCarousel(node, nodes, wType, allocId, resolveMedia) {
 }
 
 function buildTestimonial(node, nodes, allocId, resolveMedia) {
-  const textItems = collectSubtreeTexts(node, nodes);
-  const imgs = collectSubtreeImages(node, nodes);
+  let textItems = collectSubtreeTexts(node, nodes);
+  let imgs = collectSubtreeImages(node, nodes);
+  const slides = (node.content && Array.isArray(node.content.slides)) ? node.content.slides : [];
+  if (textItems.length === 0 && slides.length > 0 && Array.isArray(slides[0].texts)) {
+    textItems = slides[0].texts.map((t, idx) => ({ id: `${node.id}-sl-txt-${idx}`, text: t }));
+  }
+  if (imgs.length === 0 && slides.length > 0 && slides[0].image) {
+    imgs = [slides[0].image];
+  }
   const sortedNodes = [...textItems].sort((a, b) => ((b.text && b.text.characters) || '').length - ((a.text && a.text.characters) || '').length);
 
   const contentNode = sortedNodes[0] || null;
@@ -5385,9 +7766,12 @@ function buildCounter(node, nodes, allocId) {
   }
 
   if (gradCss) {
-    settings.custom_css = buildTextClipRule(
-      'selector .elementor-counter-number-wrapper, selector .elementor-counter-number',
-      gradCss
+    appendCustomCss(
+      settings,
+      buildTextClipRule(
+        'selector .elementor-counter-number-wrapper, selector .elementor-counter-number',
+        gradCss
+      )
     );
   }
 
@@ -5403,349 +7787,6 @@ function buildCounter(node, nodes, allocId) {
 
 // ── Elementor Pro Widget Builders ──
 
-function buildProForm(node, nodes, allocId) {
-  const formFields = [];
-  const content = node.content || {};
-  let submitLabel = content.submitLabel || 'Send Message';
-
-  if (Array.isArray(content.formFields) && content.formFields.length > 0) {
-    for (const [idx, f] of content.formFields.entries()) {
-      formFields.push({
-        _id: shortId(`${node.id}-fld-${idx}`),
-        custom_id: `field_${idx + 1}`,
-        field_type: f.type || 'text',
-        field_label: f.label,
-        placeholder: f.placeholder || f.label,
-        required: f.required ? 'true' : '',
-        width: '100',
-      });
-    }
-  } else {
-    let idx = 1;
-    for (const cid of node.children || []) {
-      const child = nodes[cid];
-      if (!child) continue;
-      if (child.widget === 'button') {
-        submitLabel = (child.content && (child.content.characters || child.content.name)) || submitLabel;
-        continue;
-      }
-      const texts = collectSubtreeTexts(child, nodes).map((t) => t.text.characters);
-      const label = texts[0] || (child.content && child.content.name) || `Field ${idx}`;
-      const lower = label.toLowerCase();
-      let fieldType = 'text';
-      if (lower.includes('email') || lower.includes('mail')) fieldType = 'email';
-      else if (lower.includes('phone') || lower.includes('tel') || lower.includes('số điện thoại')) fieldType = 'tel';
-      else if (lower.includes('message') || lower.includes('comment') || lower.includes('nội dung') || (Number(child.layout && child.layout.height) || 0) >= 90) fieldType = 'textarea';
-
-      formFields.push({
-        _id: shortId(cid),
-        custom_id: `field_${idx}`,
-        field_type: fieldType,
-        field_label: label,
-        placeholder: texts[1] || label,
-        required: lower.includes('email') || lower.includes('name') ? 'true' : '',
-        width: '100',
-      });
-      idx += 1;
-    }
-  }
-
-  if (formFields.length === 0) {
-    formFields.push(
-      { _id: shortId('f1'), custom_id: 'name', field_type: 'text', field_label: 'Name', placeholder: 'Your Name', width: '100' },
-      { _id: shortId('f2'), custom_id: 'email', field_type: 'email', field_label: 'Email', placeholder: 'your@email.com', required: 'true', width: '100' }
-    );
-  }
-
-  const settings = {
-    form_name: content.name || 'Figma Form',
-    form_fields: formFields,
-    button_text: submitLabel,
-    button_size: 'md',
-  };
-
-  if (node.layout && typeof node.layout.gap === 'number') {
-    settings.row_gap = { unit: 'px', size: node.layout.gap, sizes: [] };
-  }
-  const fieldTypo = content.fieldTypography || node.text || null;
-  if (fieldTypo) {
-    if (fieldTypo.color) settings.field_text_color = fieldTypo.color;
-    applyTypographySettings(settings, 'field_typography', fieldTypo, node.responsive);
-  }
-  if (content.fieldStyle) {
-    if (content.fieldStyle.background) settings.field_background_color = content.fieldStyle.background;
-    if (content.fieldStyle.borderColor) settings.field_border_color = content.fieldStyle.borderColor;
-    if (content.fieldStyle.borderWidth) settings.field_border_width = boxValue(content.fieldStyle.borderWidth);
-    if (content.fieldStyle.radius) settings.field_border_radius = boxValue(content.fieldStyle.radius);
-  }
-  if (content.buttonTypography) {
-    if (content.buttonTypography.color) settings.button_text_color = content.buttonTypography.color;
-    applyTypographySettings(settings, 'button_typography', content.buttonTypography, node.responsive);
-  }
-  if (content.buttonStyle) {
-    if (content.buttonStyle.background) settings.button_background_color = content.buttonStyle.background;
-    else if (content.buttonStyle.gradient) settings.button_background_color = content.buttonStyle.gradient.color1;
-    if (content.buttonStyle.radius) settings.button_border_radius = boxValue(content.buttonStyle.radius);
-  }
-  if (content.buttonPadding) {
-    settings.button_text_padding = boxValue(content.buttonPadding);
-  }
-
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: 'form',
-    isInner: false,
-    settings,
-    elements: [],
-  };
-}
-
-function buildProNavMenu(node, nodes, allocId) {
-  const menuItems = (node.content && node.content.menuItems) || [];
-  const textItems = collectSubtreeTexts(node, nodes);
-  let items = menuItems.map((m) => (typeof m === 'string' ? m : m.name));
-  if (items.length === 0) {
-    items = textItems.map((t) => t.text.characters);
-  }
-  if (items.length === 0) {
-    items = ['Trang chủ', 'Dịch vụ', 'Giới thiệu', 'Liên hệ'];
-  }
-
-  const settings = {
-    layout: (node.layout && node.layout.direction === 'column') ? 'vertical' : 'horizontal',
-    align_items: 'center',
-    pointer: 'underline',
-    _f2e_menu_items: items,
-  };
-
-  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
-    settings.padding_horizontal_menu_item = { unit: 'px', size: Math.round(node.layout.gap / 2), sizes: [] };
-  }
-
-  const navTypo = node.text || (textItems[0] && textItems[0].text) || null;
-  if (navTypo) {
-    applyTypographySettings(settings, 'typography', navTypo, node.responsive);
-    if (navTypo.color) {
-      settings.color_menu_item = navTypo.color;
-    }
-  }
-
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: 'nav-menu',
-    isInner: false,
-    settings,
-    elements: [],
-  };
-}
-
-function buildProCta(node, nodes, allocId, resolveMedia) {
-  const textItems = collectSubtreeTexts(node, nodes);
-  const texts = textItems.map((t) => t.text.characters);
-  const imgs = collectSubtreeImages(node, nodes);
-  const settings = {
-    skin: 'classic',
-    title: texts[0] || (node.content && node.content.name) || 'Call to Action',
-    description: texts[1] || '',
-    button: texts[2] || 'Learn More',
-    bg_image: imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
-  };
-
-  if (textItems[0] && textItems[0].text) {
-    if (textItems[0].text.color) settings.title_color = textItems[0].text.color;
-    applyTypographySettings(settings, 'title_typography', textItems[0].text, node.responsive);
-  }
-  if (textItems[1] && textItems[1].text) {
-    if (textItems[1].text.color) settings.description_color = textItems[1].text.color;
-    applyTypographySettings(settings, 'description_typography', textItems[1].text, node.responsive);
-  }
-  if (textItems[2] && textItems[2].text) {
-    if (textItems[2].text.color) settings.button_text_color = textItems[2].text.color;
-    applyTypographySettings(settings, 'button_typography', textItems[2].text, node.responsive);
-  }
-  if (node.style && node.style.background) {
-    settings.content_bg_color = node.style.background;
-  }
-
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: 'call-to-action',
-    isInner: false,
-    settings,
-    elements: [],
-  };
-}
-
-function buildProPriceTable(node, nodes, allocId) {
-  const textItems = collectSubtreeTexts(node, nodes);
-  const texts = textItems.map((t) => t.text.characters);
-  const priceNode = textItems.find((t) => /[$€£₫¥]|\d+\s*\/\s*(mo|yr|tháng|năm)/i.test(t.text.characters) || /^\$?\d+$/.test(t.text.characters.trim()));
-  const priceText = (priceNode && priceNode.text.characters) || '49';
-  const numericPrice = priceText.replace(/[^0-9.]/g, '') || '49';
-  const headingNode = textItems[0] || null;
-  const heading = (headingNode && headingNode.text.characters) || (node.content && node.content.name) || 'Pro Plan';
-  const features = texts.slice(2).map((ft, idx) => ({
-    _id: shortId(`feat-${idx}`),
-    item_text: ft,
-    selected_icon: { value: 'fas fa-check', library: 'fa-solid' },
-  }));
-
-  const settings = {
-    heading,
-    sub_heading: texts[1] && texts[1] !== priceText ? texts[1] : 'Monthly Plan',
-    price: numericPrice,
-    currency_symbol: 'dollar',
-    period: 'Monthly',
-    features_list: features,
-    button_text: texts[texts.length - 1] || 'Get Started',
-  };
-
-  if (headingNode && headingNode.text) {
-    if (headingNode.text.color) settings.heading_color = headingNode.text.color;
-    applyTypographySettings(settings, 'heading_typography', headingNode.text, node.responsive);
-  }
-  if (priceNode && priceNode.text) {
-    if (priceNode.text.color) settings.price_color = priceNode.text.color;
-    applyTypographySettings(settings, 'price_typography', priceNode.text, node.responsive);
-  }
-  if (textItems[2] && textItems[2].text) {
-    if (textItems[2].text.color) settings.features_color = textItems[2].text.color;
-    applyTypographySettings(settings, 'features_typography', textItems[2].text, node.responsive);
-  }
-
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: 'price-table',
-    isInner: false,
-    settings,
-    elements: [],
-  };
-}
-
-function buildProFlipBox(node, nodes, allocId) {
-  const textItems = collectSubtreeTexts(node, nodes);
-  const texts = textItems.map((t) => t.text.characters);
-  const settings = {
-    title_text_a: texts[0] || (node.content && node.content.name) || 'Front Title',
-    description_text_a: texts[1] || '',
-    title_text_b: texts[2] || texts[0] || 'Back Title',
-    description_text_b: texts[3] || texts[1] || '',
-    button_text: texts[4] || 'Read More',
-  };
-  if (textItems[0] && textItems[0].text) {
-    if (textItems[0].text.color) settings.title_color_a = textItems[0].text.color;
-    applyTypographySettings(settings, 'title_typography_a', textItems[0].text, node.responsive);
-  }
-  if (textItems[1] && textItems[1].text) {
-    if (textItems[1].text.color) settings.description_color_a = textItems[1].text.color;
-    applyTypographySettings(settings, 'description_typography_a', textItems[1].text, node.responsive);
-  }
-  if (node.style && node.style.background) {
-    settings.background_a_background = 'classic';
-    settings.background_a_color = node.style.background;
-  }
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: 'flip-box',
-    isInner: false,
-    settings,
-    elements: [],
-  };
-}
-
-function buildProSlides(node, nodes, allocId, resolveMedia) {
-  const slides = [];
-  for (const cid of node.children || []) {
-    const child = nodes[cid];
-    if (!child) continue;
-    const texts = collectSubtreeTexts(child, nodes).map((t) => t.text.characters);
-    const imgs = collectSubtreeImages(child, nodes);
-    const media = imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' };
-    slides.push({
-      _id: shortId(cid),
-      heading: texts[0] || (child.content && child.content.name) || 'Slide Heading',
-      description: texts[1] || '',
-      button_text: texts[2] || 'Click Here',
-      background_color: (child.style && child.style.background) || '#1E293B',
-      background_image: media,
-    });
-  }
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: 'slides',
-    isInner: false,
-    settings: {
-      slides,
-      slides_height: { unit: 'px', size: Math.max(360, Number(node.layout && node.layout.height) || 500), sizes: [] },
-    },
-    elements: [],
-  };
-}
-
-function buildProLoopGrid(node, allocId, wType = 'loop-grid') {
-  const cols = Number(node.layout && node.layout.columns) || 3;
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: wType,
-    isInner: false,
-    settings: {
-      template_id: '',
-      posts_per_page: 6,
-      columns: String(cols),
-      row_gap: { unit: 'px', size: Number(node.layout && node.layout.gap) || 24, sizes: [] },
-    },
-    elements: [],
-  };
-}
-
-function buildGenericProWidget(node, nodes, wType, allocId) {
-  const textItems = collectSubtreeTexts(node, nodes);
-  const texts = textItems.map((t) => t.text.characters);
-  const firstTypo = node.text || (textItems[0] && textItems[0].text) || null;
-  const settings = {};
-  if (wType === 'blockquote') {
-    settings.blockquote_content = texts[0] || (node.content && node.content.name) || '';
-    settings.author_name = texts[1] || '';
-    settings.tweet_button_Label = 'Tweet';
-    if (firstTypo) {
-      if (firstTypo.color) settings.content_text_color = firstTypo.color;
-      applyTypographySettings(settings, 'content_typography', firstTypo, node.responsive);
-    }
-  } else if (wType === 'animated-headline') {
-    settings.before_text = texts[0] || '';
-    settings.highlighted_text = texts[1] || (node.content && node.content.name) || '';
-    if (firstTypo) {
-      if (firstTypo.color) settings.title_color = firstTypo.color;
-      applyTypographySettings(settings, 'title_typography', firstTypo, node.responsive);
-    }
-  } else if (firstTypo) {
-    if (firstTypo.color) settings.title_color = firstTypo.color;
-    applyTypographySettings(settings, 'typography', firstTypo, node.responsive);
-  }
-  return {
-    id: allocId(node.id),
-    elType: 'widget',
-    widgetType: wType,
-    isInner: false,
-    settings,
-    elements: [],
-  };
-}
-
-function escapeHtml(str) {
-  return String(str || '')
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;');
-}
 
 
   // ── Module: src/code.js ──
@@ -5763,31 +7804,30 @@ const responsiveState = {
   mobile: null,
 };
 
-figma.showUI(__html__, { width: 480, height: 680 });
-
 function postStatus(message, extra = {}) {
-  figma.ui.postMessage({ type: 'status', message, ...extra });
+  if (typeof figma !== 'undefined' && figma && figma.ui) {
+    figma.ui.postMessage({ type: 'status', message, ...extra });
+  }
 }
 
 function announce(message, isError = false) {
   postStatus(message, { done: true, error: isError });
   try {
-    figma.notify(message, { error: isError, timeout: isError ? 5500 : 3500 });
+    if (typeof figma !== 'undefined' && typeof figma.notify === 'function') {
+      figma.notify(message, { error: isError, timeout: isError ? 5500 : 3500 });
+    }
   } catch (e) { }
-}
-
-function normalizeSiteUrl(rawUrl) {
+}function normalizeSiteUrl(rawUrl) {
   const cleaned = String(rawUrl || '').trim().replace(/\/+$/, '');
   const match = /^(https?:)\/\/([^/?#]+)(\/[^?#]*)?$/i.exec(cleaned);
   if (!match) {
     throw new Error('Vui lòng nhập URL WordPress hợp lệ (ví dụ: https://example.com hoặc http://localhost:10040).');
   }
   return `${match[1].toLowerCase()}//${match[2]}${(match[3] || '').replace(/\/+$/, '')}`;
-}
-
-async function wpRequest(siteUrl, token, endpoint, init = {}) {
+}async function wpRequest(siteUrl, token, endpoint, init = {}) {
   const baseUrl = normalizeSiteUrl(siteUrl);
   const url = `${baseUrl}/index.php?rest_route=/f2e-bridge/v1${endpoint}`;
+  const timeoutMs = Number(init.timeoutMs) > 0 ? Number(init.timeoutMs) : 30000;
 
   const fetchOptions = {
     method: init.method || 'GET',
@@ -5801,75 +7841,118 @@ async function wpRequest(siteUrl, token, endpoint, init = {}) {
     fetchOptions.body = init.body;
   }
 
+  let controller = null;
+  let timerId = null;
+  if (typeof AbortController === 'function') {
+    try {
+      controller = new AbortController();
+      fetchOptions.signal = controller.signal;
+    } catch (e) {
+      controller = null;
+    }
+  }
+
+  const raceTimeout = (promise) => new Promise((resolve, reject) => {
+    timerId = setTimeout(() => {
+      if (controller) {
+        try { controller.abort(); } catch (e) { }
+      }
+      const timeoutErr = new Error(`Yêu cầu WordPress hết thời gian (${timeoutMs}ms): ${endpoint}`);
+      timeoutErr.isTimeout = true;
+      reject(timeoutErr);
+    }, timeoutMs);
+    Promise.resolve(promise).then(
+      (val) => {
+        clearTimeout(timerId);
+        timerId = null;
+        resolve(val);
+      },
+      (err) => {
+        clearTimeout(timerId);
+        timerId = null;
+        reject(err);
+      }
+    );
+  });
+
   let response;
   try {
-    response = await fetch(url, fetchOptions);
+    response = await raceTimeout(fetch(url, fetchOptions));
   } catch (err) {
+    if (err && err.isTimeout) throw err;
     const detail = err && err.message ? `: ${err.message}` : '';
     const isHttpCustomLocal = /^http:\/\/(?!localhost|127\.0\.0\.1|\[::1\])/i.test(baseUrl);
     const localHint = isHttpCustomLocal
       ? ' (Lưu ý: Figma chặn HTTP thường với tên miền .local do Mixed Content — hãy dùng http://localhost:PORT của LocalWP, ví dụ http://localhost:10040, hoặc bật Trust SSL trong LocalWP để dùng https://)'
       : '';
-    throw new Error(`Không thể kết nối tới WordPress${detail}${localHint}.`);
+    const netErr = new Error(`Không thể kết nối tới WordPress${detail}${localHint}.`);
+    netErr.isNetwork = true;
+    throw netErr;
   }
 
   let body;
   try {
     if (typeof response.json === 'function') {
-      body = await response.json();
+      body = await raceTimeout(response.json());
     } else if (typeof response.text === 'function') {
-      const txt = await response.text();
+      const txt = await raceTimeout(response.text());
       body = JSON.parse(txt);
     } else {
       throw new Error('Response object has neither json() nor text()');
     }
   } catch (e) {
-    throw new Error(`WordPress trả về dữ liệu không phải JSON (HTTP ${response.status}): ${e && e.message ? e.message : e}`);
+    if (e && e.isTimeout) throw e;
+    const parseErr = new Error(`WordPress trả về dữ liệu không phải JSON (HTTP ${response.status}): ${e && e.message ? e.message : e}`);
+    parseErr.status = response.status;
+    throw parseErr;
   }
 
   if (!response.ok || !body || body.success === false) {
     const errMsg = (body && (body.message || (body.data && body.data.message))) || `WordPress trả về lỗi HTTP ${response.status}.`;
-    throw new Error(errMsg);
+    const httpErr = new Error(errMsg);
+    httpErr.status = response.status;
+    throw httpErr;
   }
   return body.data !== undefined ? body.data : body;
 }
 
-/** Build flat indented outline of current selection for the Widget Tagging UI */
-function buildSelectionOutline(selection) {
+/** Build flat indented outline of current selection for the Widget Tagging UI */function buildSelectionOutline(selection) {
   const items = [];
-  const walk = (node, depth, isTopRoot = false) => {
+  const walk = (node, depth, isTopRoot = false, isAutoBg = false) => {
     if (!node || node.visible === false || items.length >= 250) return;
     const resolved = resolveWidget(node);
+    const effectiveWidget = isAutoBg && resolved.source !== 'override' ? 'background' : resolved.widget;
+    const effectiveSource = isAutoBg && resolved.source !== 'override' ? 'heuristic' : resolved.source;
     const hasAutoLayout = Boolean(node.layoutMode && node.layoutMode !== 'NONE');
     items.push({
       nodeId: node.id,
       name: String(node.name || 'Unnamed').slice(0, 64),
       type: node.type,
       depth,
-      widget: resolved.widget,
-      source: resolved.source,
+      widget: effectiveWidget,
+      source: effectiveSource,
       hasAutoLayout,
       childCount: visibleChildren(node).length,
     });
-    // Do not expand internal layers/vectors of atomic leaf widgets (icons, logos, buttons, images, etc.)
+    // Do not expand internal layers/vectors of atomic leaf widgets (icons, logos, buttons, images, background, etc.)
     // or layers marked "skip", so the outline matches Elementor's actual widget hierarchy!
-    if (isAtomicLeafWidget(resolved.widget)) {
+    if (isAtomicLeafWidget(effectiveWidget)) {
       return;
     }
+    const { bgIds } = detectCompositeBackgroundChildren(node);
     for (const child of visibleChildren(node)) {
-      walk(child, depth + 1, false);
+      walk(child, depth + 1, false, bgIds.has(child.id));
     }
   };
   for (const root of selection) {
-    walk(root, 0, true);
+    walk(root, 0, true, false);
   }
   return items;
-}
-
-function sendOutlineToUi() {
+}function sendOutlineToUi() {
   const selection = figma.currentPage.selection || [];
   figma.ui.postMessage({
     type: 'outline',
+    selectionIds: selection.map((n) => n.id),
     selectionNames: selection.map((n) => n.name),
     selectionCount: selection.length,
     items: selection.length ? buildSelectionOutline(selection) : [],
@@ -5989,53 +8072,271 @@ function handleClearResponsive() {
 function handleFixAutoLayout() {
   const selection = figma.currentPage.selection || [];
   if (selection.length === 0) {
-    throw new Error('Hãy chọn ít nhất 1 Frame hoặc Group trên Figma trước khi tối ưu Auto-Layout.');
+    throw new Error('Hãy chọn ít nhất 1 Frame hoặc Group trên Figma trước khi phân tích.');
   }
   const result = fixAndOptimizeCanvasSelection(selection);
   sendOutlineToUi();
   announce(
-    `Đã tối ưu xong! Chuyển đổi ${result.convertedFrames} Frame sang Auto-Layout và gom ${result.taggedIcons} nhóm Vector thành Icon.`
+    `Đã phân tích an toàn (0 thay đổi giao diện gốc): gắn ${result.taggedBackgrounds || 0} lớp BG gộp nền, ${result.taggedIcons || 0} Icon SVG & ${result.virtualLayoutFrames || 0} Frame Virtual Layout.`
   );
 }
 
 async function getActiveSelectionForExtraction() {
+  const selection = figma.currentPage.selection || [];
+  if (selection.length > 0) {
+    return selection;
+  }
   if (responsiveState.desktop && responsiveState.desktop.nodeId && typeof figma.getNodeByIdAsync === 'function') {
     const desktopNode = await figma.getNodeByIdAsync(responsiveState.desktop.nodeId);
     if (desktopNode && !desktopNode.removed) {
       return [desktopNode];
     }
   }
-  const selection = figma.currentPage.selection || [];
-  if (selection.length === 0) {
-    throw new Error('Vui lòng chọn ít nhất 1 Frame hoặc Component trên Figma!');
-  }
-  return selection;
+  throw new Error('Vui lòng chọn ít nhất 1 Frame hoặc Component trên Figma!');
 }
 
-async function handleCompileForClipboardOrDownload(payload = {}) {
+const pendingWebpRequests = new Map();async function processRasterAssetsInUi(
+  document,
+  assetPayloads,
+  { imageFormat = 'WEBP', quality = 0.82, maxWidth = 0, onBatchProgress = null } = {}
+) {
+  const rasterAssets = (assetPayloads || []).filter((a) => a && a.kind === 'image' && a.base64);
+  if (rasterAssets.length === 0) return { count: 0, savedPct: 0, keptOriginal: 0, warnings: 0 };
+
+  const targetFormat = String(imageFormat || 'WEBP').toUpperCase();
+  const targetMime = targetFormat === 'JPG' ? 'image/jpeg' : (targetFormat === 'PNG' ? 'image/png' : 'image/webp');
+  const clampedQuality = Math.max(0.3, Math.min(1, Number(quality) || 0.82));
+  const clampedMaxWidth = Math.max(0, Math.round(Number(maxWidth) || 0));
+
+  postStatus(`Đang xử lý ${rasterAssets.length} ảnh (${targetFormat}${clampedMaxWidth > 0 ? `, max ${clampedMaxWidth}px` : ''}) ngay tại chỗ…`);
+
+  // Split into bounded IPC batches (max 4 assets or 4 MB per batch)
+  const MAX_BATCH_ASSETS = 4;
+  const MAX_BATCH_BYTES = 4 * 1024 * 1024;
+  const batches = [];
+  let curBatch = [];
+  let curBatchBytes = 0;
+  for (const asset of rasterAssets) {
+    const estBytes = Number(asset.byteLength) || Math.ceil((asset.base64 || '').length * 0.75);
+    if (curBatch.length > 0 && (curBatch.length >= MAX_BATCH_ASSETS || curBatchBytes + estBytes > MAX_BATCH_BYTES)) {
+      batches.push({ items: curBatch, bytes: curBatchBytes });
+      curBatch = [];
+      curBatchBytes = 0;
+    }
+    curBatch.push(asset);
+    curBatchBytes += estBytes;
+  }
+  if (curBatch.length > 0) {
+    batches.push({ items: curBatch, bytes: curBatchBytes });
+  }
+
+  const shaMap = new Map();
+  let totalOrig = 0;
+  let totalComp = 0;
+  let convertedCount = 0;
+  let keptOriginal = 0;
+  let warningCount = 0;
+
+  const pushOptWarning = (message) => {
+    warningCount += 1;
+    if (document && Array.isArray(document.warnings)) {
+      document.warnings.push({ code: 'image-optimize-warning', message });
+    }
+  };
+
+  for (let bIdx = 0; bIdx < batches.length; bIdx += 1) {
+    const batch = batches[bIdx];
+    const requestId = `imgopt-${Date.now()}-${bIdx}-${Math.random().toString(16).slice(2, 8)}`;
+    const timeoutMs = Math.max(20000, Math.min(120000, batch.items.length * 8000 + Math.ceil(batch.bytes / 1048576) * 4000));
+
+    let timedOut = false;
+    const results = await new Promise((resolve) => {
+      const timer = setTimeout(() => {
+        timedOut = true;
+        pendingWebpRequests.delete(requestId);
+        resolve([]);
+      }, timeoutMs);
+      pendingWebpRequests.set(requestId, (resList) => {
+        clearTimeout(timer);
+        resolve(Array.isArray(resList) ? resList : []);
+      });
+      figma.ui.postMessage({
+        type: 'compress-assets-webp',
+        requestId,
+        targetFormat,
+        quality: clampedQuality,
+        maxWidth: clampedMaxWidth,
+        assets: batch.items.map((a) => ({
+          sha256: a.sha256,
+          mime: a.mime || 'image/png',
+          base64: a.base64,
+        })),
+      });
+    });
+
+    if (timedOut) {
+      pushOptWarning(`Batch xử lý ảnh ${bIdx + 1}/${batches.length} hết thời gian (${timeoutMs}ms); giữ nguyên ảnh gốc.`);
+    }
+
+    if (typeof onBatchProgress === 'function') {
+      onBatchProgress(bIdx + 1, batches.length);
+    }
+
+    for (const res of results) {
+      if (!res || !res.oldSha256) continue;
+      if (res.error) {
+        pushOptWarning(`Không thể tối ưu ảnh (${res.oldSha256.slice(0, 8)}): ${res.error}`);
+        continue;
+      }
+      if (res.skipped || !res.base64) continue;
+
+      const origAsset = rasterAssets.find((a) => a.sha256 === res.oldSha256);
+      if (!origAsset) continue;
+
+      const outBytes = base64ToBytes(res.base64);
+      if (!outBytes || outBytes.byteLength === 0) continue;
+
+      const origBytesLen = Number(origAsset.byteLength || 0);
+      // Size guard: for WebP conversion, keep original PNG/JPG if WebP output is >= original size
+      if (targetFormat === 'WEBP' && origBytesLen > 0 && outBytes.byteLength >= origBytesLen) {
+        keptOriginal += 1;
+        continue;
+      }
+      if (targetFormat !== 'WEBP' && !res.resized && origBytesLen > 0 && outBytes.byteLength >= origBytesLen) {
+        keptOriginal += 1;
+        continue;
+      }
+
+      const outMime = res.mime || targetMime;
+      const newSha = await sha256(outBytes);
+      const newDataUri = `data:${outMime};base64,${res.base64}`;
+
+      totalOrig += origBytesLen;
+      totalComp += outBytes.byteLength;
+      convertedCount += 1;
+
+      if (document.assets && document.assets[res.oldSha256]) {
+        delete document.assets[res.oldSha256];
+      }
+      origAsset.sha256 = newSha;
+      origAsset.mime = outMime;
+      origAsset.base64 = res.base64;
+      origAsset.byteLength = outBytes.byteLength;
+      if (document.assets) {
+        document.assets[newSha] = origAsset;
+      }
+      shaMap.set(res.oldSha256, { sha256: newSha, mime: outMime, dataUri: newDataUri });
+    }
+  }
+
+  // Remap all node image, backgroundImage, extractedImages, and slides[].image references
+  if (shaMap.size > 0 && document && document.nodes) {
+    for (const n of Object.values(document.nodes)) {
+      if (!n) continue;
+      if (n.raster && shaMap.has(n.raster.sha256)) {
+        n.raster = { ...shaMap.get(n.raster.sha256) };
+      }
+      if (n.image && shaMap.has(n.image.sha256)) {
+        n.image = { ...shaMap.get(n.image.sha256) };
+      }
+      if (n.style && n.style.backgroundImage && shaMap.has(n.style.backgroundImage)) {
+        const mapped = shaMap.get(n.style.backgroundImage);
+        n.style.backgroundImage = mapped.sha256;
+        n.style.backgroundImageDataUri = mapped.dataUri;
+      }
+      if (Array.isArray(n.extractedImages)) {
+        n.extractedImages = n.extractedImages.map((imgRef) => {
+          if (imgRef && imgRef.sha256 && shaMap.has(imgRef.sha256)) {
+            return { ...shaMap.get(imgRef.sha256) };
+          }
+          return imgRef;
+        });
+      }
+      if (n.content && Array.isArray(n.content.slides)) {
+        for (const sl of n.content.slides) {
+          if (sl && sl.image && sl.image.sha256 && shaMap.has(sl.image.sha256)) {
+            sl.image = { ...shaMap.get(sl.image.sha256) };
+          }
+        }
+      }
+    }
+  }
+
+  const savedPct = totalOrig > 0 ? Math.max(0, Math.round((1 - totalComp / totalOrig) * 100)) : 0;
+  return { count: convertedCount, savedPct, keptOriginal, warnings: warningCount };
+}async function compressRasterAssetsToWebpInUi(document, assetPayloads, { quality = 0.82, maxWidth = 0, onBatchProgress = null } = {}) {
+  return processRasterAssetsInUi(document, assetPayloads, {
+    imageFormat: 'WEBP',
+    quality,
+    maxWidth,
+    onBatchProgress,
+  });
+}async function handleCompileForClipboardOrDownload(payload = {}) {
   const {
     action = 'clipboard',
     imageFormat = 'PNG',
     imageScale = 2,
+    webpQuality = 0.82,
+    imageMaxWidth = 0,
     siteUrl = '',
+    autoUnwrap = true,
+    linearBorder = true,
+    devModeCss = true,
   } = payload;
 
   const selection = await getActiveSelectionForExtraction();
-  postStatus('Đang trích xuất cây thiết kế & hình ảnh/SVG từ Figma…');
-  const designTokens = await extractLocalDesignSystem(figma);
+  postStatus('Đang quét Design System từ Figma…', { progress: 4 });
+  const designTokens = await extractLocalDesignSystem(figma, selection);
   const { document, assetPayloads } = await extractDesignSelection(selection, {
     fileKey: figma.fileKey || 'local-file',
     imageFormat,
     imageScale,
+    useDevModeCss: devModeCss !== false,
     responsiveFrames: {
       tablet: responsiveState.tablet,
       mobile: responsiveState.mobile,
     },
     designTokens,
+    onProgress: (phase, cur, total) => {
+      const ratio = total > 0 ? cur / total : 1;
+      if (phase === 'nodes') {
+        const pct = Math.round(8 + ratio * 47); // 8% -> 55%
+        postStatus(`Đang trích xuất layer Figma (${cur}/${total})…`, { progress: pct });
+      } else if (phase === 'assets') {
+        const pct = Math.round(55 + ratio * 25); // 55% -> 80%
+        postStatus(`Đang cắt ảnh & SVG (${cur}/${total})…`, { progress: pct });
+      }
+    },
   });
 
+  let webpNote = '';
+  const fmtUpper = String(imageFormat || 'PNG').toUpperCase();
+  const maxWNum = Number(imageMaxWidth) || 0;
+  if (fmtUpper === 'WEBP' || (maxWNum > 0 && (fmtUpper === 'PNG' || fmtUpper === 'JPG'))) {
+    postStatus(`Đang tối ưu ảnh (${fmtUpper}) ngay tại chỗ…`, { progress: 82 });
+    const imgRep = await processRasterAssetsInUi(document, assetPayloads, {
+      imageFormat: fmtUpper,
+      quality: webpQuality,
+      maxWidth: maxWNum,
+      onBatchProgress: (done, total) => {
+        const pct = Math.round(82 + (done / Math.max(1, total)) * 10); // 82% -> 92%
+        postStatus(`Đang xử lý ảnh batch ${done}/${total}…`, { progress: pct });
+      },
+    });
+    if (imgRep.count > 0) {
+      webpNote = fmtUpper === 'WEBP' ? ` [WebP -${imgRep.savedPct}%]` : ` [${fmtUpper} resized]`;
+    }
+  }
+  postStatus('Đang biên dịch & kiểm tra độ khớp Elementor…', { progress: 94 });
+
+  const v3CompileOpts = {
+    siteUrl,
+    autoUnwrap: autoUnwrap !== false,
+    linearBorder: linearBorder !== false,
+  };
+
   if (action === 'clipboard') {
-    const clipboardData = compileElementorClipboard(document, { siteUrl });
+    const clipboardData = compileElementorClipboard(document, v3CompileOpts);
     const rep = clipboardData.fidelityReport || {};
     const healNote = rep.healedCount ? ` [Auto-Healed ${rep.healedCount} điểm lệch]` : ' [Khớp 100%]';
     figma.ui.postMessage({
@@ -6045,12 +8346,12 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
       warnings: document.warnings,
       fidelityReport: rep,
     });
-    announce(`Đã copy "${document.title}" (${clipboardData.elements.length} sections)${healNote}! Mở Elementor Editor và bấm Ctrl+V.`);
+    announce(`Đã copy "${document.title}" (${clipboardData.elements.length} sections)${webpNote}${healNote}! Mở Elementor Editor và bấm Ctrl+V.`);
     return;
   }
 
   if (action === 'download-elementor-v3') {
-    const v3Json = compileElementorV3(document, { siteUrl });
+    const v3Json = compileElementorV3(document, v3CompileOpts);
     figma.ui.postMessage({
       type: 'download-ready',
       filename: `${slugify(document.title)}-elementor-v3.json`,
@@ -6063,7 +8364,7 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
   }
 
   if (action === 'download-elementor-v4') {
-    const v4Json = compileElementorV4(document);
+    const v4Json = compileElementorV4(document, { siteUrl });
     figma.ui.postMessage({
       type: 'download-ready',
       filename: `${slugify(document.title)}-elementor-v4-atomic.json`,
@@ -6074,7 +8375,7 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
     return;
   }
 
-  const v3Compiled = compileElementorV3(document, { siteUrl });
+  const v3Compiled = compileElementorV3(document, v3CompileOpts);
   const bundle = {
     kind: 'f2e.bundle',
     version: '1.0.0',
@@ -6082,7 +8383,7 @@ async function handleCompileForClipboardOrDownload(payload = {}) {
     document,
     assets: assetPayloads,
     elementorV3: v3Compiled,
-    elementorV4: compileElementorV4(document),
+    elementorV4: compileElementorV4(document, { siteUrl }),
   };
   figma.ui.postMessage({
     type: 'download-ready',
@@ -6154,21 +8455,26 @@ async function handleLoadSiteTargets(siteUrl) {
     templates: statusData.templates || [],
     hasPro: Boolean(statusData.hasPro),
   });
-}
-
-async function handleLivePushToWordPress(payload) {
+}async function handleLivePushToWordPress(payload) {
   const {
     siteUrl,
     targetType = 'page',
     templateType = 'page',
     targetPostId = 0,
     postTitle = '',
-    postStatus = 'draft',
+    postStatus: wpPostStatus = 'draft',
+    pageLayout = 'elementor_canvas',
     importMode = 'resync',
     elementorVersion = 'v3',
     syncGlobalStyles = true,
     imageFormat = 'PNG',
     imageScale = 2,
+    webpQuality = 0.82,
+    imageMaxWidth = 0,
+    customTokens = null,
+    autoUnwrap = true,
+    linearBorder = true,
+    devModeCss = true,
   } = payload;
 
   const stored = (await figma.clientStorage.getAsync(STORAGE_SITES_KEY)) || [];
@@ -6178,11 +8484,13 @@ async function handleLivePushToWordPress(payload) {
   }
 
   const selection = await getActiveSelectionForExtraction();
-  postStatus('1/4: Đang trích xuất thiết kế & tài nguyên từ Figma…');
+  postStatus('1/4: Đang quét Design System từ Figma…', { progress: 4 });
   let designTokens = { colors: [], typography: [] };
   if (syncGlobalStyles) {
     try {
-      designTokens = await extractLocalDesignSystem(figma);
+      designTokens = customTokens && (Array.isArray(customTokens.colors) || Array.isArray(customTokens.typography))
+        ? customTokens
+        : await extractLocalDesignSystem(figma, selection);
     } catch (tokenErr) {
       throw new Error(`Lỗi ở bước 1A (Design System): ${tokenErr && tokenErr.message ? tokenErr.message : tokenErr}`);
     }
@@ -6194,44 +8502,117 @@ async function handleLivePushToWordPress(payload) {
       fileKey: figma.fileKey || 'local-file',
       imageFormat,
       imageScale,
+      useDevModeCss: devModeCss !== false,
       responsiveFrames: {
         tablet: responsiveState.tablet,
         mobile: responsiveState.mobile,
       },
       designTokens,
+      onProgress: (phase, cur, total) => {
+        const ratio = total > 0 ? cur / total : 1;
+        if (phase === 'nodes') {
+          const pct = Math.round(6 + ratio * 32); // 6% -> 38%
+          postStatus(`1/4: Đang trích xuất layer Figma (${cur}/${total})…`, { progress: pct });
+        } else if (phase === 'assets') {
+          const pct = Math.round(38 + ratio * 20); // 38% -> 58%
+          postStatus(`1/4: Đang cắt ảnh & SVG (${cur}/${total})…`, { progress: pct });
+        }
+      },
     });
     document = extracted.document;
     assetPayloads = extracted.assetPayloads;
+    const fmtUpper = String(imageFormat || 'PNG').toUpperCase();
+    const maxWNum = Number(imageMaxWidth) || 0;
+    if (fmtUpper === 'WEBP' || (maxWNum > 0 && (fmtUpper === 'PNG' || fmtUpper === 'JPG'))) {
+      postStatus(`1/4: Đang tối ưu ảnh (${fmtUpper}) ngay tại chỗ…`, { progress: 60 });
+      await processRasterAssetsInUi(document, assetPayloads, {
+        imageFormat: fmtUpper,
+        quality: webpQuality,
+        maxWidth: maxWNum,
+        onBatchProgress: (done, total) => {
+          const pct = Math.round(60 + (done / Math.max(1, total)) * 6); // 60% -> 66%
+          postStatus(`1/4: Đang xử lý ảnh batch ${done}/${total}…`, { progress: pct });
+        },
+      });
+    }
   } catch (extErr) {
     throw new Error(`Lỗi ở bước 1B (Extract Node): ${extErr && extErr.message ? extErr.message : extErr}`);
   }
 
-  // Step 2: Upload deduplicated assets (SHA-256) with bounded concurrency (4 parallel workers)
+  // Step 2: Upload deduplicated assets (SHA-256) with 10MB guard, transient retry & failure aggregation
   const attachmentMap = {};
+  const MAX_ASSET_BYTES = 10 * 1024 * 1024;
   try {
     if (assetPayloads.length > 0) {
       const CONCURRENCY = Math.min(4, assetPayloads.length);
       let cursor = 0;
       let completed = 0;
+      const failedAssets = [];
+
+      const isTransientError = (err) => {
+        if (!err) return false;
+        if (err.isTimeout || err.isNetwork) return true;
+        if (typeof err.status === 'number') return err.status >= 500 || err.status === 429;
+        return /timeout|hết thời gian|network|fetch/i.test(String(err.message || ''));
+      };
 
       const uploadWorker = async () => {
         while (cursor < assetPayloads.length) {
           const idx = cursor;
           cursor += 1;
           const asset = assetPayloads[idx];
-          postStatus(`2/4: Đang đồng bộ tài nguyên ${completed + 1}/${assetPayloads.length} (SHA-256: ${asset.sha256.slice(0, 8)})…`);
-          const uploaded = await wpRequest(site.siteUrl, site.token, '/assets', {
-            method: 'POST',
-            body: JSON.stringify({
+          const byteLen = Number(asset.byteLength || 0) || Math.ceil(String(asset.base64 || '').length * 0.75);
+          if (byteLen > MAX_ASSET_BYTES) {
+            failedAssets.push({
               sha256: asset.sha256,
-              mime: asset.mime,
-              kind: asset.kind,
-              base64: asset.base64,
-              name: document.title,
-            }),
-          });
-          if (uploaded && uploaded.id) {
+              error: `${asset.assetId || asset.sha256.slice(0, 8)} vượt quá giới hạn 10MB (${(byteLen / 1048576).toFixed(1)}MB). Hãy bật WebP, độ phân giải 1x hoặc giới hạn rộng tối đa.`,
+            });
+            completed += 1;
+            continue;
+          }
+
+          const uploadPct = Math.round(68 + (completed / assetPayloads.length) * 18); // 68% -> 86%
+          postStatus(`2/4: Đang đồng bộ tài nguyên ${completed + 1}/${assetPayloads.length} (SHA-256: ${asset.sha256.slice(0, 8)})…`, { progress: uploadPct });
+
+          let lastErr = null;
+          let uploaded = null;
+          for (let attempt = 0; attempt <= 1; attempt += 1) {
+            try {
+              uploaded = await wpRequest(site.siteUrl, site.token, '/assets', {
+                method: 'POST',
+                timeoutMs: 90000,
+                body: JSON.stringify({
+                  sha256: asset.sha256,
+                  mime: asset.mime,
+                  kind: asset.kind,
+                  base64: asset.base64,
+                  name: document.title,
+                }),
+              });
+              lastErr = null;
+              break;
+            } catch (err) {
+              lastErr = err;
+              if (attempt === 0 && isTransientError(err)) {
+                await new Promise((r) => setTimeout(r, 400));
+                continue;
+              }
+              break;
+            }
+          }
+
+          if (lastErr) {
+            failedAssets.push({
+              sha256: asset.sha256,
+              error: `${asset.assetId || asset.sha256.slice(0, 8)}: ${lastErr.message || lastErr}`,
+            });
+          } else if (uploaded && Number(uploaded.id) > 0 && uploaded.url) {
             attachmentMap[asset.sha256] = { id: uploaded.id, url: uploaded.url };
+          } else {
+            failedAssets.push({
+              sha256: asset.sha256,
+              error: `${asset.assetId || asset.sha256.slice(0, 8)}: WordPress không trả về id/url hợp lệ.`,
+            });
           }
           completed += 1;
         }
@@ -6242,6 +8623,13 @@ async function handleLivePushToWordPress(payload) {
         workers.push(uploadWorker());
       }
       await Promise.all(workers);
+
+      if (failedAssets.length > 0) {
+        const preview = failedAssets.slice(0, 2).map((f) => f.error).join('; ');
+        throw new Error(
+          `Upload thất bại ${failedAssets.length}/${assetPayloads.length} tài nguyên (đã lưu ${Object.keys(attachmentMap).length}, các file đã lên sẽ được tái sử dụng qua SHA-256 khi thử lại): ${preview}`
+        );
+      }
     }
   } catch (assetErr) {
     throw new Error(`Lỗi ở bước 2 (Upload Asset): ${assetErr && assetErr.message ? assetErr.message : assetErr}`);
@@ -6250,7 +8638,7 @@ async function handleLivePushToWordPress(payload) {
   // Step 3: Optionally sync Global Design System (Colors & Typography)
   try {
     if (syncGlobalStyles && (designTokens.colors.length > 0 || designTokens.typography.length > 0)) {
-      postStatus('3/4: Đang đồng bộ Global Colors & Fonts vào Elementor Site Settings…');
+      postStatus('3/4: Đang đồng bộ Global Colors & Fonts vào Elementor Site Settings…', { progress: 88 });
       await wpRequest(site.siteUrl, site.token, '/design-system', {
         method: 'POST',
         body: JSON.stringify(designTokens),
@@ -6264,24 +8652,31 @@ async function handleLivePushToWordPress(payload) {
   let result;
   let fidelityReport = null;
   try {
-    postStatus('4/4: Đang kiểm tra độ khớp thiết kế & cập nhật cấu trúc Elementor trên WordPress…');
+    postStatus('4/4: Đang kiểm tra độ khớp thiết kế & cập nhật cấu trúc Elementor trên WordPress…', { progress: 94 });
     let compiledElements;
     if (elementorVersion === 'v4') {
-      compiledElements = compileElementorV4(document).content;
+      compiledElements = compileElementorV4(document, { siteUrl: site.siteUrl, attachmentMap }).content;
     } else {
-      const v3Out = compileElementorV3(document, { siteUrl: site.siteUrl, attachmentMap });
+      const v3Out = compileElementorV3(document, {
+        siteUrl: site.siteUrl,
+        attachmentMap,
+        autoUnwrap: autoUnwrap !== false,
+        linearBorder: linearBorder !== false,
+      });
       compiledElements = v3Out.content;
       fidelityReport = v3Out.fidelityReport;
     }
 
     result = await wpRequest(site.siteUrl, site.token, '/import', {
       method: 'POST',
+      timeoutMs: 90000,
       body: JSON.stringify({
         title: postTitle || document.title,
         targetType,
         templateType,
         targetPostId: Number(targetPostId) || 0,
-        postStatus,
+        postStatus: wpPostStatus,
+        pageLayout,
         importMode,
         elementorVersion,
         attachmentMap,
@@ -6298,7 +8693,7 @@ async function handleLivePushToWordPress(payload) {
     fidelityReport,
   });
   announce(`Đã đẩy thành công lên WordPress! (${result.actionLabel || 'Saved'} — Post #${result.postId})`);
-  await handleLoadSiteTargets(site.siteUrl);
+  await handleLoadSiteTargets(site.siteUrl).catch(() => {});
 }
 
 async function handleScanDesignSystemPreview() {
@@ -6318,9 +8713,11 @@ async function handleSyncDesignSystemOnly(siteUrl, options = {}) {
     throw new Error('Vui lòng kết nối website WordPress trước.');
   }
   postStatus('Đang trích xuất Design System & Theme Styles từ Figma…');
-  const tokens = await extractLocalDesignSystem(figma, figma.currentPage.selection);
+  const tokens = (options && options.customTokens && (Array.isArray(options.customTokens.colors) || Array.isArray(options.customTokens.typography)))
+    ? options.customTokens
+    : await extractLocalDesignSystem(figma, figma.currentPage.selection);
   if (tokens.colors.length === 0 && tokens.typography.length === 0 && !tokens.themeStyles?.buttons && !tokens.settings?.layout?.containerWidth) {
-    throw new Error('File Figma này chưa khai báo Local Color Variables hoặc Text Styles.');
+    throw new Error('Chưa phát hiện màu sắc hoặc kiểu chữ nào. Hãy chọn 1 Frame trên Figma rồi bấm "Quét lại".');
   }
 
   const payload = {
@@ -6366,9 +8763,6 @@ function slugify(text) {
     .replace(/[^a-z0-9]+/g, '-')
     .replace(/^-+|-+$/g, '') || 'figma-design';
 }
-
-figma.on('selectionchange', sendOutlineToUi);
-sendOutlineToUi();
 
 async function handleRequestAiScanPayload() {
   const selection = figma.currentPage.selection || [];
@@ -6441,109 +8835,130 @@ async function handleApplyAiTags(tags = []) {
     totalCount: tags.length,
   });
   announce(`✨ Gemini Flash AI đã tự động gán thẻ thành công ${applied} widget!`);
+}function createMessageHandler() {
+  return async (msg) => {
+    if (!msg || !msg.type) return;
+    if (msg.type === 'compress-assets-webp-result') {
+      const resolver = pendingWebpRequests.get(msg.requestId);
+      if (resolver) {
+        pendingWebpRequests.delete(msg.requestId);
+        resolver(msg.results || []);
+      }
+      return;
+    }
+    const busyTypes = [
+      'verify-site',
+      'live-push',
+      'sync-design-system',
+      'scan-design-system',
+      'export-action',
+      'fix-auto-layout',
+      'request-ai-scan-payload',
+      'apply-ai-tags',
+    ];
+    const isBusy = busyTypes.includes(msg.type);
+    if (isBusy) figma.ui.postMessage({ type: 'busy', busy: true });
+
+    try {
+      switch (msg.type) {
+        case 'get-outline':
+          sendOutlineToUi();
+          break;
+        case 'inspect-node-css':
+          await handleInspectNodeDevMode(msg);
+          break;
+        case 'set-widget':
+          await setLayerWidgetOverride(msg.nodeId, msg.widget);
+          break;
+        case 'reset-all-widgets':
+          await handleResetAllWidgetOverrides();
+          break;
+        case 'fix-auto-layout':
+          handleFixAutoLayout();
+          break;
+        case 'request-ai-scan-payload':
+          await handleRequestAiScanPayload();
+          break;
+        case 'apply-ai-tags':
+          await handleApplyAiTags(msg.tags);
+          break;
+        case 'save-ai-config':
+          await figma.clientStorage.setAsync(STORAGE_AI_KEY, msg.config);
+          announce('Đã lưu cấu hình Gemini API Key thành công!');
+          break;
+        case 'save-prefs':
+          await figma.clientStorage.setAsync(STORAGE_PREFS_KEY, msg.prefs || {});
+          break;
+        case 'capture-responsive':
+          handleCaptureResponsive(msg.viewport);
+          break;
+        case 'clear-responsive':
+          handleClearResponsive();
+          break;
+        case 'verify-site':
+          await handleVerifyAndSaveSite(msg.config);
+          break;
+        case 'delete-site':
+          await handleDeleteSite(msg.siteUrl);
+          break;
+        case 'load-site-targets':
+          await handleLoadSiteTargets(msg.siteUrl);
+          break;
+        case 'live-push':
+          await handleLivePushToWordPress(msg.payload);
+          break;
+        case 'sync-design-system':
+          await handleSyncDesignSystemOnly(msg.siteUrl, msg.options || {});
+          break;
+        case 'scan-design-system':
+          await handleScanDesignSystemPreview();
+          break;
+        case 'export-action':
+          await handleCompileForClipboardOrDownload(msg.payload);
+          break;
+        default:
+          break;
+      }
+    } catch (err) {
+      const rawMsg = (err && (err.message || (typeof err.toString === 'function' ? err.toString() : ''))) || String(err) || 'Đã xảy ra lỗi.';
+      const fullStack = err && err.stack ? ` [${String(err.stack).replace(/\s+/g, ' ').slice(0, 320)}]` : '';
+      const text = `${rawMsg}${fullStack}`;
+      announce(text.replace(/Bearer\s+\S+/gi, 'Bearer [redacted]'), true);
+    } finally {
+      if (isBusy) figma.ui.postMessage({ type: 'busy', busy: false });
+    }
+  };
+}function initPluginRuntime() {
+  figma.showUI(__html__, { width: 480, height: 680 });
+  figma.on('selectionchange', sendOutlineToUi);
+  sendOutlineToUi();
+
+  Promise.all([
+    figma.clientStorage.getAsync(STORAGE_SITES_KEY),
+    figma.clientStorage.getAsync(STORAGE_PREFS_KEY),
+    figma.clientStorage.getAsync(STORAGE_AI_KEY),
+  ]).then(([sites, prefs, aiConfig]) => {
+    const list = Array.isArray(sites) ? sites : [];
+    const activeUrl = (list[0] && list[0].siteUrl) || '';
+    figma.ui.postMessage({
+      type: 'init-state',
+      sites: list,
+      activeSiteUrl: activeUrl,
+      widgetCatalog: WIDGET_CATALOG,
+      prefs: prefs || {},
+      aiConfig: aiConfig || { apiKey: '', model: 'gemini-3.8-flash' },
+    });
+    if (activeUrl) {
+      handleLoadSiteTargets(activeUrl).catch(() => { });
+    }
+  });
+
+  figma.ui.onmessage = createMessageHandler();
 }
 
-Promise.all([
-  figma.clientStorage.getAsync(STORAGE_SITES_KEY),
-  figma.clientStorage.getAsync(STORAGE_PREFS_KEY),
-  figma.clientStorage.getAsync(STORAGE_AI_KEY),
-]).then(([sites, prefs, aiConfig]) => {
-  const list = Array.isArray(sites) ? sites : [];
-  const activeUrl = (list[0] && list[0].siteUrl) || '';
-  figma.ui.postMessage({
-    type: 'init-state',
-    sites: list,
-    activeSiteUrl: activeUrl,
-    widgetCatalog: WIDGET_CATALOG,
-    prefs: prefs || {},
-    aiConfig: aiConfig || { apiKey: '', model: 'gemini-3.8-flash' },
-  });
-  if (activeUrl) {
-    handleLoadSiteTargets(activeUrl).catch(() => { });
-  }
-});
-
-figma.ui.onmessage = async (msg) => {
-  if (!msg || !msg.type) return;
-  const busyTypes = [
-    'verify-site',
-    'live-push',
-    'sync-design-system',
-    'scan-design-system',
-    'export-action',
-    'fix-auto-layout',
-    'request-ai-scan-payload',
-    'apply-ai-tags',
-  ];
-  const isBusy = busyTypes.includes(msg.type);
-  if (isBusy) figma.ui.postMessage({ type: 'busy', busy: true });
-
-  try {
-    switch (msg.type) {
-      case 'get-outline':
-        sendOutlineToUi();
-        break;
-      case 'inspect-node-css':
-        await handleInspectNodeDevMode(msg);
-        break;
-      case 'set-widget':
-        await setLayerWidgetOverride(msg.nodeId, msg.widget);
-        break;
-      case 'reset-all-widgets':
-        await handleResetAllWidgetOverrides();
-        break;
-      case 'fix-auto-layout':
-        handleFixAutoLayout();
-        break;
-      case 'request-ai-scan-payload':
-        await handleRequestAiScanPayload();
-        break;
-      case 'apply-ai-tags':
-        await handleApplyAiTags(msg.tags);
-        break;
-      case 'save-ai-config':
-        await figma.clientStorage.setAsync(STORAGE_AI_KEY, msg.config);
-        announce('Đã lưu cấu hình Gemini API Key thành công!');
-        break;
-      case 'capture-responsive':
-        handleCaptureResponsive(msg.viewport);
-        break;
-      case 'clear-responsive':
-        handleClearResponsive();
-        break;
-      case 'verify-site':
-        await handleVerifyAndSaveSite(msg.config);
-        break;
-      case 'delete-site':
-        await handleDeleteSite(msg.siteUrl);
-        break;
-      case 'load-site-targets':
-        await handleLoadSiteTargets(msg.siteUrl);
-        break;
-      case 'live-push':
-        await handleLivePushToWordPress(msg.payload);
-        break;
-      case 'sync-design-system':
-        await handleSyncDesignSystemOnly(msg.siteUrl, msg.options || {});
-        break;
-      case 'scan-design-system':
-        await handleScanDesignSystemPreview();
-        break;
-      case 'export-action':
-        await handleCompileForClipboardOrDownload(msg.payload);
-        break;
-      default:
-        break;
-    }
-  } catch (err) {
-    const rawMsg = (err && (err.message || (typeof err.toString === 'function' ? err.toString() : ''))) || String(err) || 'Đã xảy ra lỗi.';
-    const fullStack = err && err.stack ? ` [${String(err.stack).replace(/\s+/g, ' ').slice(0, 320)}]` : '';
-    const text = `${rawMsg}${fullStack}`;
-    announce(text.replace(/Bearer\s+\S+/gi, 'Bearer [redacted]'), true);
-  } finally {
-    if (isBusy) figma.ui.postMessage({ type: 'busy', busy: false });
-  }
-};
+if (typeof figma !== 'undefined' && figma && figma.ui && figma.clientStorage && typeof figma.showUI === 'function') {
+  initPluginRuntime();
+}
 
 
 })();

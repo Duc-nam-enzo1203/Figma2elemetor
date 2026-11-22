@@ -20,21 +20,44 @@ final class DocumentWriter
     /**
      * @param list<array<string,mixed>> $incomingElements
      * @param array<string,mixed> $options
-     * @return array{postId:int,actionLabel:string,editUrl:string,viewUrl:string}
+     * @return array{postId:int,actionLabel:string,editUrl:string,viewUrl:string,elementCount:int}|\WP_Error
      */
-    public function saveOrSync(array $incomingElements, array $options = []): array
+    public function saveOrSync(array $incomingElements, array $options = [])
     {
         $targetPostId = (int) ($options['targetPostId'] ?? 0);
         $targetType = (string) ($options['targetType'] ?? 'page');
         $templateType = (string) ($options['templateType'] ?? 'page');
-        $title = sanitize_text_field((string) ($options['title'] ?? 'Figma Import'));
-        $status = in_array($options['postStatus'] ?? 'draft', ['draft', 'publish', 'private'], true)
-            ? (string) $options['postStatus']
+        $rawTitle = (string) ($options['title'] ?? 'Figma Import');
+        $title = function_exists('sanitize_text_field') ? sanitize_text_field($rawTitle) : trim(strip_tags($rawTitle));
+        $rawStatus = (string) ($options['postStatus'] ?? 'draft');
+        $status = in_array($rawStatus, ['draft', 'publish', 'private'], true)
+            ? $rawStatus
             : 'draft';
+        $rawPageLayout = (string) ($options['pageLayout'] ?? '');
+        $allowedLayouts = ['default', 'elementor_canvas', 'elementor_header_footer', 'elementor_theme'];
+        $pageLayout = in_array($rawPageLayout, $allowedLayouts, true) ? $rawPageLayout : '';
         $mode = (string) ($options['importMode'] ?? 'resync'); // 'resync' | 'append' | 'replace'
 
         $actionLabel = 'Created';
-        if ($targetPostId > 0 && function_exists('get_post') && get_post($targetPostId) !== null) {
+        if ($targetPostId > 0) {
+            $targetPost = function_exists('get_post') ? get_post($targetPostId) : null;
+            if ($targetPost === null || $targetPost === false || (is_object($targetPost) && ($targetPost->post_status ?? '') === 'trash')) {
+                $msg = sprintf('Target post %d does not exist.', $targetPostId);
+                if (class_exists('\WP_Error')) {
+                    return new \WP_Error('target_post_not_found', $msg, ['status' => 404]);
+                }
+                throw new \RuntimeException($msg, 404);
+            }
+            $allowedPostTypes = ['page', 'elementor_library'];
+            $actualPostType = is_object($targetPost)
+                ? (string) ($targetPost->post_type ?? '')
+                : (is_array($targetPost) ? (string) ($targetPost['post_type'] ?? '') : '');
+            if (!in_array($actualPostType, $allowedPostTypes, true)) {
+                throw new \RuntimeException('Target post type is not allowed for F2E Bridge import.', 403);
+            }
+            if (function_exists('current_user_can') && !current_user_can('edit_post', $targetPostId)) {
+                throw new \RuntimeException('Insufficient permissions to edit target post.', 403);
+            }
             $postId = $targetPostId;
             $existingRaw = function_exists('get_post_meta') ? get_post_meta($postId, '_elementor_data', true) : '';
             $existingTree = is_string($existingRaw) && $existingRaw !== '' ? json_decode($existingRaw, true) : [];
@@ -53,11 +76,25 @@ final class DocumentWriter
             }
         } else {
             $postType = $targetType === 'elementor_library' ? 'elementor_library' : 'page';
-            $postId = function_exists('wp_insert_post') ? (int) wp_insert_post([
-                'post_title' => $title !== '' ? $title : 'Figma Import',
-                'post_type' => $postType,
-                'post_status' => $status,
-            ]) : 1;
+            if (function_exists('wp_insert_post')) {
+                $inserted = wp_insert_post([
+                    'post_title' => $title !== '' ? $title : 'Figma Import',
+                    'post_type' => $postType,
+                    'post_status' => $status,
+                ], true);
+                if ((function_exists('is_wp_error') && is_wp_error($inserted)) || $inserted instanceof \WP_Error) {
+                    return $inserted;
+                }
+                $postId = (int) $inserted;
+                if ($postId <= 0) {
+                    if (class_exists('\WP_Error')) {
+                        return new \WP_Error('insert_post_failed', 'Failed to create WordPress post.', ['status' => 500]);
+                    }
+                    throw new \RuntimeException('Failed to create WordPress post.', 500);
+                }
+            } else {
+                $postId = 1;
+            }
             $finalTree = $incomingElements;
         }
 
@@ -76,10 +113,18 @@ final class DocumentWriter
                 if (function_exists('wp_set_object_terms')) {
                     wp_set_object_terms($postId, $templateType, 'elementor_library_type');
                 }
+            } elseif ($pageLayout !== '') {
+                update_post_meta($postId, '_wp_page_template', $pageLayout);
+                $pageSettings = function_exists('get_post_meta') ? get_post_meta($postId, '_elementor_page_settings', true) : [];
+                $pageSettings = is_array($pageSettings) ? $pageSettings : [];
+                if ($pageLayout === 'elementor_canvas' || $pageLayout === 'elementor_header_footer') {
+                    $pageSettings['hide_title'] = 'yes';
+                }
+                update_post_meta($postId, '_elementor_page_settings', $pageSettings);
             }
         }
 
-        $this->clearElementorCache();
+        $this->clearElementorCache($postId);
 
         $editUrl = function_exists('admin_url') ? admin_url('post.php?post=' . $postId . '&action=elementor') : '';
         $viewUrl = function_exists('get_permalink') ? (string) get_permalink($postId) : '';
@@ -284,8 +329,15 @@ final class DocumentWriter
         return $incoming;
     }
 
-    private function clearElementorCache(): void
+    private function clearElementorCache(int $postId = 0): void
     {
+        if ($postId > 0 && function_exists('delete_post_meta')) {
+            delete_post_meta($postId, '_elementor_css');
+            delete_post_meta($postId, '_elementor_element_cache');
+        }
+        if ($postId > 0 && function_exists('do_action')) {
+            do_action('elementor/atomic-widgets/styles/clear', ['post', (string) $postId]);
+        }
         if (class_exists('Elementor\\Plugin')) {
             $plugin = \Elementor\Plugin::$instance ?? null;
             if (is_object($plugin) && isset($plugin->files_manager) && method_exists($plugin->files_manager, 'clear_cache')) {

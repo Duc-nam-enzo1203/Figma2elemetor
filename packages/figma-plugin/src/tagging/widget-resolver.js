@@ -11,6 +11,7 @@ export const WIDGET_CATALOG = [
   { value: 'container-grid', label: 'Grid Container (CSS Grid)', category: 'Layout', icon: 'container-grid', pro: false },
   { value: 'inner-section', label: 'Inner Section / Columns', category: 'Layout', icon: 'columns', pro: false },
   { value: 'unwrap', label: 'Bỏ qua Container (Unwrap - Giữ con)', category: 'Layout', icon: 'unwrap', pro: false },
+  { value: 'background', label: 'Background (Gộp vào ảnh nền)', category: 'Layout', icon: 'image', pro: false },
 
   // ── Basic (Elementor Free) ──
   { value: 'heading', label: 'Heading (H1–H6)', category: 'Basic (Free)', icon: 't-letter', pro: false },
@@ -258,6 +259,9 @@ const NAMING_ALIASES = {
   unwrap: 'unwrap',
   'unwrap-container': 'unwrap',
   flatten: 'unwrap',
+  bg: 'background',
+  background: 'background',
+  backdrop: 'background',
 };
 
 const VECTOR_TYPES = new Set([
@@ -274,6 +278,32 @@ export function visibleChildren(node) {
 
 export function hasImageFill(node) {
   return Array.isArray(node && node.fills) && node.fills.some((fill) => fill && fill.type === 'IMAGE' && fill.visible !== false);
+}
+
+export function hasDescendantImageFill(node, depth = 0) {
+  if (!node || depth > 5) return false;
+  if (hasImageFill(node)) return true;
+  return visibleChildren(node).some((child) => hasDescendantImageFill(child, depth + 1));
+}
+
+export function countImageFills(node, depth = 0) {
+  if (!node || depth > 5) return 0;
+  let count = hasImageFill(node) ? 1 : 0;
+  for (const child of visibleChildren(node)) {
+    count += countImageFills(child, depth + 1);
+  }
+  return count;
+}
+
+export function isSingleMaskedRasterWrapper(node) {
+  if (!node || hasImageFill(node)) return false;
+  const kids = visibleChildren(node);
+  if (kids.length === 0) return false;
+  if (collectTextDescendants(node).length > 0) return false;
+  if (isVectorGraphic(node)) return false;
+  const hasMaskChild = kids.some((k) => Boolean(k && k.isMask));
+  if (hasMaskChild && hasDescendantImageFill(node)) return true;
+  return countImageFills(node) === 1 && kids.every((k) => k && k.type !== 'TEXT');
 }
 
 export function hasSolidOrGradientFill(node) {
@@ -414,7 +444,7 @@ function candidateFitsNode(node, widget) {
     return node.type === 'TEXT';
   }
   if (widget === 'image') {
-    return hasImageFill(node) || (kids.length === 0 && node.type === 'RECTANGLE');
+    return hasImageFill(node) || isSingleMaskedRasterWrapper(node) || (kids.length === 0 && node.type === 'RECTANGLE');
   }
   if (widget === 'icon') {
     return isVectorGraphic(node);
@@ -484,8 +514,8 @@ function classifyByHeuristics(node) {
     return { widget: (w <= 128 && h <= 128) ? 'icon' : 'image', source: 'heuristic' };
   }
 
-  // Leaf with Image fill -> Image widget
-  if (hasImageFill(node) && kids.length === 0) {
+  // Leaf with Image fill or single masked/wrapped raster frame -> Image widget
+  if ((hasImageFill(node) && kids.length === 0) || isSingleMaskedRasterWrapper(node)) {
     return { widget: 'image', source: 'heuristic' };
   }
 
@@ -494,8 +524,15 @@ function classifyByHeuristics(node) {
     return { widget: 'button', source: 'heuristic' };
   }
 
-  // Gallery heuristic (2+ sibling images with no text)
-  if (kids.length >= 2 && kids.every((child) => hasImageFill(child) && visibleChildren(child).length === 0)) {
+  // Gallery heuristic (3+ sibling images with no text; 2-photo rows stay as containers)
+  if (
+    kids.length >= 3 &&
+    kids.every(
+      (child) =>
+        collectTextDescendants(child).length === 0 &&
+        ((hasImageFill(child) && visibleChildren(child).length === 0) || isSingleMaskedRasterWrapper(child))
+    )
+  ) {
     return { widget: 'image-gallery', source: 'heuristic' };
   }
 
@@ -589,4 +626,143 @@ function isIconListNode(node, kids) {
   }
 
   return false;
+}
+
+const STRICT_BG_TOKENS = new Set([
+  'bg', 'background', 'backdrop', 'overlay', 'hero-bg', 'decor', 'watermark', 'vignette', 'scrim',
+]);
+
+const EXACT_SHAPE_BG_NAMES = new Set([
+  'line', 'main', 'mask', 'shape', 'shadow', 'glow', 'gradient', 'tint', 'blur', 'pattern', 'wave', 'curve', 'rectangle', 'ellipse',
+]);
+
+function hasOverlayOpacityOrBlend(ch) {
+  if (!ch) return false;
+  if (typeof ch.opacity === 'number' && ch.opacity < 0.95) return true;
+  if (ch.blendMode && ch.blendMode !== 'PASS_THROUGH' && ch.blendMode !== 'NORMAL') return true;
+  if (Array.isArray(ch.fills)) {
+    return ch.fills.some((f) => {
+      if (!f || f.visible === false) return false;
+      if (typeof f.opacity === 'number' && f.opacity < 0.95) return true;
+      if (String(f.type || '').startsWith('GRADIENT_') && Array.isArray(f.gradientStops)) {
+        return f.gradientStops.some((st) => st && st.color && typeof st.color.a === 'number' && st.color.a < 0.95);
+      }
+      return false;
+    });
+  }
+  return false;
+}
+
+function boxesOverlap(a, b) {
+  const ax1 = Number(a && a.x) || 0;
+  const ay1 = Number(a && a.y) || 0;
+  const ax2 = ax1 + (Number(a && a.width) || 0);
+  const ay2 = ay1 + (Number(a && a.height) || 0);
+  const bx1 = Number(b && b.x) || 0;
+  const by1 = Number(b && b.y) || 0;
+  const bx2 = bx1 + (Number(b && b.width) || 0);
+  const by2 = by1 + (Number(b && b.height) || 0);
+  return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1;
+}
+
+/**
+ * Identifies composite background layers inside a container frame (such as multi-layer
+ * Hero backgrounds: BG + Mask + Line + Main + Overlay stacked behind Menu/Text/Group).
+ *
+ * Respects explicit `background` tags (via pluginData or `[bg]` prefix) on any frame,
+ * and auto-detects non-text visual layers stacked strictly behind foreground content
+ * (plus full-frame translucent overlays above foreground content) inside freeform
+ * (non-Auto-Layout) frames without mutating the Figma canvas.
+ */
+export function detectCompositeBackgroundChildren(containerNode) {
+  const kids = visibleChildren(containerNode);
+  if (kids.length < 2) {
+    return { bgChildren: [], fgChildren: kids, bgIds: new Set() };
+  }
+
+  const bgIds = new Set();
+
+  // 1. Explicit `background` tag (pluginData override or `[bg]` / `[background]` bracket tag)
+  for (const child of kids) {
+    const resolved = resolveWidget(child);
+    if (resolved.widget === 'background') {
+      bgIds.add(child.id);
+    }
+  }
+
+  // 2. Smart Auto-Detection for freeform (non-Auto-Layout) frames with mixed background + foreground content
+  const isFreeform = !containerNode.layoutMode || containerNode.layoutMode === 'NONE';
+  if (isFreeform) {
+    // In Figma API, `children[0]` is bottom-most (lowest z-index), `children[n-1]` is top-most.
+    const isForegroundContent = (child) => {
+      if (bgIds.has(child.id)) return false;
+      const resolved = resolveWidget(child);
+      if (resolved.source === 'override' && resolved.widget !== 'background') return true;
+      if (collectTextDescendants(child).length > 0) return true;
+      return ['nav-menu', 'button', 'form', 'heading', 'text-editor', 'icon-list'].includes(resolved.widget);
+    };
+
+    const firstFgIdx = kids.findIndex((c) => isForegroundContent(c));
+    if (firstFgIdx >= 0) {
+      const fgCandidates = kids.slice(firstFgIdx).filter((c) => isForegroundContent(c));
+      const parentArea = Math.max(1, (Number(containerNode.width) || 0) * (Number(containerNode.height) || 0));
+
+      // All non-text layers strictly below the first foreground content layer (`i < firstFgIdx`)
+      for (let i = 0; i < firstFgIdx; i += 1) {
+        const child = kids[i];
+        if (bgIds.has(child.id)) continue;
+        if (isForegroundContent(child)) continue;
+        const resolved = resolveWidget(child);
+        if (resolved.source === 'override' && resolved.widget !== 'background') continue;
+        if (collectTextDescendants(child).length > 0) continue;
+
+        const lower = String(child.name || '').trim().toLowerCase();
+        const tokens = lower.split(/[^a-z0-9-]+/).filter(Boolean);
+        const matchesStrictBg = lower === 'hero bg' || tokens.some((t) => STRICT_BG_TOKENS.has(t));
+        const matchesShapeBg = tokens.some((t) => EXACT_SHAPE_BG_NAMES.has(t));
+        const cw = Number(child.width) || 0;
+        const ch = Number(child.height) || 0;
+        const childArea = cw * ch;
+        const coversLargeArea = parentArea > 1 && childArea / parentArea >= 0.30;
+        const overlapsFg = fgCandidates.some((fg) => boxesOverlap(child, fg));
+        const isSmallIcon = isVectorGraphic(child) && cw > 0 && ch > 0 && cw <= 72 && ch <= 72 && !overlapsFg && !coversLargeArea;
+
+        if (matchesStrictBg || (matchesShapeBg && !isSmallIcon) || coversLargeArea || overlapsFg) {
+          bgIds.add(child.id);
+        }
+      }
+
+      // Post-foreground translucent/blend overlays (`i > firstFgIdx`) covering >= 50% of container
+      for (let i = firstFgIdx + 1; i < kids.length; i += 1) {
+        const child = kids[i];
+        if (bgIds.has(child.id)) continue;
+        if (isForegroundContent(child)) continue;
+        const resolved = resolveWidget(child);
+        if (resolved.source === 'override' && resolved.widget !== 'background') continue;
+        if (collectTextDescendants(child).length > 0) continue;
+
+        const lower = String(child.name || '').trim().toLowerCase();
+        const tokens = lower.split(/[^a-z0-9-]+/).filter(Boolean);
+        const matchesStrictBg = lower === 'hero bg' || tokens.some((t) => STRICT_BG_TOKENS.has(t));
+        const cw = Number(child.width) || 0;
+        const ch = Number(child.height) || 0;
+        const childArea = cw * ch;
+        const areaRatio = parentArea > 1 ? childArea / parentArea : 0;
+
+        if (areaRatio >= 0.50 && (matchesStrictBg || hasOverlayOpacityOrBlend(child))) {
+          bgIds.add(child.id);
+        }
+      }
+    }
+  }
+
+  const bgChildren = kids.filter((c) => bgIds.has(c.id));
+  const fgChildren = kids.filter((c) => !bgIds.has(c.id));
+
+  // Safety: never bake ALL children into background (must leave at least 1 foreground element)
+  if (bgChildren.length === 0 || fgChildren.length === 0) {
+    return { bgChildren: [], fgChildren: kids, bgIds: new Set() };
+  }
+
+  return { bgChildren, fgChildren, bgIds };
 }

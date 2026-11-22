@@ -105,6 +105,29 @@ export function bytesToBase64(input) {
   return result;
 }
 
+/** Pure-JS Base64 decoder to Uint8Array (for Figma sandbox without atob) */
+export function base64ToBytes(b64) {
+  const clean = String(b64 || '').replace(/[^A-Za-z0-9+/=]/g, '');
+  const chars = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+  const lookup = new Uint8Array(128);
+  for (let i = 0; i < chars.length; i += 1) lookup[chars.charCodeAt(i)] = i;
+  const len = clean.length;
+  const pad = clean.endsWith('==') ? 2 : (clean.endsWith('=') ? 1 : 0);
+  const out = new Uint8Array(Math.max(0, ((len * 3) >> 2) - pad));
+  let p = 0;
+  for (let i = 0; i < len; i += 4) {
+    const c1 = lookup[clean.charCodeAt(i)] || 0;
+    const c2 = lookup[clean.charCodeAt(i + 1)] || 0;
+    const c3 = lookup[clean.charCodeAt(i + 2)] || 0;
+    const c4 = lookup[clean.charCodeAt(i + 3)] || 0;
+    const triplet = (c1 << 18) | (c2 << 12) | (c3 << 6) | c4;
+    if (p < out.length) out[p++] = (triplet >> 16) & 0xff;
+    if (p < out.length) out[p++] = (triplet >> 8) & 0xff;
+    if (p < out.length) out[p++] = triplet & 0xff;
+  }
+  return out;
+}
+
 /** Pure-JS SHA-256 (FIPS 180-4) over Uint8Array/ArrayBuffer */
 export async function sha256(input) {
   const bytes = typeof input === 'string'

@@ -15,1049 +15,25 @@ import {
   resolveWidget,
   visibleChildren,
   hasImageFill,
+  hasDescendantImageFill,
   collectTextDescendants,
   isAtomicLeafWidget,
   isVectorGraphic,
+  detectCompositeBackgroundChildren,
 } from '../tagging/widget-resolver.js';
 import { inferVirtualLayout } from '../optimizer/auto-layout-fixer.js';
 
-const WEIGHT_MAP = {
-  thin: '100',
-  hairline: '100',
-  extralight: '200',
-  ultralight: '200',
-  light: '300',
-  regular: '400',
-  normal: '400',
-  book: '400',
-  medium: '500',
-  semibold: '600',
-  demibold: '600',
-  bold: '700',
-  extrabold: '800',
-  ultrabold: '800',
-  black: '900',
-  heavy: '900',
+import { safeNum, safeStr, fontWeightOf, rgbToHex, extractSolidColor, extractGradient, extractLayout, extractStyle, extractTypography, extractLink, extractButtonIcon, captureResponsiveTree, matchResponsiveOverride } from './primitives.js';
+import { resolveCssVars, normalizeCssColor, applyDevModeCSSToNode, inspectNodeDevMode } from './devmode-css.js';
+import { detectColorRole, detectTypographyRole, extractLocalDesignSystem } from './design-system.js';
+
+export {
+  safeNum, safeStr, fontWeightOf, rgbToHex, extractSolidColor, extractGradient,
+  extractLayout, extractStyle, extractTypography, extractLink, extractButtonIcon,
+  captureResponsiveTree, matchResponsiveOverride,
+  resolveCssVars, normalizeCssColor, applyDevModeCSSToNode, inspectNodeDevMode,
+  detectColorRole, detectTypographyRole, extractLocalDesignSystem,
 };
-
-/** Safe number coercion that never throws on `Symbol(figma.mixed)` */
-export function safeNum(val, fallback = 0) {
-  if (typeof val === 'number' && Number.isFinite(val)) return val;
-  if (typeof val === 'string') {
-    const n = Number(val);
-    return Number.isFinite(n) ? n : fallback;
-  }
-  return fallback;
-}
-
-/** Safe string coercion that never throws on `Symbol(figma.mixed)` */
-export function safeStr(val, fallback = '') {
-  if (typeof val === 'string') return val;
-  if (typeof val === 'number') return String(val);
-  return fallback;
-}
-
-export function fontWeightOf(styleName) {
-  const key = safeStr(styleName, '').toLowerCase().replace(/[\s_-]|italic|oblique/g, '');
-  return WEIGHT_MAP[key] || '400';
-}
-
-export function rgbToHex(color, alpha = 1) {
-  if (!color || typeof color !== 'object') return '#000000';
-  const r = Math.round(Math.max(0, Math.min(1, safeNum(color.r, 0))) * 255);
-  const g = Math.round(Math.max(0, Math.min(1, safeNum(color.g, 0))) * 255);
-  const b = Math.round(Math.max(0, Math.min(1, safeNum(color.b, 0))) * 255);
-  const a = alpha !== undefined ? safeNum(alpha, 1) : (color.a !== undefined ? safeNum(color.a, 1) : 1);
-  if (a < 1) {
-    return `rgba(${r}, ${g}, ${b}, ${Math.round(a * 100) / 100})`;
-  }
-  return `#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
-}
-
-export function extractSolidColor(paints) {
-  if (!Array.isArray(paints)) return null;
-  const paint = [...paints].reverse().find(
-    (item) => item && item.type === 'SOLID' && item.visible !== false && safeNum(item.opacity, 1) > 0
-  );
-  if (!paint || !paint.color) return null;
-  return rgbToHex(paint.color, safeNum(paint.opacity, 1));
-}
-
-export function extractGradient(paints) {
-  if (!Array.isArray(paints)) return null;
-  const paint = [...paints].reverse().find(
-    (item) => item && safeStr(item.type).startsWith('GRADIENT_') && item.visible !== false && safeNum(item.opacity, 1) > 0
-  );
-  if (!paint || !Array.isArray(paint.gradientStops) || paint.gradientStops.length < 2) return null;
-
-  const stop0 = paint.gradientStops[0];
-  const stop1 = paint.gradientStops[paint.gradientStops.length - 1];
-  let angle = 180;
-  if (Array.isArray(paint.gradientHandlePositions) && paint.gradientHandlePositions.length >= 2) {
-    const start = paint.gradientHandlePositions[0];
-    const end = paint.gradientHandlePositions[1];
-    const dx = safeNum(end && end.x) - safeNum(start && start.x);
-    const dy = safeNum(end && end.y) - safeNum(start && start.y);
-    angle = Math.round((Math.atan2(dx, -dy) * 180) / Math.PI);
-    if (angle < 0) angle += 360;
-  }
-
-  return {
-    type: paint.type === 'GRADIENT_RADIAL' ? 'radial' : 'linear',
-    color1: rgbToHex(stop0.color, stop0.color && stop0.color.a !== undefined ? stop0.color.a : 1),
-    stop1: Math.round(safeNum(stop0.position, 0) * 100),
-    color2: rgbToHex(stop1.color, stop1.color && stop1.color.a !== undefined ? stop1.color.a : 1),
-    stop2: Math.round(safeNum(stop1.position, 1) * 100),
-    angle,
-  };
-}
-
-export function extractLayout(node, parentNode = null) {
-  let width = Math.round(safeNum(node.width, 0));
-  let height = Math.round(safeNum(node.height, 0));
-  const strokeW = Math.max(1, Math.round(safeNum(node.strokeWeight, 1)));
-  if (node.type === 'LINE') {
-    const rot = Math.abs(safeNum(node.rotation, 0));
-    const isVertLine = (rot >= 45 && rot <= 135) || (parentNode && parentNode.layoutMode === 'HORIZONTAL' && height === 0);
-    if (isVertLine) {
-      height = Math.max(width, height, 24);
-      width = strokeW;
-    } else if (height === 0) {
-      height = strokeW;
-    }
-  } else if (width === 0 && height > 0) {
-    width = strokeW;
-  } else if (height === 0 && width > 0) {
-    height = strokeW;
-  }
-  const x = Math.round(safeNum(node.x, 0));
-  const y = Math.round(safeNum(node.y, 0));
-
-  let layout;
-  if (node.layoutMode && node.layoutMode !== 'NONE') {
-    layout = {
-      width,
-      height,
-      x,
-      y,
-      mode: node.layoutMode === 'GRID' ? 'grid' : 'flex',
-      direction: node.layoutMode === 'HORIZONTAL' ? 'row' : 'column',
-      gap: Math.max(0, Math.round(safeNum(node.itemSpacing, 0))),
-      wrap: node.layoutWrap === 'WRAP',
-      padding: {
-        top: Math.round(safeNum(node.paddingTop, 0)),
-        right: Math.round(safeNum(node.paddingRight, 0)),
-        bottom: Math.round(safeNum(node.paddingBottom, 0)),
-        left: Math.round(safeNum(node.paddingLeft, 0)),
-      },
-      justify: safeStr(node.primaryAxisAlignItems, 'MIN'),
-      align: safeStr(node.counterAxisAlignItems, 'MIN'),
-      primarySizing: safeStr(node.primaryAxisSizingMode, 'AUTO'),
-      counterSizing: safeStr(node.counterAxisSizingMode, 'AUTO'),
-      clipsContent: Boolean(node.clipsContent),
-      minWidth: typeof node.minWidth === 'number' ? Math.round(node.minWidth) : null,
-      maxWidth: typeof node.maxWidth === 'number' ? Math.round(node.maxWidth) : null,
-      minHeight: typeof node.minHeight === 'number' ? Math.round(node.minHeight) : null,
-      maxHeight: typeof node.maxHeight === 'number' ? Math.round(node.maxHeight) : null,
-      inferred: false,
-    };
-    if (typeof node.counterAxisSpacing === 'number') {
-      layout.rowGap = Math.max(0, Math.round(safeNum(node.counterAxisSpacing, 0)));
-    }
-    if (node.layoutMode === 'GRID') {
-      layout.columns = Array.isArray(node.gridColumnSizes) ? node.gridColumnSizes.length : safeNum(node.gridColumnCount, 2);
-      layout.rows = Array.isArray(node.gridRowSizes) ? node.gridRowSizes.length : safeNum(node.gridRowCount, 1);
-    }
-  } else {
-    layout = inferVirtualLayout(node);
-    layout.x = x;
-    layout.y = y;
-    layout.clipsContent = Boolean(node.clipsContent);
-  }
-
-  // Child sizing relative to parent Auto-Layout
-  if (typeof node.layoutSizingHorizontal === 'string') {
-    layout.sizingH = node.layoutSizingHorizontal; // 'FIXED' | 'HUG' | 'FILL'
-  } else if (parentNode) {
-    const parentIsRow = parentNode.layoutMode === 'HORIZONTAL';
-    if (parentIsRow && safeNum(node.layoutGrow, 0) >= 1) layout.sizingH = 'FILL';
-    else if (!parentIsRow && node.layoutAlign === 'STRETCH') layout.sizingH = 'FILL';
-  }
-
-  if (typeof node.layoutSizingVertical === 'string') {
-    layout.sizingV = node.layoutSizingVertical; // 'FIXED' | 'HUG' | 'FILL'
-  } else if (parentNode) {
-    const parentIsRow = parentNode.layoutMode === 'HORIZONTAL';
-    if (!parentIsRow && safeNum(node.layoutGrow, 0) >= 1) layout.sizingV = 'FILL';
-    else if (parentIsRow && node.layoutAlign === 'STRETCH') layout.sizingV = 'FILL';
-  }
-
-  // Detect absolute positioning inside an Auto-Layout parent (or full-bleed background layers named "bg")
-  const rawName = safeStr(node.name).trim().toLowerCase();
-  const parentW = parentNode ? Math.round(safeNum(parentNode.width, 0)) : 0;
-  const parentH = parentNode ? Math.round(safeNum(parentNode.height, 0)) : 0;
-  if (node.layoutPositioning === 'ABSOLUTE') {
-    layout.position = 'absolute';
-  } else if (
-    parentNode &&
-    (rawName === 'bg' || rawName === 'background' || rawName === 'overlay') &&
-    visibleChildren(node).length === 0 &&
-    width >= parentW * 0.9 &&
-    height >= parentH * 0.9
-  ) {
-    layout.position = 'absolute';
-    layout.isBackgroundLayer = true;
-  }
-
-  return layout;
-}
-
-export function extractStyle(node) {
-  const style = {};
-
-  if (node.type !== 'TEXT') {
-    const bg = extractSolidColor(node.fills);
-    if (bg) style.background = bg;
-    const gradient = extractGradient(node.fills);
-    if (gradient) style.gradient = gradient;
-  }
-
-  // Corner radius (guards against `figma.mixed` symbol when corners differ)
-  if (typeof node.cornerRadius === 'number' && node.cornerRadius > 0) {
-    const r = Math.round(node.cornerRadius);
-    style.radius = { top: r, right: r, bottom: r, left: r, isLinked: true };
-  } else if (
-    typeof node.topLeftRadius === 'number' ||
-    typeof node.topRightRadius === 'number' ||
-    typeof node.bottomRightRadius === 'number' ||
-    typeof node.bottomLeftRadius === 'number'
-  ) {
-    const tl = Math.round(safeNum(node.topLeftRadius, 0));
-    const tr = Math.round(safeNum(node.topRightRadius, 0));
-    const br = Math.round(safeNum(node.bottomRightRadius, 0));
-    const bl = Math.round(safeNum(node.bottomLeftRadius, 0));
-    if (tl > 0 || tr > 0 || br > 0 || bl > 0) {
-      style.radius = { top: tl, right: tr, bottom: br, left: bl, isLinked: tl === tr && tr === br && br === bl };
-    }
-  }
-
-  // Borders / Strokes (guards against `figma.mixed` on strokeWeight)
-  const strokeSolid = extractSolidColor(node.strokes);
-  const strokeGrad = extractGradient(node.strokes);
-  const borderColor = strokeSolid || (strokeGrad ? strokeGrad.color1 : null);
-
-  if (borderColor) {
-    const hasIndividualStrokes =
-      typeof node.strokeTopWeight === 'number' ||
-      typeof node.strokeRightWeight === 'number' ||
-      typeof node.strokeBottomWeight === 'number' ||
-      typeof node.strokeLeftWeight === 'number';
-
-    if (hasIndividualStrokes && node.strokeWeight !== Number(node.strokeTopWeight)) {
-      const bt = Math.round(safeNum(node.strokeTopWeight, 0));
-      const br = Math.round(safeNum(node.strokeRightWeight, 0));
-      const bb = Math.round(safeNum(node.strokeBottomWeight, 0));
-      const bl = Math.round(safeNum(node.strokeLeftWeight, 0));
-      if (bt > 0 || br > 0 || bb > 0 || bl > 0) {
-        style.borderWidth = { top: bt, right: br, bottom: bb, left: bl, isLinked: bt === br && br === bb && bb === bl };
-      }
-    } else if (typeof node.strokeWeight === 'number' && node.strokeWeight > 0) {
-      const w = Math.max(1, Math.round(node.strokeWeight));
-      style.borderWidth = { top: w, right: w, bottom: w, left: w, isLinked: true };
-    }
-
-    if (style.borderWidth) {
-      style.borderColor = borderColor;
-      if (strokeGrad) {
-        style.borderGradient = strokeGrad;
-      }
-    }
-  }
-
-  // Box Shadow
-  if (Array.isArray(node.effects)) {
-    const shadow = node.effects.find(
-      (ef) => ef && ef.visible !== false && (ef.type === 'DROP_SHADOW' || ef.type === 'INNER_SHADOW')
-    );
-    if (shadow && shadow.color) {
-      style.boxShadow = {
-        horizontal: Math.round(safeNum(shadow.offset && shadow.offset.x, 0)),
-        vertical: Math.round(safeNum(shadow.offset && shadow.offset.y, 0)),
-        blur: Math.round(safeNum(shadow.radius, 0)),
-        spread: Math.round(safeNum(shadow.spread, 0)),
-        color: rgbToHex(shadow.color, shadow.color.a !== undefined ? shadow.color.a : 0.25),
-        position: shadow.type === 'INNER_SHADOW' ? 'inset' : '',
-      };
-    }
-  }
-
-  if (typeof node.opacity === 'number' && node.opacity < 1) {
-    style.opacity = Math.round(node.opacity * 100) / 100;
-  }
-
-  return style;
-}
-
-export function extractTypography(node) {
-  if (!node) return null;
-  const characters = safeStr(node.characters, '');
-
-  // Handle `figma.mixed` on fontSize, fontName, lineHeight, letterSpacing, fills
-  let fontSize = typeof node.fontSize === 'number' ? Math.round(node.fontSize) : null;
-  let fontName = node.fontName && typeof node.fontName === 'object' && node.fontName.family ? node.fontName : null;
-  let lineHeightObj = node.lineHeight && typeof node.lineHeight === 'object' && node.lineHeight.unit ? node.lineHeight : null;
-  let letterSpacingObj = node.letterSpacing && typeof node.letterSpacing === 'object' ? node.letterSpacing : null;
-  let fillsArr = Array.isArray(node.fills) ? node.fills : null;
-
-  if (characters.length > 0) {
-    if (fontSize === null && typeof node.getRangeFontSize === 'function') {
-      try {
-        const s = node.getRangeFontSize(0, 1);
-        if (typeof s === 'number') fontSize = Math.round(s);
-      } catch (e) { }
-    }
-    if (!fontName && typeof node.getRangeFontName === 'function') {
-      try {
-        const fn = node.getRangeFontName(0, 1);
-        if (fn && typeof fn === 'object' && fn.family) fontName = fn;
-      } catch (e) { }
-    }
-    if (!fillsArr && typeof node.getRangeFills === 'function') {
-      try {
-        const rf = node.getRangeFills(0, 1);
-        if (Array.isArray(rf)) fillsArr = rf;
-      } catch (e) { }
-    }
-  }
-
-  const text = {
-    characters,
-    fontSize: fontSize || 16,
-    fontFamily: fontName ? safeStr(fontName.family, 'Inter') : 'Inter',
-    fontWeight: fontName ? fontWeightOf(fontName.style) : '400',
-    align: safeStr(node.textAlignHorizontal, 'LEFT').toLowerCase(),
-  };
-
-  if (fontName && safeStr(fontName.style).toLowerCase().includes('italic')) {
-    text.fontStyle = 'italic';
-  } else {
-    text.fontStyle = 'normal';
-  }
-
-  if (lineHeightObj && lineHeightObj.unit !== 'AUTO') {
-    if (lineHeightObj.unit === 'PIXELS') {
-      text.lineHeight = Math.round(safeNum(lineHeightObj.value, text.fontSize * 1.35));
-      text.lineHeightUnit = 'px';
-    } else if (lineHeightObj.unit === 'PERCENT') {
-      text.lineHeight = Math.round(safeNum(lineHeightObj.value, 135) / 10) / 10;
-      text.lineHeightUnit = 'em';
-    }
-  } else {
-    // If AUTO, generate explicit line-height based on font size for 100% theme immunity
-    text.lineHeight = Math.round(text.fontSize * (text.fontSize >= 32 ? 1.2 : 1.4));
-    text.lineHeightUnit = 'px';
-  }
-
-  if (letterSpacingObj && safeNum(letterSpacingObj.value, 0) !== 0) {
-    text.letterSpacing = Math.round(safeNum(letterSpacingObj.value, 0) * 10) / 10;
-  }
-
-  if (node.textCase === 'UPPER') text.transform = 'uppercase';
-  else if (node.textCase === 'LOWER') text.transform = 'lowercase';
-  else if (node.textCase === 'TITLE') text.transform = 'capitalize';
-
-  if (node.textDecoration === 'UNDERLINE') text.decoration = 'underline';
-  else if (node.textDecoration === 'STRIKETHROUGH') text.decoration = 'line-through';
-
-  // Extract solid color OR gradient fill on TEXT nodes (e.g. background-clip: text)
-  let color = extractSolidColor(fillsArr);
-  const textGradient = extractGradient(fillsArr);
-  if (textGradient) {
-    text.gradient = textGradient;
-    text.gradientCss = `linear-gradient(${textGradient.angle}deg, ${textGradient.color1} ${textGradient.stop1}%, ${textGradient.color2} ${textGradient.stop2}%)`;
-    text.backgroundClipText = true;
-    if (!color) {
-      color = textGradient.color2 || textGradient.color1;
-    }
-  }
-  const nodeOpacity = typeof node.opacity === 'number' ? node.opacity : 1;
-  if (color && nodeOpacity < 1 && !color.startsWith('rgba')) {
-    // Convert hex to rgba with node opacity
-    const hex = color.replace('#', '');
-    const r = parseInt(hex.slice(0, 2), 16);
-    const g = parseInt(hex.slice(2, 4), 16);
-    const b = parseInt(hex.slice(4, 6), 16);
-    color = `rgba(${r}, ${g}, ${b}, ${Math.round(nodeOpacity * 100) / 100})`;
-  }
-  if (color) text.color = color;
-
-  return text;
-}
-
-export function extractLink(node) {
-  const reactions = Array.isArray(node && node.reactions) ? node.reactions : [];
-  for (const reaction of reactions) {
-    const action = (reaction && reaction.action) || (Array.isArray(reaction && reaction.actions) ? reaction.actions[0] : null);
-    if (action && action.type === 'URL' && action.url) {
-      return safeStr(action.url);
-    }
-  }
-  return null;
-}
-
-export function extractButtonIcon(node) {
-  if (!node || !Array.isArray(node.children)) return null;
-  const kids = node.children.filter((c) => c && c.visible !== false);
-  const textChild = kids.find((c) => c.type === 'TEXT');
-  const iconChild = kids.find((c) => c.type !== 'TEXT' && (c.type === 'VECTOR' || c.type === 'INSTANCE' || c.type === 'FRAME' || c.type === 'GROUP' || c.type === 'BOOLEAN_OPERATION' || c.type === 'LINE' || isVectorGraphic(c)));
-
-  if (!iconChild) return null;
-
-  const iconName = safeStr(iconChild.name).toLowerCase();
-  let align = 'right';
-  if (textChild && typeof iconChild.x === 'number' && typeof textChild.x === 'number') {
-    align = iconChild.x < textChild.x ? 'left' : 'right';
-  } else if (textChild && kids.indexOf(iconChild) < kids.indexOf(textChild)) {
-    align = 'left';
-  }
-
-  let faIcon = 'fas fa-arrow-right';
-  if (iconName.includes('left') || iconName.includes('prev') || iconName.includes('back')) {
-    faIcon = 'fas fa-arrow-left';
-  } else if (iconName.includes('up')) {
-    faIcon = 'fas fa-arrow-up';
-  } else if (iconName.includes('down')) {
-    faIcon = 'fas fa-arrow-down';
-  } else if (iconName.includes('chevron-right') || iconName.includes('chevron')) {
-    faIcon = 'fas fa-chevron-right';
-  } else if (iconName.includes('check')) {
-    faIcon = 'fas fa-check';
-  } else if (iconName.includes('plus')) {
-    faIcon = 'fas fa-plus';
-  } else if (iconName.includes('search')) {
-    faIcon = 'fas fa-search';
-  } else if (iconName.includes('phone') || iconName.includes('call')) {
-    faIcon = 'fas fa-phone';
-  } else if (iconName.includes('mail') || iconName.includes('envelope')) {
-    faIcon = 'fas fa-envelope';
-  } else if (iconName.includes('download')) {
-    faIcon = 'fas fa-download';
-  } else if (iconName.includes('external') || iconName.includes('link')) {
-    faIcon = 'fas fa-external-link-alt';
-  } else if (iconName.includes('cart') || iconName.includes('shop')) {
-    faIcon = 'fas fa-shopping-cart';
-  } else {
-    // Default for CTA button vector graphics
-    faIcon = 'fas fa-arrow-right';
-  }
-
-  return {
-    value: faIcon,
-    library: 'fa-solid',
-    align,
-  };
-}
-
-export function captureResponsiveTree(rootNode) {
-  const walk = (node, path = [], parent = null) => {
-    const kids = visibleChildren(node);
-    const name = safeStr(node.name).trim();
-    return {
-      nodeId: node.id,
-      name,
-      normName: name.toLowerCase(),
-      type: node.type,
-      pathKey: path.join('/'),
-      layout: extractLayout(node, parent),
-      style: extractStyle(node),
-      text: node.type === 'TEXT' ? extractTypography(node) : null,
-      children: kids.map((child) => walk(child, [...path, safeStr(child.name).trim().toLowerCase()], node)),
-    };
-  };
-  return walk(rootNode, [], null);
-}
-
-export function matchResponsiveOverride(capturedTree, pathNames, expectedType) {
-  if (!capturedTree) return null;
-  let current = capturedTree;
-  for (const seg of pathNames) {
-    if (!current || !Array.isArray(current.children)) return null;
-    current = current.children.find((c) => c.normName === seg);
-  }
-  if (!current || current.type !== expectedType) return null;
-  return {
-    width: current.layout && current.layout.width,
-    direction: current.layout && current.layout.direction,
-    gap: current.layout && current.layout.gap,
-    padding: current.layout && current.layout.padding,
-    columns: current.layout && current.layout.columns,
-    fontSize: current.text && current.text.fontSize,
-    align: current.text && current.text.align,
-  };
-}
-
-/**
- * Unwraps CSS variables generated by Figma Dev Mode (`var(--token-name, fallback)`)
- * and strips CSS comments (`/* 140% *\/`) so exact values are extracted deterministically.
- */
-export function resolveCssVars(rawVal) {
-  if (typeof rawVal !== 'string') return '';
-  let s = rawVal.replace(/\/\*[\s\S]*?\*\//g, '').trim();
-  let prev = '';
-  while (s.includes('var(') && s !== prev) {
-    prev = s;
-    s = s.replace(/var\(\s*--[^,)]+\s*,\s*([^()]+)\)/g, '$1').trim();
-  }
-  return s;
-}
-
-/**
- * Normalizes CSS color strings from Figma Dev Mode (e.g. `#FFF` -> `#FFFFFF`, `#000` -> `#000000`, `var(--c, #16A34A)` -> `#16A34A`).
- */
-export function normalizeCssColor(rawColor) {
-  const s = resolveCssVars(rawColor);
-  if (!s) return null;
-  const hex3 = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(s);
-  if (hex3) {
-    return `#${hex3[1]}${hex3[1]}${hex3[2]}${hex3[2]}${hex3[3]}${hex3[3]}`.toUpperCase();
-  }
-  const hex6 = /^#([0-9a-fA-F]{6}|[0-9a-fA-F]{8})$/.exec(s);
-  if (hex6) {
-    return s.toUpperCase();
-  }
-  if (/^rgba?\([^)]+\)$/i.test(s)) {
-    return s;
-  }
-  const match = s.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/i);
-  return match ? normalizeCssColor(match[0]) : null;
-}
-
-/**
- * Apply full Dev Mode CSS from Figma (node.getCSSAsync()) to an IR entry.
- * Treats Figma Dev Mode as the authoritative source of truth for borders, padding, flex layout, and typography.
- */
-export function applyDevModeCSSToNode(entry, devModeCSS) {
-  if (!entry || !devModeCSS || typeof devModeCSS !== 'object') return;
-  entry.devModeCSS = devModeCSS;
-  entry.devModeCSSString = Object.entries(devModeCSS)
-    .map(([k, v]) => `  ${k}: ${v};`)
-    .join('\n');
-
-  const style = entry.style || (entry.style = {});
-  const layout = entry.layout || (entry.layout = {});
-  const cssKeys = Object.keys(devModeCSS);
-  if (cssKeys.length === 0) return;
-
-  // 1. Authoritative Dev Mode Borders & Gradient Border
-  const hasAnyDevBorder = Boolean(
-    devModeCSS['border'] ||
-    devModeCSS['border-top'] ||
-    devModeCSS['border-right'] ||
-    devModeCSS['border-bottom'] ||
-    devModeCSS['border-left'] ||
-    devModeCSS['border-width'] ||
-    devModeCSS['border-image'] ||
-    devModeCSS['border-image-source']
-  );
-
-  // If Dev Mode CSS returned layout/box properties for a non-TEXT node and has NO border properties at all,
-  // remove any phantom stroke from `node.strokes` that is not actually rendered in Dev Mode!
-  if (!hasAnyDevBorder && entry.type !== 'text' && (devModeCSS['display'] || devModeCSS['background'] || devModeCSS['background-color'] || devModeCSS['border-radius'] || devModeCSS['padding'])) {
-    delete style.borderWidth;
-    delete style.borderColor;
-    delete style.borderGradient;
-  }
-
-  if (devModeCSS['border-image-source'] || devModeCSS['border-image']) {
-    const bImg = resolveCssVars(devModeCSS['border-image-source'] || devModeCSS['border-image']);
-    style.devModeBorderImage = bImg;
-    if (bImg.includes('linear-gradient')) {
-      const angleMatch = bImg.match(/([\d.]+)deg/);
-      const angle = angleMatch ? parseInt(angleMatch[1], 10) : 180;
-      const colors = (bImg.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/g) || ['#64A14F', '#038132']).map((c) => normalizeCssColor(c) || c);
-      style.borderGradient = {
-        angle,
-        color1: colors[0] || '#64A14F',
-        stop1: 0,
-        color2: colors[1] || colors[0] || '#038132',
-        stop2: 100,
-      };
-      if (!style.borderColor) style.borderColor = colors[0] || '#64A14F';
-    }
-  }
-
-  if (devModeCSS['border-radius']) {
-    const rClean = resolveCssVars(devModeCSS['border-radius']);
-    const parts = rClean.split(/\s+/).map((p) => parseFloat(p) || 0);
-    if (parts.length === 1 && parts[0] > 0) {
-      style.radius = { top: parts[0], right: parts[0], bottom: parts[0], left: parts[0], isLinked: true };
-    } else if (parts.length === 2) {
-      style.radius = { top: parts[0], right: parts[1], bottom: parts[0], left: parts[1], isLinked: false };
-    } else if (parts.length === 3) {
-      style.radius = { top: parts[0], right: parts[1], bottom: parts[2], left: parts[1], isLinked: false };
-    } else if (parts.length >= 4) {
-      style.radius = { top: parts[0], right: parts[1], bottom: parts[2], left: parts[3], isLinked: false };
-    }
-  }
-
-  if (devModeCSS['border-top'] || devModeCSS['border-right'] || devModeCSS['border-bottom'] || devModeCSS['border-left']) {
-    const parseSide = (val) => {
-      const clean = resolveCssVars(val);
-      if (!clean || clean === 'none' || clean === '0') return { w: 0, c: null };
-      const wMatch = clean.match(/([\d.]+)px/);
-      const c = normalizeCssColor(clean);
-      return {
-        w: wMatch ? Math.max(1, Math.round(parseFloat(wMatch[1]))) : 0,
-        c,
-      };
-    };
-    const st = parseSide(devModeCSS['border-top']);
-    const sr = parseSide(devModeCSS['border-right']);
-    const sb = parseSide(devModeCSS['border-bottom']);
-    const sl = parseSide(devModeCSS['border-left']);
-    if (st.w > 0 || sr.w > 0 || sb.w > 0 || sl.w > 0) {
-      style.borderWidth = {
-        top: st.w,
-        right: sr.w,
-        bottom: sb.w,
-        left: sl.w,
-        isLinked: st.w === sr.w && sr.w === sb.w && sb.w === sl.w,
-      };
-      const sideColor = st.c || sr.c || sb.c || sl.c;
-      if (sideColor) {
-        style.borderColor = sideColor;
-      }
-    }
-  }
-
-  if (devModeCSS['border-width'] || devModeCSS['border']) {
-    const bClean = resolveCssVars(devModeCSS['border']);
-    const bwClean = resolveCssVars(devModeCSS['border-width']);
-    if (bClean === 'none' || bClean === '0' || bwClean === '0' || bwClean === '0px') {
-      delete style.borderWidth;
-      delete style.borderColor;
-    } else {
-      if (bwClean) {
-        const bwParts = bwClean.split(/\s+/).map((p) => Math.round(parseFloat(p) || 0));
-        if (bwParts.length === 1 && bwParts[0] > 0) {
-          style.borderWidth = { top: bwParts[0], right: bwParts[0], bottom: bwParts[0], left: bwParts[0], isLinked: true };
-        } else if (bwParts.length === 4) {
-          style.borderWidth = { top: bwParts[0], right: bwParts[1], bottom: bwParts[2], left: bwParts[3], isLinked: false };
-        }
-      } else if (bClean) {
-        const bwMatch = bClean.match(/([\d.]+)px/);
-        if (bwMatch && !style.borderWidth) {
-          const bw = Math.max(1, Math.round(parseFloat(bwMatch[1])));
-          style.borderWidth = { top: bw, right: bw, bottom: bw, left: bw, isLinked: true };
-        }
-      }
-      if (bClean) {
-        const c = normalizeCssColor(bClean);
-        if (c) style.borderColor = c;
-      }
-    }
-  }
-
-  if (devModeCSS['border-color']) {
-    const c = normalizeCssColor(devModeCSS['border-color']);
-    if (c) style.borderColor = c;
-  }
-
-  // 2. Authoritative Dev Mode Background & Gradient (including background-clip: text on TEXT layers)
-  const devBg = resolveCssVars(devModeCSS['background'] || devModeCSS['background-color'] || '');
-  const isTextClip = Boolean(
-    entry.type === 'text' ||
-    (devModeCSS['background-clip'] && String(devModeCSS['background-clip']).includes('text')) ||
-    (devModeCSS['-webkit-background-clip'] && String(devModeCSS['-webkit-background-clip']).includes('text')) ||
-    (devModeCSS['-webkit-text-fill-color'] && String(devModeCSS['-webkit-text-fill-color']).includes('transparent'))
-  );
-
-  if (devBg) {
-    if (devBg.includes('gradient')) {
-      const angleMatch = devBg.match(/([\d.]+)deg/);
-      const angle = angleMatch ? parseInt(angleMatch[1], 10) : 180;
-      const colors = (devBg.match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/g) || []).map((c) => normalizeCssColor(c) || c);
-      const parsedGrad = colors.length >= 2
-        ? {
-            type: devBg.includes('radial-gradient') ? 'radial' : 'linear',
-            angle,
-            color1: colors[0],
-            stop1: 0,
-            color2: colors[colors.length - 1],
-            stop2: 100,
-          }
-        : null;
-
-      if (isTextClip) {
-        const text = entry.text || (entry.text = {});
-        text.gradientCss = devBg;
-        text.backgroundClipText = true;
-        if (parsedGrad) {
-          text.gradient = parsedGrad;
-          if (!text.color) {
-            text.color = parsedGrad.color2 || parsedGrad.color1;
-          }
-        }
-        if (entry.type === 'text') {
-          delete style.gradient;
-          delete style.background;
-        }
-      } else if (parsedGrad) {
-        style.gradient = parsedGrad;
-      }
-    } else {
-      const solidBg = normalizeCssColor(devBg);
-      if (solidBg) {
-        if (entry.type === 'text') {
-          const text = entry.text || (entry.text = {});
-          if (!text.color) text.color = solidBg;
-        } else {
-          style.background = solidBg;
-        }
-      }
-    }
-  }
-
-  // 3. Authoritative Dev Mode Flexbox, Padding, Gap & Box Sizing
-  const disp = resolveCssVars(devModeCSS['display'] || '');
-  if (disp === 'flex' || disp === 'inline-flex') {
-    layout.mode = 'flex';
-    const fDir = resolveCssVars(devModeCSS['flex-direction'] || '');
-    layout.direction = fDir === 'column' ? 'column' : 'row';
-    layout.inferred = false;
-  } else if (disp === 'grid') {
-    layout.mode = 'grid';
-    layout.inferred = false;
-  }
-
-  if (devModeCSS['flex-wrap']) {
-    const fw = resolveCssVars(devModeCSS['flex-wrap']);
-    layout.wrap = fw === 'wrap';
-  }
-
-  if (devModeCSS['justify-content']) {
-    const jc = resolveCssVars(devModeCSS['justify-content']);
-    if (jc === 'space-between') layout.justify = 'SPACE_BETWEEN';
-    else if (jc === 'center') layout.justify = 'CENTER';
-    else if (jc === 'flex-end' || jc === 'end') layout.justify = 'MAX';
-    else if (jc === 'flex-start' || jc === 'start') layout.justify = 'MIN';
-  }
-
-  if (devModeCSS['align-items']) {
-    const ai = resolveCssVars(devModeCSS['align-items']);
-    if (ai === 'center') layout.align = 'CENTER';
-    else if (ai === 'flex-end' || ai === 'end') layout.align = 'MAX';
-    else if (ai === 'baseline') layout.align = 'BASELINE';
-    else if (ai === 'flex-start' || ai === 'start') layout.align = 'MIN';
-  }
-
-  // Child flex sizing from Dev Mode (`flex: 1 0 0` and `align-self: stretch`)
-  if (devModeCSS['flex']) {
-    const flexVal = resolveCssVars(devModeCSS['flex']);
-    if (flexVal.startsWith('1 ') || flexVal === '1') {
-      layout.flexGrow = 1;
-      if (!layout.sizingH || layout.sizingH === 'HUG') {
-        layout.sizingH = 'FILL';
-      }
-    }
-  }
-  if (devModeCSS['align-self'] && resolveCssVars(devModeCSS['align-self']) === 'stretch') {
-    layout.alignSelf = 'stretch';
-  }
-
-  if (devModeCSS['padding']) {
-    const pClean = resolveCssVars(devModeCSS['padding']);
-    const pParts = pClean.split(/\s+/).map((p) => Math.round(parseFloat(p) || 0));
-    if (pParts.length === 1) {
-      layout.padding = { top: pParts[0], right: pParts[0], bottom: pParts[0], left: pParts[0], isLinked: true };
-    } else if (pParts.length === 2) {
-      layout.padding = { top: pParts[0], right: pParts[1], bottom: pParts[0], left: pParts[1], isLinked: false };
-    } else if (pParts.length === 3) {
-      layout.padding = { top: pParts[0], right: pParts[1], bottom: pParts[2], left: pParts[1], isLinked: false };
-    } else if (pParts.length >= 4) {
-      layout.padding = { top: pParts[0], right: pParts[1], bottom: pParts[2], left: pParts[3], isLinked: false };
-    }
-  }
-  if (devModeCSS['padding-top'] || devModeCSS['padding-right'] || devModeCSS['padding-bottom'] || devModeCSS['padding-left']) {
-    const curP = layout.padding || { top: 0, right: 0, bottom: 0, left: 0 };
-    const pt = devModeCSS['padding-top'] ? Math.round(parseFloat(resolveCssVars(devModeCSS['padding-top'])) || 0) : curP.top;
-    const pr = devModeCSS['padding-right'] ? Math.round(parseFloat(resolveCssVars(devModeCSS['padding-right'])) || 0) : curP.right;
-    const pb = devModeCSS['padding-bottom'] ? Math.round(parseFloat(resolveCssVars(devModeCSS['padding-bottom'])) || 0) : curP.bottom;
-    const pl = devModeCSS['padding-left'] ? Math.round(parseFloat(resolveCssVars(devModeCSS['padding-left'])) || 0) : curP.left;
-    layout.padding = { top: pt, right: pr, bottom: pb, left: pl, isLinked: pt === pr && pr === pb && pb === pl };
-  }
-
-  if (devModeCSS['gap']) {
-    const gClean = resolveCssVars(devModeCSS['gap']);
-    const gParts = gClean.split(/\s+/).map((p) => Math.round(parseFloat(p) || 0));
-    if (gParts.length === 1 && !isNaN(gParts[0])) {
-      layout.gap = gParts[0];
-    } else if (gParts.length >= 2) {
-      layout.rowGap = gParts[0];
-      layout.gap = gParts[1];
-    }
-  }
-  if (devModeCSS['column-gap']) {
-    const cg = Math.round(parseFloat(resolveCssVars(devModeCSS['column-gap'])) || 0);
-    if (!isNaN(cg)) layout.gap = cg;
-  }
-  if (devModeCSS['row-gap']) {
-    const rg = Math.round(parseFloat(resolveCssVars(devModeCSS['row-gap'])) || 0);
-    if (!isNaN(rg)) layout.rowGap = rg;
-  }
-
-  if (devModeCSS['width'] && (!layout.width || layout.width === 0)) {
-    const wVal = parseFloat(resolveCssVars(devModeCSS['width']));
-    if (!isNaN(wVal)) layout.width = Math.round(wVal);
-  }
-
-  if (devModeCSS['height'] && (!layout.height || layout.height === 0)) {
-    const hVal = parseFloat(resolveCssVars(devModeCSS['height']));
-    if (!isNaN(hVal)) layout.height = Math.round(hVal);
-  }
-
-  // 4. Authoritative Dev Mode Typography
-  if (entry.text) {
-    const text = entry.text;
-    if (devModeCSS['font-family']) {
-      text.fontFamily = resolveCssVars(devModeCSS['font-family']).replace(/['"]/g, '').split(',')[0].trim();
-    }
-    if (devModeCSS['font-weight']) {
-      text.fontWeight = String(resolveCssVars(devModeCSS['font-weight']));
-    }
-    if (devModeCSS['font-size']) {
-      const fsMatch = resolveCssVars(devModeCSS['font-size']).match(/([\d.]+)px/);
-      if (fsMatch) text.fontSize = Math.round(parseFloat(fsMatch[1]));
-    }
-    if (devModeCSS['line-height']) {
-      const lhClean = resolveCssVars(devModeCSS['line-height']);
-      const lhMatch = lhClean.match(/([\d.]+)px/);
-      if (lhMatch) {
-        text.lineHeight = Math.round(parseFloat(lhMatch[1]));
-        text.lineHeightUnit = 'px';
-      } else if (lhClean.includes('%')) {
-        text.lineHeight = Math.round((parseFloat(lhClean) / 100) * 100) / 100;
-        text.lineHeightUnit = 'em';
-      } else if (lhClean === 'normal') {
-        text.lineHeightRaw = 'normal';
-        text.lineHeight = 1.2;
-        text.lineHeightUnit = 'em';
-      } else if (/^[\d.]+$/.test(lhClean)) {
-        text.lineHeight = Math.round(parseFloat(lhClean) * 100) / 100;
-        text.lineHeightUnit = 'em';
-      }
-    }
-    if (devModeCSS['color']) {
-      const normC = normalizeCssColor(devModeCSS['color']);
-      if (normC) text.color = normC;
-    }
-    if (devModeCSS['letter-spacing']) {
-      const lsMatch = resolveCssVars(devModeCSS['letter-spacing']).match(/([-\d.]+)px/);
-      if (lsMatch) text.letterSpacing = parseFloat(lsMatch[1]);
-    }
-    if (devModeCSS['text-align']) {
-      text.align = resolveCssVars(devModeCSS['text-align']).toLowerCase();
-    }
-    if (devModeCSS['text-transform']) {
-      text.transform = resolveCssVars(devModeCSS['text-transform']);
-    }
-    if (devModeCSS['font-style']) {
-      text.fontStyle = resolveCssVars(devModeCSS['font-style']);
-    }
-  }
-}
-
-/**
- * Live Inspector for Figma Dev Mode CSS (`await node.getCSSAsync()`).
- * Extracts raw Dev Mode CSS, unwraps `var(--token, fallback)` values, identifies CSS variables
- * and color swatches, and computes the exact Elementor widget & control mapping for display in the Plugin UI.
- */
-export async function inspectNodeDevMode(node, options = {}) {
-  if (!node) return null;
-  const { includeSubtree = false, maxSubtreeNodes = 20 } = options;
-
-  const inspectSingle = async (target, depth = 0, parent = null) => {
-    let rawCss = {};
-    let hasNativeApi = false;
-    if (typeof target.getCSSAsync === 'function') {
-      hasNativeApi = true;
-      try {
-        const res = await target.getCSSAsync();
-        if (res && typeof res === 'object') {
-          rawCss = { ...res };
-        }
-      } catch (e) { }
-    }
-
-    const choice = resolveWidget(target);
-    const entry = {
-      id: target.id,
-      name: safeStr(target.name, 'Unnamed'),
-      type: target.type === 'TEXT' ? 'text' : safeStr(target.type, 'FRAME').toLowerCase(),
-      rawType: safeStr(target.type, 'FRAME'),
-      widget: choice.widget,
-      widgetSource: choice.source,
-      layout: extractLayout(target, parent),
-      style: extractStyle(target),
-      text: target.type === 'TEXT' ? extractTypography(target) : null,
-    };
-
-    if (Object.keys(rawCss).length > 0) {
-      applyDevModeCSSToNode(entry, rawCss);
-    }
-
-    const resolvedCss = {};
-    const cssVariables = [];
-    const lines = [];
-    const resolvedLines = [];
-
-    for (const [prop, val] of Object.entries(rawCss)) {
-      const strVal = String(val);
-      const unwrapped = resolveCssVars(strVal);
-      resolvedCss[prop] = unwrapped;
-      lines.push(`  ${prop}: ${strVal};`);
-      resolvedLines.push(`  ${prop}: ${unwrapped};`);
-
-      const varMatches = strVal.match(/--[a-zA-Z0-9_-]+/g);
-      if (varMatches) {
-        for (const vm of varMatches) {
-          if (!cssVariables.includes(vm)) cssVariables.push(vm);
-        }
-      }
-    }
-
-    // Build selector slug from layer name
-    const slug = safeStr(target.name, 'layer')
-      .toLowerCase()
-      .replace(/[^a-z0-9]+/g, '-')
-      .replace(/^-+|-+$/g, '') || 'layer';
-    const selector = `.f2e-${slug}`;
-
-    const headerComment = `/* Layer: "${entry.name}" (${target.id}) | Type: ${entry.rawType} | Elementor: ${entry.widget} */`;
-    const cssBlock = lines.length > 0
-      ? `${headerComment}\n${selector} {\n${lines.join('\n')}\n}`
-      : `${headerComment}\n${selector} {\n  /* Node không có thuộc tính CSS trực tiếp từ getCSSAsync() */\n}`;
-
-    const resolvedCssBlock = resolvedLines.length > 0
-      ? `${headerComment}\n${selector} {\n${resolvedLines.join('\n')}\n}`
-      : cssBlock;
-
-    // Build human-readable Elementor Mapping Summary pills
-    const mappingPills = [];
-    const L = entry.layout || {};
-    const S = entry.style || {};
-    const T = entry.text || null;
-
-    if (L.width || L.height) {
-      const hMode = L.sizingH ? ` (${L.sizingH})` : '';
-      const vMode = L.sizingV ? ` (${L.sizingV})` : '';
-      mappingPills.push({ label: 'Size', value: `${L.width || 0}px${hMode} × ${L.height || 0}px${vMode}` });
-    }
-    if (L.mode === 'flex') {
-      mappingPills.push({
-        label: 'Flex',
-        value: `${L.direction || 'row'}${L.wrap ? ' wrap' : ''} • align: ${L.align || 'MIN'} / ${L.justify || 'MIN'}`,
-      });
-    } else if (L.mode === 'grid') {
-      mappingPills.push({ label: 'Grid', value: `${L.columns || 2} cols` });
-    }
-    if (typeof L.gap === 'number' && L.gap > 0) {
-      mappingPills.push({ label: 'Gap', value: `${L.gap}px` });
-    }
-    if (L.padding && (L.padding.top || L.padding.right || L.padding.bottom || L.padding.left)) {
-      mappingPills.push({
-        label: 'Padding',
-        value: `${L.padding.top}px ${L.padding.right}px ${L.padding.bottom}px ${L.padding.left}px`,
-      });
-    }
-    if (S.background) {
-      mappingPills.push({ label: 'BG', value: S.background, color: S.background });
-    } else if (S.gradient) {
-      mappingPills.push({ label: 'Gradient', value: `${S.gradient.angle}deg (${S.gradient.color1} → ${S.gradient.color2})`, color: S.gradient.color1 });
-    }
-    if (S.borderWidth && (S.borderWidth.top || S.borderWidth.right || S.borderWidth.bottom || S.borderWidth.left)) {
-      const bw = S.borderWidth;
-      const bwStr = bw.isLinked ? `${bw.top}px` : `${bw.top}px ${bw.right}px ${bw.bottom}px ${bw.left}px`;
-      mappingPills.push({
-        label: 'Border',
-        value: `${bwStr} solid ${S.borderColor || '#000000'}`,
-        color: S.borderColor || null,
-      });
-    }
-    if (S.radius && (S.radius.top || S.radius.right || S.radius.bottom || S.radius.left)) {
-      const r = S.radius;
-      const rStr = r.isLinked ? `${r.top}px` : `${r.top}px ${r.right}px ${r.bottom}px ${r.left}px`;
-      mappingPills.push({ label: 'Radius', value: rStr });
-    }
-    if (T) {
-      mappingPills.push({
-        label: 'Font',
-        value: `${T.fontFamily} ${T.fontWeight} • ${T.fontSize}px/${T.lineHeight || ''}${T.lineHeightUnit || 'px'}`,
-        color: T.color || null,
-      });
-      if (T.gradientCss || T.gradient) {
-        const gLabel = T.gradient
-          ? `${T.gradient.angle}deg (${T.gradient.color1} → ${T.gradient.color2})`
-          : T.gradientCss;
-        mappingPills.push({
-          label: 'Text Gradient',
-          value: gLabel,
-          color: (T.gradient && T.gradient.color1) || T.color || null,
-        });
-      }
-    }
-
-    return {
-      nodeId: target.id,
-      name: entry.name,
-      type: entry.rawType,
-      depth,
-      width: L.width || 0,
-      height: L.height || 0,
-      widget: entry.widget,
-      widgetSource: entry.widgetSource,
-      hasNativeApi,
-      propertyCount: Object.keys(rawCss).length,
-      rawCss,
-      resolvedCss,
-      cssVariables,
-      cssBlock,
-      resolvedCssBlock,
-      mappingPills,
-    };
-  };
-
-  const rootResult = await inspectSingle(node, 0, node.parent || null);
-
-  if (includeSubtree) {
-    const subtreeBlocks = [rootResult.cssBlock];
-    const subtreeResolvedBlocks = [rootResult.resolvedCssBlock];
-    const subtreeNodes = [];
-    let visited = 0;
-
-    const walkKids = async (curr, depth) => {
-      const kids = visibleChildren(curr);
-      for (const child of kids) {
-        if (visited >= maxSubtreeNodes) return;
-        visited += 1;
-        const childInfo = await inspectSingle(child, depth, curr);
-        subtreeNodes.push(childInfo);
-        if (childInfo.propertyCount > 0) {
-          subtreeBlocks.push(childInfo.cssBlock);
-          subtreeResolvedBlocks.push(childInfo.resolvedCssBlock);
-        }
-        await walkKids(child, depth + 1);
-      }
-    };
-
-    await walkKids(node, 1);
-    rootResult.subtreeCount = subtreeNodes.length;
-    rootResult.subtreeCssBlock = subtreeBlocks.join('\n\n');
-    rootResult.subtreeResolvedCssBlock = subtreeResolvedBlocks.join('\n\n');
-  }
-
-  return rootResult;
-}
 
 /**
  * Full extraction of selected Figma nodes into the F2E Intermediate Representation (IR)
@@ -1067,9 +43,11 @@ export async function extractDesignSelection(selection, options = {}) {
     fileKey = 'local-figma',
     imageFormat = 'PNG',
     imageScale = 2,
+    useDevModeCss = true,
     responsiveFrames = { tablet: null, mobile: null },
     designTokens = { colors: [], typography: [] },
     isRootSelection = true,
+    onProgress = null,
   } = options;
 
   const nodes = {};
@@ -1078,9 +56,26 @@ export async function extractDesignSelection(selection, options = {}) {
   const warnings = [];
   const pendingExports = [];
 
+  // Fast synchronous node count for accurate percentage progress
+  let totalVisibleNodes = 0;
+  if (typeof onProgress === 'function') {
+    const countNodes = (n) => {
+      if (!n || n.visible === false) return;
+      totalVisibleNodes += 1;
+      for (const c of visibleChildren(n)) countNodes(c);
+    };
+    for (const rootNode of selection) countNodes(rootNode);
+  }
+  let visitedNodes = 0;
+
   const visit = async (node, context = {}) => {
     const { insideAtomic = false, path = [], parentNode = null, isTopRoot = false } = context;
     if (!node || node.visible === false) return null;
+
+    visitedNodes += 1;
+    if (typeof onProgress === 'function' && (isTopRoot || visitedNodes === 1 || visitedNodes % 8 === 0 || visitedNodes >= totalVisibleNodes)) {
+      onProgress('nodes', Math.min(visitedNodes, Math.max(1, totalVisibleNodes)), Math.max(1, totalVisibleNodes), safeStr(node.name));
+    }
 
     let choice = resolveWidget(node);
     // Guard: If top-level root artboard is heuristic-skip, fallback to container so export doesn't fail
@@ -1092,7 +87,7 @@ export async function extractDesignSelection(selection, options = {}) {
 
     const id = `f2e:${fileKey}:${node.id}`;
     let devModeCSS = null;
-    if (typeof node.getCSSAsync === 'function') {
+    if (useDevModeCss && typeof node.getCSSAsync === 'function') {
       try {
         devModeCSS = await node.getCSSAsync();
       } catch (e) { }
@@ -1132,9 +127,30 @@ export async function extractDesignSelection(selection, options = {}) {
     // Atomic leaf widgets consume their own subtree directly (do not produce child Elementor elements)
     const isLeafWidget = isAtomicLeafWidget(choice.widget);
 
+    // Detect composite background layers (e.g. BG + Mask + Line + Main + Overlay behind Menu/Text/Group)
+    let hasCompositeBg = false;
+    let compositeFgNodes = [];
+    if (!isLeafWidget && rawKids.length >= 2) {
+      const { bgChildren, fgChildren, bgIds } = detectCompositeBackgroundChildren(node);
+      if (bgChildren.length > 0 && fgChildren.length > 0) {
+        hasCompositeBg = true;
+        compositeFgNodes = fgChildren;
+        rawKids = rawKids.filter((c) => !bgIds.has(c.id));
+        if (layout.inferred) {
+          const fgInferred = inferVirtualLayout(node, rawKids);
+          Object.assign(layout, fgInferred);
+          if (Array.isArray(fgInferred.orderedIds) && fgInferred.orderedIds.length === rawKids.length) {
+            const byId = new Map(rawKids.map((k) => [k.id, k]));
+            rawKids = fgInferred.orderedIds.map((oid) => byId.get(oid)).filter(Boolean);
+          }
+        }
+      }
+    }
+
     const childrenIds = [];
     if (!isLeafWidget) {
       for (const child of rawKids) {
+        if (resolveWidget(child).widget === 'background') continue;
         const childName = safeStr(child.name).trim().toLowerCase();
         const cid = await visit(child, {
           insideAtomic: false,
@@ -1176,7 +192,7 @@ export async function extractDesignSelection(selection, options = {}) {
       if (!tn) return null;
       const typo = extractTypography(tn);
       if (!typo) return null;
-      if (typeof tn.getCSSAsync === 'function') {
+      if (useDevModeCss && typeof tn.getCSSAsync === 'function') {
         try {
           const tCss = await tn.getCSSAsync();
           if (tCss && Object.keys(tCss).length > 0) {
@@ -1264,10 +280,28 @@ export async function extractDesignSelection(selection, options = {}) {
         })
         .filter((item) => item.text.length > 0);
 
+      const findDeepVectorColor = async (vNode, depth = 0) => {
+        if (!vNode || depth > 5) return null;
+        const direct = extractSolidColor(vNode.strokes) || extractSolidColor(vNode.fills);
+        if (direct) return direct;
+        if (typeof vNode.getCSSAsync === 'function' && useDevModeCss) {
+          try {
+            const vCss = await vNode.getCSSAsync();
+            const c = vCss && (normalizeCssColor(vCss['stroke']) || normalizeCssColor(vCss['fill']));
+            if (c) return c;
+          } catch (e) { }
+        }
+        for (const k of visibleChildren(vNode)) {
+          const found = await findDeepVectorColor(k, depth + 1);
+          if (found) return found;
+        }
+        return null;
+      };
+
       entry.content.iconList = listItems;
       const visualNode = findFirstVisualDescendant(node);
       if (visualNode) {
-        entry.content.iconColor = extractSolidColor(visualNode.fills) || extractSolidColor(visualNode.strokes) || null;
+        entry.content.iconColor = await findDeepVectorColor(visualNode);
         entry.content.iconSize = Math.round(safeNum(visualNode.width, 0)) || null;
       }
     }
@@ -1294,8 +328,16 @@ export async function extractDesignSelection(selection, options = {}) {
         entry.content.iconSize = Math.round(safeNum(visualNode.width, 40)) || 40;
         entry.content.iconColor = extractSolidColor(visualNode.fills) || extractSolidColor(visualNode.strokes) || null;
         if (typeof visualNode.exportAsync === 'function') {
-          if (hasImageFill(visualNode)) {
-            pendingExports.push({ kind: 'raster', node: visualNode, id });
+          if (hasImageFill(visualNode) || (collectTextDescendants(visualNode).length === 0 && hasDescendantImageFill(visualNode))) {
+            pendingExports.push({
+              kind: 'raster',
+              node: visualNode,
+              id,
+              onResult: (ref) => {
+                entry.image = ref;
+                entry.raster = ref;
+              },
+            });
           } else {
             pendingExports.push({ kind: 'svg', node: visualNode, id });
           }
@@ -1322,7 +364,7 @@ export async function extractDesignSelection(selection, options = {}) {
       for (const child of rawKids) {
         const cStyle = extractStyle(child);
         const cLayout = extractLayout(child, node);
-        if (typeof child.getCSSAsync === 'function') {
+        if (useDevModeCss && typeof child.getCSSAsync === 'function') {
           try {
             const cCss = await child.getCSSAsync();
             if (cCss) applyDevModeCSSToNode({ style: cStyle, layout: cLayout }, cCss);
@@ -1341,47 +383,253 @@ export async function extractDesignSelection(selection, options = {}) {
       entry.content.socialItems = socialItems;
     }
 
-    if (['accordion', 'nested-accordion', 'toggle', 'tabs', 'nested-tabs'].includes(choice.widget)) {
-      const accordionItems = [];
-      for (const child of rawKids) {
-        const textNodes = collectTextDescendants(child);
-        if (textNodes.length === 0) continue;
-        const titleNode = textNodes[0];
-        const bodyNodes = textNodes.slice(1);
+    if (['image-gallery', 'image-carousel', 'gallery', 'media-carousel'].includes(choice.widget)) {
+      let imgNodes = hasImageFill(node)
+        ? [node]
+        : collectVisualImageDescendants(node, { includeVectors: false });
+      if (imgNodes.length === 0) {
+        imgNodes = collectVisualImageDescendants(node, { includeVectors: true, minVectorSize: 25 });
+      }
+      if (imgNodes.length > 0) {
+        entry.extractedImages = new Array(imgNodes.length).fill(null);
+        imgNodes.forEach((imgNode, idx) => {
+          if (typeof imgNode.exportAsync === 'function') {
+            pendingExports.push({
+              kind: 'raster',
+              node: imgNode,
+              id,
+              onResult: (ref) => {
+                entry.extractedImages[idx] = ref;
+              },
+            });
+          }
+        });
+      }
+    }
 
-        const titleText = safeStr(titleNode.characters || titleNode.name).trim();
-        const titleTypography = await extractTextWithDevMode(titleNode);
-
-        let bodyText = '';
-        let bodyTypography = null;
-        if (bodyNodes.length > 0) {
-          bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
-          bodyTypography = await extractTextWithDevMode(bodyNodes[0]);
+    if (['call-to-action', 'testimonial', 'flip-box', 'price-table'].includes(choice.widget)) {
+      const imgNodes = collectVisualImageDescendants(node, { includeVectors: false });
+      if (imgNodes.length > 0) {
+        entry.extractedImages = new Array(imgNodes.length).fill(null);
+        imgNodes.forEach((imgNode, idx) => {
+          if (typeof imgNode.exportAsync === 'function') {
+            pendingExports.push({
+              kind: 'raster',
+              node: imgNode,
+              id,
+              onResult: (ref) => {
+                entry.extractedImages[idx] = ref;
+              },
+            });
+          }
+        });
+      }
+      if (choice.widget === 'call-to-action') {
+        const btnChild = rawKids.find((c) => c && c.type !== 'TEXT' && resolveWidget(c).widget === 'button');
+        if (btnChild) {
+          const btnTexts = collectTextDescendants(btnChild);
+          if (btnTexts.length > 0) {
+            entry.content.ctaButtonText = safeStr(btnTexts[0].characters).trim();
+          }
         }
+      }
+    }
 
-        const itemEntry = {
-          sourceNodeId: child.id,
-          layout: extractLayout(child, node),
-          style: extractStyle(child),
-        };
-        if (typeof child.getCSSAsync === 'function') {
+    if (['slides', 'testimonial-carousel', 'reviews'].includes(choice.widget)) {
+      const slides = [];
+      entry.extractedImages = [];
+      for (const slideChild of rawKids) {
+        if (!slideChild || slideChild.visible === false) continue;
+        const slideTextNodes = collectTextDescendants(slideChild);
+        const slideTexts = [];
+        for (const tn of slideTextNodes) {
+          const tObj = await extractTextWithDevMode(tn);
+          if (tObj && safeStr(tObj.characters).trim().length > 0) {
+            tObj.nodeName = safeStr(tn.name, '');
+            tObj.link = extractLink(tn) || '';
+            slideTexts.push(tObj);
+          }
+        }
+        const slideStyle = extractStyle(slideChild);
+        if (useDevModeCss && typeof slideChild.getCSSAsync === 'function') {
           try {
-            const cCss = await child.getCSSAsync();
-            if (cCss) applyDevModeCSSToNode(itemEntry, cCss);
+            const sCss = await slideChild.getCSSAsync();
+            if (sCss) applyDevModeCSSToNode({ type: 'frame', style: slideStyle, layout: {} }, sCss);
           } catch (e) { }
         }
+        const slideObj = {
+          id: slideChild.id,
+          name: safeStr(slideChild.name, 'Slide'),
+          texts: slideTexts,
+          background: slideStyle.background || null,
+          image: null,
+        };
+        slides.push(slideObj);
 
-        accordionItems.push({
-          id: child.id,
-          title: titleText || safeStr(child.name, `Item ${accordionItems.length + 1}`),
-          body: bodyText,
-          titleTypography,
-          bodyTypography,
-          padding: itemEntry.layout.padding,
-          borderWidth: itemEntry.style.borderWidth,
-          borderColor: itemEntry.style.borderColor,
-          background: itemEntry.style.background,
-        });
+        if (hasImageFill(slideChild) && typeof slideChild.exportAsync === 'function') {
+          const slideFgNodes = visibleChildren(slideChild);
+          pendingExports.push({
+            kind: slideFgNodes.length > 0 ? 'composite-bg' : 'raster',
+            node: slideChild,
+            id,
+            fgNodes: slideFgNodes,
+            hasDirectImageFill: true,
+            onResult: (ref) => {
+              slideObj.image = ref;
+              entry.extractedImages.push(ref);
+            },
+          });
+        } else {
+          const descImg = collectVisualImageDescendants(slideChild, { includeVectors: false })[0];
+          if (descImg && typeof descImg.exportAsync === 'function') {
+            pendingExports.push({
+              kind: 'raster',
+              node: descImg,
+              id,
+              onResult: (ref) => {
+                slideObj.image = ref;
+                entry.extractedImages.push(ref);
+              },
+            });
+          }
+        }
+      }
+      entry.content.slides = slides;
+    }
+
+    if (['accordion', 'nested-accordion', 'toggle', 'tabs', 'nested-tabs'].includes(choice.widget)) {
+      const accordionItems = [];
+
+      const extractExpandIconStyle = async (containerNode) => {
+        const kids = visibleChildren(containerNode);
+        for (const k of kids) {
+          if (!k || k.type === 'TEXT') continue;
+          const kTexts = collectTextDescendants(k);
+          if (kTexts.length > 0) continue;
+          const kName = safeStr(k.name).toLowerCase();
+          const kw = Math.round(safeNum(k.width, 0));
+          const kh = Math.round(safeNum(k.height, 0));
+          const isIconLike =
+            kName.includes('plus') ||
+            kName.includes('minus') ||
+            kName.includes('chevron') ||
+            kName.includes('arrow') ||
+            kName.includes('icon') ||
+            (kw > 0 && kw <= 48 && kh > 0 && kh <= 48);
+          if (!isIconLike) continue;
+
+          const kEntry = { layout: extractLayout(k, containerNode), style: extractStyle(k) };
+          if (useDevModeCss && typeof k.getCSSAsync === 'function') {
+            try {
+              const kCss = await k.getCSSAsync();
+              if (kCss) applyDevModeCSSToNode(kEntry, kCss);
+            } catch (e) { }
+          }
+          // Find stroke/fill color of the inner vector icon (e.g. "Plus" stroke: #16A34A)
+          let iconStrokeColor = kEntry.style.borderColor || null;
+          const innerKids = visibleChildren(k);
+          for (const ik of innerKids) {
+            const c = extractSolidColor(ik.strokes) || extractSolidColor(ik.fills);
+            if (c) {
+              iconStrokeColor = c;
+              break;
+            }
+            if (useDevModeCss && typeof ik.getCSSAsync === 'function') {
+              try {
+                const ikCss = await ik.getCSSAsync();
+                const sc = ikCss && (normalizeCssColor(ikCss['stroke']) || normalizeCssColor(ikCss['fill']) || normalizeCssColor(ikCss['color']));
+                if (sc) {
+                  iconStrokeColor = sc;
+                  break;
+                }
+              } catch (e) { }
+            }
+          }
+          return {
+            width: kEntry.layout.width || kw || 32,
+            height: kEntry.layout.height || kh || 32,
+            background: kEntry.style.background || null,
+            radius: kEntry.style.radius || null,
+            color: iconStrokeColor || extractSolidColor(k.strokes) || extractSolidColor(k.fills) || null,
+          };
+        }
+        return null;
+      };
+
+      // Check if this node is a single FAQ card (direct children include a TEXT node + icon, e.g. "FAQ 1" -> [Question, Plus wrap])
+      const hasDirectTextChild = rawKids.some((c) => c && c.type === 'TEXT');
+      if (hasDirectTextChild) {
+        const textNodes = collectTextDescendants(node);
+        if (textNodes.length > 0) {
+          const titleNode = textNodes[0];
+          const bodyNodes = textNodes.slice(1);
+          const titleText = safeStr(titleNode.characters || titleNode.name).trim();
+          const titleTypography = await extractTextWithDevMode(titleNode);
+          let bodyText = '';
+          let bodyTypography = null;
+          if (bodyNodes.length > 0) {
+            bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
+            bodyTypography = await extractTextWithDevMode(bodyNodes[0]);
+          }
+          const expandIconStyle = await extractExpandIconStyle(node);
+          accordionItems.push({
+            id: node.id,
+            title: titleText || safeStr(node.name, 'Item 1'),
+            body: bodyText,
+            titleTypography,
+            bodyTypography,
+            padding: entry.layout.padding,
+            borderWidth: entry.style.borderWidth,
+            borderColor: entry.style.borderColor,
+            background: entry.style.background,
+            radius: entry.style.radius,
+            expandIconStyle,
+          });
+        }
+      } else {
+        for (const child of rawKids) {
+          const textNodes = collectTextDescendants(child);
+          if (textNodes.length === 0) continue;
+          const titleNode = textNodes[0];
+          const bodyNodes = textNodes.slice(1);
+
+          const titleText = safeStr(titleNode.characters || titleNode.name).trim();
+          const titleTypography = await extractTextWithDevMode(titleNode);
+
+          let bodyText = '';
+          let bodyTypography = null;
+          if (bodyNodes.length > 0) {
+            bodyText = bodyNodes.map((bn) => safeStr(bn.characters || bn.name).trim()).filter(Boolean).join('\n');
+            bodyTypography = await extractTextWithDevMode(bodyNodes[0]);
+          }
+
+          const itemEntry = {
+            sourceNodeId: child.id,
+            layout: extractLayout(child, node),
+            style: extractStyle(child),
+          };
+          if (useDevModeCss && typeof child.getCSSAsync === 'function') {
+            try {
+              const cCss = await child.getCSSAsync();
+              if (cCss) applyDevModeCSSToNode(itemEntry, cCss);
+            } catch (e) { }
+          }
+          const expandIconStyle = await extractExpandIconStyle(child);
+
+          accordionItems.push({
+            id: child.id,
+            title: titleText || safeStr(child.name, `Item ${accordionItems.length + 1}`),
+            body: bodyText,
+            titleTypography,
+            bodyTypography,
+            padding: itemEntry.layout.padding,
+            borderWidth: itemEntry.style.borderWidth,
+            borderColor: itemEntry.style.borderColor,
+            background: itemEntry.style.background,
+            radius: itemEntry.style.radius,
+            expandIconStyle,
+          });
+        }
       }
       entry.content.accordionItems = accordionItems;
     }
@@ -1389,51 +637,208 @@ export async function extractDesignSelection(selection, options = {}) {
     if (choice.widget === 'form' || choice.widget === 'login' || choice.widget === 'search-form') {
       const formFields = [];
       let submitLabel = 'Send Message';
-      for (const child of rawKids) {
-        const lower = safeStr(child.name).toLowerCase();
-        const cEntry = {
-          layout: extractLayout(child, node),
-          style: extractStyle(child),
+
+      const isPureRedAsterisk = (color) => {
+        if (!color || typeof color !== 'string') return false;
+        const c = color.trim().toUpperCase();
+        return c === '#FF0000' || c === '#F00' || c === '#EF4444' || c === '#DC2626' || c === '#E11D48';
+      };
+
+      const isButtonLikeNode = (n) => {
+        if (!n || n.type === 'TEXT') return false;
+        const tCount = collectTextDescendants(n).length;
+        if (tCount === 0 || tCount > 2) return false;
+        const lower = safeStr(n.name).toLowerCase();
+        if (lower.includes('btn') || lower.includes('button') || lower.includes('submit') || lower.includes('cta')) return true;
+        const resolved = resolveWidget(n);
+        return resolved && resolved.widget === 'button';
+      };
+
+      const isInputBoxLike = (k) => {
+        if (!k || k.type === 'TEXT') return false;
+        const kName = safeStr(k.name).toLowerCase();
+        if (kName.includes('label')) return false;
+        const st = extractStyle(k);
+        return Boolean(
+          st.background ||
+          st.borderColor ||
+          st.radius ||
+          kName.includes('input') ||
+          kName.includes('textarea') ||
+          kName.includes('select') ||
+          kName.includes('box') ||
+          kName.includes('field')
+        );
+      };
+
+      const findInputBoxNode = (fieldNode) => {
+        const kids = visibleChildren(fieldNode);
+        // Look for a styled child box (has background, border, or radius and is not a label/TEXT node)
+        for (const k of kids) {
+          if (isInputBoxLike(k)) return k;
+        }
+        return fieldNode;
+      };
+
+      const isSingleFieldPair = (nodeToCheck, kids) => {
+        if (!kids || kids.length !== 2) return false;
+        if (nodeToCheck.layoutMode === 'HORIZONTAL') return false;
+        const [first, second] = kids;
+        const firstTexts = collectTextDescendants(first);
+        const secondTexts = collectTextDescendants(second);
+        if (firstTexts.length === 0 || firstTexts.length > 2) return false;
+        if (secondTexts.length > 2) return false;
+        const firstName = safeStr(first.name).toLowerCase();
+        const firstStyle = first.type === 'TEXT' ? {} : extractStyle(first);
+        const firstLooksLikeLabel =
+          first.type === 'TEXT' ||
+          firstName.includes('label') ||
+          firstName.includes('title') ||
+          (!firstStyle.background && !firstStyle.borderColor && !firstStyle.radius);
+        return firstLooksLikeLabel && isInputBoxLike(second);
+      };
+
+      const parseSingleField = async (fieldNode, parentRef, widthPct = '100') => {
+        const lowerName = safeStr(fieldNode.name).toLowerCase();
+        const childTextNodes = collectTextDescendants(fieldNode);
+        const texts = childTextNodes.map((t) => safeStr(t.characters || t.name).trim()).filter(Boolean);
+        if (texts.length === 0) return;
+
+        // If label is split across two text nodes (e.g. "Họ và tên" + "*"), combine them cleanly
+        let label = texts[0];
+        let placeholderIdx = 1;
+        if (texts.length >= 2 && texts[1] === '*') {
+          label = `${texts[0]} *`;
+          placeholderIdx = 2;
+        }
+        const placeholder = texts[placeholderIdx] || label.replace(/\s*\*$/, '').trim();
+        const isRequired = label.includes('*') || lowerName.includes('required');
+        const cleanLabel = label.replace(/\s*\*$/, '').trim() || label;
+        const combinedSearch = `${lowerName} ${cleanLabel.toLowerCase()} ${placeholder.toLowerCase()}`;
+
+        const inputBox = findInputBoxNode(fieldNode);
+        const inputBoxEntry = {
+          layout: extractLayout(inputBox, fieldNode),
+          style: extractStyle(inputBox),
         };
-        if (typeof child.getCSSAsync === 'function') {
+        if (useDevModeCss && typeof inputBox.getCSSAsync === 'function') {
           try {
-            const cCss = await child.getCSSAsync();
-            if (cCss) applyDevModeCSSToNode(cEntry, cCss);
+            const ibCss = await inputBox.getCSSAsync();
+            if (ibCss) applyDevModeCSSToNode(inputBoxEntry, ibCss);
           } catch (e) { }
         }
+        const inputHeight = Number(inputBoxEntry.layout.height || inputBox.height || 0);
 
-        if (lower.includes('btn') || lower.includes('button') || lower.includes('submit')) {
-          const btnTexts = collectTextDescendants(child);
-          if (btnTexts.length > 0) {
-            submitLabel = safeStr(btnTexts[0].characters || btnTexts[0].name).trim();
-            entry.content.buttonTypography = await extractTextWithDevMode(btnTexts[0]);
-          }
-          entry.content.buttonStyle = cEntry.style;
-          entry.content.buttonPadding = cEntry.layout.padding;
-          continue;
-        }
         let fieldType = 'text';
-        if (lower.includes('email') || lower.includes('mail')) fieldType = 'email';
-        else if (lower.includes('phone') || lower.includes('tel') || lower.includes('số điện thoại')) fieldType = 'tel';
-        else if (lower.includes('message') || lower.includes('comment') || lower.includes('nội dung') || (Number(child.height) || 0) >= 90) fieldType = 'textarea';
+        if (combinedSearch.includes('email') || combinedSearch.includes('mail')) {
+          fieldType = 'email';
+        } else if (combinedSearch.includes('phone') || combinedSearch.includes('tel') || combinedSearch.includes('điện thoại') || combinedSearch.includes('sđt')) {
+          fieldType = 'tel';
+        } else if (combinedSearch.includes('số lượng') || combinedSearch.includes('quantity')) {
+          fieldType = 'number';
+        } else if (
+          combinedSearch.includes('message') ||
+          combinedSearch.includes('comment') ||
+          combinedSearch.includes('nội dung') ||
+          combinedSearch.includes('ghi chú') ||
+          combinedSearch.includes('nhu cầu') ||
+          combinedSearch.includes('mô tả') ||
+          inputHeight >= 80
+        ) {
+          fieldType = 'textarea';
+        }
 
-        const childTextNodes = collectTextDescendants(child);
-        const texts = childTextNodes.map((t) => safeStr(t.characters || t.name).trim()).filter(Boolean);
-        if (!entry.content.fieldTypography && childTextNodes.length > 0) {
-          entry.content.fieldTypography = await extractTextWithDevMode(childTextNodes[0]);
+        // Extract label typography (from label text, ignoring pure red '*' color)
+        if (!entry.content.labelTypography && childTextNodes[0]) {
+          const lblT = await extractTextWithDevMode(childTextNodes[0]);
+          if (lblT) {
+            if (isPureRedAsterisk(lblT.color)) lblT.color = '#000000';
+            entry.content.labelTypography = lblT;
+          }
         }
-        if (!entry.content.fieldStyle && (cEntry.style.background || cEntry.style.borderColor || cEntry.style.radius)) {
-          entry.content.fieldStyle = cEntry.style;
+        // Extract input field typography (from placeholder/value text inside input box, NEVER the red '*')
+        const inputTextNode = childTextNodes[placeholderIdx] || childTextNodes[childTextNodes.length - 1];
+        if (!entry.content.fieldTypography && inputTextNode) {
+          const fldT = await extractTextWithDevMode(inputTextNode);
+          if (fldT) {
+            if (isPureRedAsterisk(fldT.color)) fldT.color = '#000000';
+            entry.content.fieldTypography = fldT;
+          }
         }
-        const label = texts[0] || safeStr(child.name, `Field ${formFields.length + 1}`);
+        if (!entry.content.fieldStyle && (inputBoxEntry.style.background || inputBoxEntry.style.borderColor || inputBoxEntry.style.radius)) {
+          entry.content.fieldStyle = inputBoxEntry.style;
+        }
+
         formFields.push({
           id: `field_${formFields.length + 1}`,
           type: fieldType,
-          label,
-          placeholder: texts[1] || label,
-          required: fieldType === 'email' ? 'true' : '',
+          label: cleanLabel,
+          placeholder,
+          required: isRequired || fieldType === 'email' ? 'true' : '',
+          width: widthPct,
         });
-      }
+      };
+
+      const walkFormChildren = async (kids, parentRef, depth = 0) => {
+        for (const child of kids) {
+          if (!child || child.visible === false) continue;
+
+          if (isButtonLikeNode(child)) {
+            const btnEntry = { layout: extractLayout(child, parentRef), style: extractStyle(child) };
+            if (useDevModeCss && typeof child.getCSSAsync === 'function') {
+              try {
+                const bCss = await child.getCSSAsync();
+                if (bCss) applyDevModeCSSToNode(btnEntry, bCss);
+              } catch (e) { }
+            }
+            const btnTexts = collectTextDescendants(child);
+            if (btnTexts.length > 0) {
+              submitLabel = safeStr(btnTexts[0].characters || btnTexts[0].name).trim();
+              entry.content.buttonTypography = await extractTextWithDevMode(btnTexts[0]);
+            }
+            entry.content.buttonStyle = btnEntry.style;
+            entry.content.buttonPadding = btnEntry.layout.padding;
+            continue;
+          }
+
+          const grandKids = visibleChildren(child);
+          const grandFrameKids = grandKids.filter((gk) => gk.type !== 'TEXT' && collectTextDescendants(gk).length > 0);
+          const allTextsInChild = collectTextDescendants(child);
+
+          // Case 0: Single field structured as [LabelFrame("Họ và tên" + "*"), InputBoxFrame("Nhập...")]
+          if (isSingleFieldPair(child, grandKids)) {
+            await parseSingleField(child, parentRef, '100');
+            continue;
+          }
+
+          // Case 1: Wrapper container holding multiple field rows or a 2-column horizontal row of fields
+          if (depth < 3 && grandFrameKids.length >= 2) {
+            const isHorizontalRow = child.layoutMode === 'HORIZONTAL';
+            if (isHorizontalRow) {
+              const nonBtnCols = grandFrameKids.filter((gk) => !isButtonLikeNode(gk));
+              const colPct = nonBtnCols.length === 2 ? '50' : (nonBtnCols.length === 3 ? '33' : '100');
+              for (const colField of grandKids) {
+                if (isButtonLikeNode(colField)) {
+                  await walkFormChildren([colField], child, depth + 1);
+      } else {
+                  await parseSingleField(colField, child, colPct);
+                }
+              }
+              continue;
+            }
+            // Vertical wrapper (e.g. "Fields" group containing multiple fields)
+            if (allTextsInChild.length >= 3 || grandFrameKids.every((gk) => collectTextDescendants(gk).length >= 1)) {
+              await walkFormChildren(grandKids, child, depth + 1);
+              continue;
+            }
+          }
+
+          // Case 2: Single field node (e.g. Field -> [Label, Input Box])
+          await parseSingleField(child, parentRef, '100');
+        }
+      };
+
+      await walkFormChildren(rawKids, node, 0);
       entry.content.formFields = formFields;
       entry.content.submitLabel = submitLabel;
     }
@@ -1447,15 +852,21 @@ export async function extractDesignSelection(selection, options = {}) {
       'html',
     ].includes(choice.widget);
 
-    if (isVisualAssetWidget && typeof node.exportAsync === 'function') {
-      if (hasImageFill(node)) {
+    if (hasCompositeBg && typeof node.exportAsync === 'function') {
+      pendingExports.push({ kind: 'composite-bg', node, id, fgNodes: compositeFgNodes });
+    } else if (isVisualAssetWidget && typeof node.exportAsync === 'function') {
+      if (hasImageFill(node) || (collectTextDescendants(node).length === 0 && hasDescendantImageFill(node))) {
         pendingExports.push({ kind: 'raster', node, id });
       } else {
         // Multi-color SVG icon, logo frame, vector graphic, or illustrated shape
         pendingExports.push({ kind: 'svg', node, id });
       }
     } else if (hasImageFill(node) && typeof node.exportAsync === 'function') {
-      pendingExports.push({ kind: 'raster', node, id });
+      if (!isLeafWidget && rawKids.length > 0) {
+        pendingExports.push({ kind: 'composite-bg', node, id, fgNodes: rawKids, hasDirectImageFill: true });
+      } else {
+        pendingExports.push({ kind: 'raster', node, id });
+      }
     }
 
     nodes[id] = entry;
@@ -1481,11 +892,76 @@ export async function extractDesignSelection(selection, options = {}) {
   const mime = fmt === 'JPG' ? 'image/jpeg' : 'image/png';
   const scale = safeNum(imageScale, 2) === 1 ? 1 : 2;
 
-  for (const item of pendingExports) {
+  const recordRasterAsset = async (item, imgBytes, prefix = 'img') => {
+    const hash = await sha256(imgBytes);
+    const b64 = bytesToBase64(imgBytes);
+    const dataUri = `data:${mime};base64,${b64}`;
+    const ref = { sha256: hash, mime, dataUri };
+
+    if (typeof item.onResult === 'function') {
+      item.onResult(ref);
+    } else {
+      nodes[item.id].raster = ref;
+      if (['image', 'theme-site-logo', 'site-logo', 'theme-post-featured-image'].includes(nodes[item.id].widget)) {
+        nodes[item.id].image = ref;
+      } else {
+        nodes[item.id].style.backgroundImage = hash;
+        nodes[item.id].style.backgroundImageDataUri = dataUri;
+      }
+    }
+
+    if (!seenHashes.has(hash)) {
+      const asset = {
+        assetId: `${prefix}-${item.node.id}`,
+        kind: 'image',
+        sha256: hash,
+        mime,
+        byteLength: imgBytes.byteLength,
+        base64: b64,
+      };
+      assets[hash] = asset;
+      assetPayloads.push(asset);
+      seenHashes.set(hash, asset);
+    }
+  };
+
+  const getSingleCleanImageHashBytes = async (targetNode) => {
+    if (typeof figma === 'undefined' || typeof figma.getImageByHash !== 'function') return null;
+    const visFills = Array.isArray(targetNode.fills)
+      ? targetNode.fills.filter((f) => f && f.visible !== false)
+      : [];
+    if (visFills.length !== 1) return null;
+    const f = visFills[0];
+    if (!f || f.type !== 'IMAGE' || !f.imageHash) return null;
+    if (f.scaleMode && f.scaleMode !== 'FILL' && f.scaleMode !== 'FIT') return null;
+    try {
+      const imgHandle = figma.getImageByHash(f.imageHash);
+      if (imgHandle && typeof imgHandle.getBytesAsync === 'function') {
+        const bytes = await imgHandle.getBytesAsync();
+        if (bytes && bytes.byteLength > 0) return bytes;
+      }
+    } catch (e) { }
+    return null;
+  };
+
+  for (let expIdx = 0; expIdx < pendingExports.length; expIdx += 1) {
+    const item = pendingExports[expIdx];
+    if (typeof onProgress === 'function') {
+      onProgress('assets', expIdx + 1, pendingExports.length, safeStr(item.node && item.node.name));
+    }
     try {
       if (item.kind === 'svg') {
         const svgBytes = await item.node.exportAsync({ format: 'SVG' });
         const svgString = utf8Decode(svgBytes);
+        // Reactive safeguard: if Figma emitted an <svg><image href="data:image/..."/></svg>, re-export as raster
+        if (/<image\b[^>]*\b(?:xlink:)?href\s*=\s*["']data:image\//i.test(svgString) && typeof item.node.exportAsync === 'function') {
+          const fallbackBytes = await item.node.exportAsync({
+            format: fmt,
+            constraint: { type: 'SCALE', value: scale },
+          });
+          await recordRasterAsset(item, fallbackBytes, 'img');
+          continue;
+        }
         const hash = await sha256(svgBytes);
         nodes[item.id].svg = {
           sha256: hash,
@@ -1506,36 +982,141 @@ export async function extractDesignSelection(selection, options = {}) {
           assetPayloads.push(asset);
           seenHashes.set(hash, asset);
         }
+      } else if (item.kind === 'composite-bg') {
+        // Fast path: single clean IMAGE fill on container -> extract raw image bytes via getImageByHash without mutating canvas
+        let imgBytes = item.hasDirectImageFill ? await getSingleCleanImageHashBytes(item.node) : null;
+
+        if (!imgBytes) {
+          // Non-destructive composite background baking: lock HUG Auto-Layout dimensions,
+          // clear node strokes/effects/opacity (or strip CSS copies if read-only on INSTANCE),
+          // temporarily hide foreground nodes, export, and restore everything in `finally`.
+          const targetNode = item.node;
+          const prevVisibility = (item.fgNodes || []).map((n) => [n, n.visible]);
+          const prevLayoutState = {
+            hasLayout: Boolean(targetNode.layoutMode && targetNode.layoutMode !== 'NONE'),
+            pMode: targetNode.primaryAxisSizingMode,
+            cMode: targetNode.counterAxisSizingMode,
+            sH: targetNode.layoutSizingHorizontal,
+            sV: targetNode.layoutSizingVertical,
+            w: targetNode.width,
+            h: targetNode.height,
+          };
+          const prevStrokes = targetNode.strokes;
+          const prevEffects = targetNode.effects;
+          const prevOpacity = targetNode.opacity;
+          let clearedStrokes = false;
+          let clearedEffects = false;
+          let clearedOpacity = false;
+
+          try {
+            if (prevLayoutState.hasLayout) {
+              try {
+                if (prevLayoutState.pMode === 'AUTO') targetNode.primaryAxisSizingMode = 'FIXED';
+                if (prevLayoutState.cMode === 'AUTO') targetNode.counterAxisSizingMode = 'FIXED';
+                if (prevLayoutState.sH === 'HUG') targetNode.layoutSizingHorizontal = 'FIXED';
+                if (prevLayoutState.sV === 'HUG') targetNode.layoutSizingVertical = 'FIXED';
+              } catch (e) { }
+            }
+
+            try {
+              if (Array.isArray(prevStrokes) && prevStrokes.length > 0) {
+                targetNode.strokes = [];
+                if (Array.isArray(targetNode.strokes) && targetNode.strokes.length === 0) clearedStrokes = true;
+              } else {
+                clearedStrokes = true;
+              }
+            } catch (e) { }
+
+            try {
+              if (Array.isArray(prevEffects) && prevEffects.length > 0) {
+                targetNode.effects = [];
+                if (Array.isArray(targetNode.effects) && targetNode.effects.length === 0) clearedEffects = true;
+              } else {
+                clearedEffects = true;
+              }
+            } catch (e) { }
+
+            try {
+              if (typeof prevOpacity === 'number' && prevOpacity < 1) {
+                targetNode.opacity = 1;
+                if (targetNode.opacity === 1) clearedOpacity = true;
+              } else {
+                clearedOpacity = true;
+              }
+            } catch (e) { }
+
+            let allHidden = true;
+            for (const [fg] of prevVisibility) {
+              try {
+                fg.visible = false;
+                if (fg.visible !== false) allHidden = false;
+              } catch (e) {
+                allHidden = false;
+              }
+            }
+
+            if (!allHidden) {
+              const directFallback = await getSingleCleanImageHashBytes(targetNode);
+              if (directFallback) {
+                imgBytes = directFallback;
+              } else {
+                warnings.push({
+                  code: 'composite-bg-instance-fg-visible',
+                  nodeId: targetNode.id,
+                  message: `Could not hide foreground child inside "${safeStr(targetNode.name)}" (possibly locked INSTANCE) during composite background export.`,
+                });
+              }
+            }
+
+            if (!imgBytes) {
+              imgBytes = await targetNode.exportAsync({
+                format: fmt,
+                constraint: { type: 'SCALE', value: scale },
+              });
+            }
+          } finally {
+            for (const [fg, wasVisible] of prevVisibility) {
+              try { fg.visible = wasVisible; } catch (e) { }
+            }
+            try { if (clearedStrokes && prevStrokes !== undefined) targetNode.strokes = prevStrokes; } catch (e) { }
+            try { if (clearedEffects && prevEffects !== undefined) targetNode.effects = prevEffects; } catch (e) { }
+            try { if (clearedOpacity && prevOpacity !== undefined) targetNode.opacity = prevOpacity; } catch (e) { }
+            if (prevLayoutState.hasLayout) {
+              try {
+                if (prevLayoutState.pMode !== undefined) targetNode.primaryAxisSizingMode = prevLayoutState.pMode;
+                if (prevLayoutState.cMode !== undefined) targetNode.counterAxisSizingMode = prevLayoutState.cMode;
+                if (prevLayoutState.sH !== undefined) targetNode.layoutSizingHorizontal = prevLayoutState.sH;
+                if (prevLayoutState.sV !== undefined) targetNode.layoutSizingVertical = prevLayoutState.sV;
+              } catch (e) { }
+            }
+          }
+
+          if (!item.onResult && nodes[item.id] && nodes[item.id].style) {
+            const st = nodes[item.id].style;
+            if (!clearedStrokes) {
+              delete st.borderWidth;
+              delete st.borderColor;
+              delete st.borderGradient;
+              delete st.devModeBorder;
+              delete st.devModeBorderImage;
+            }
+            if (!clearedEffects) {
+              delete st.boxShadow;
+              delete st.devModeBoxShadow;
+            }
+            if (!clearedOpacity) {
+              delete st.opacity;
+            }
+          }
+        }
+
+        await recordRasterAsset(item, imgBytes, 'bg');
       } else {
         const imgBytes = await item.node.exportAsync({
           format: fmt,
           constraint: { type: 'SCALE', value: scale },
         });
-        const hash = await sha256(imgBytes);
-        const b64 = bytesToBase64(imgBytes);
-        const dataUri = `data:${mime};base64,${b64}`;
-
-        nodes[item.id].raster = { sha256: hash, mime, dataUri };
-        if (nodes[item.id].widget === 'image') {
-          nodes[item.id].image = { sha256: hash, mime, dataUri };
-        } else {
-          nodes[item.id].style.backgroundImage = hash;
-          nodes[item.id].style.backgroundImageDataUri = dataUri;
-        }
-
-        if (!seenHashes.has(hash)) {
-          const asset = {
-            assetId: `img-${item.node.id}`,
-            kind: 'image',
-            sha256: hash,
-            mime,
-            byteLength: imgBytes.byteLength,
-            base64: b64,
-          };
-          assets[hash] = asset;
-          assetPayloads.push(asset);
-          seenHashes.set(hash, asset);
-        }
+        await recordRasterAsset(item, imgBytes, 'img');
       }
     } catch (err) {
       warnings.push({
@@ -1543,6 +1124,12 @@ export async function extractDesignSelection(selection, options = {}) {
         nodeId: item.node.id,
         message: `Could not export asset for "${safeStr(item.node.name)}": ${err && err.message ? err.message : err}`,
       });
+    }
+  }
+
+  for (const n of Object.values(nodes)) {
+    if (n && Array.isArray(n.extractedImages)) {
+      n.extractedImages = n.extractedImages.filter(Boolean);
     }
   }
 
@@ -1566,251 +1153,33 @@ export async function extractDesignSelection(selection, options = {}) {
   return { document, assetPayloads };
 }
 
-export function detectColorRole(name) {
-  const lower = safeStr(name).toLowerCase();
-  if (/(^|[-_/ ])(primary|brand|main)([-_/ ]|$)/i.test(lower)) return 'primary';
-  if (/(^|[-_/ ])(secondary)([-_/ ]|$)/i.test(lower)) return 'secondary';
-  if (/(^|[-_/ ])(text|body|content|foreground)([-_/ ]|$)/i.test(lower)) return 'text';
-  if (/(^|[-_/ ])(accent|highlight)([-_/ ]|$)/i.test(lower)) return 'accent';
-  return 'custom';
-}
+const VISUAL_NAME_TOKENS = new Set(['icon', 'ic', 'svg', 'logo', 'img', 'image', 'pic', 'photo', 'avatar', 'thumb', 'thumbnail']);
 
-export function detectTypographyRole(name) {
-  const lower = safeStr(name).toLowerCase();
-  if (/^h1\b|heading[\s_/-]?1/i.test(lower)) return 'h1';
-  if (/^h2\b|heading[\s_/-]?2/i.test(lower)) return 'h2';
-  if (/^h3\b|heading[\s_/-]?3/i.test(lower)) return 'h3';
-  if (/^h4\b|heading[\s_/-]?4/i.test(lower)) return 'h4';
-  if (/^h5\b|heading[\s_/-]?5/i.test(lower)) return 'h5';
-  if (/^h6\b|heading[\s_/-]?6/i.test(lower)) return 'h6';
-  if (/body|paragraph|regular|base/i.test(lower)) return 'body';
-  if (/link|anchor/i.test(lower)) return 'link';
-  return 'custom';
-}
-
-function findNodeCandidate(nodes, predicate, depth = 0) {
-  if (!Array.isArray(nodes) || depth > 5) return null;
-  for (const n of nodes) {
-    if (!n || n.visible === false) continue;
-    if (predicate(n)) return n;
-    if (Array.isArray(n.children)) {
-      const found = findNodeCandidate(n.children, predicate, depth + 1);
-      if (found) return found;
+export function collectVisualImageDescendants(node, options = {}, depth = 0) {
+  if (!node || depth > 4) return [];
+  const { includeVectors = true, minVectorSize = 0 } = options;
+  const out = [];
+  for (const child of visibleChildren(node)) {
+    if (!child || child.type === 'TEXT') continue;
+    if (hasImageFill(child)) {
+      out.push(child);
+      continue;
     }
-  }
-  return null;
-}
-
-export async function extractLocalDesignSystem(figmaApi, activeSelection = null) {
-  const colors = [];
-  const typography = [];
-  const selection = Array.isArray(activeSelection)
-    ? activeSelection
-    : (figmaApi && figmaApi.currentPage && Array.isArray(figmaApi.currentPage.selection) ? figmaApi.currentPage.selection : []);
-
-  try {
-    if (figmaApi && figmaApi.variables && typeof figmaApi.variables.getLocalVariablesAsync === 'function') {
-      const collections = typeof figmaApi.variables.getLocalVariableCollectionsAsync === 'function'
-        ? await figmaApi.variables.getLocalVariableCollectionsAsync()
-        : [];
-      const defaultModes = {};
-      for (const col of collections || []) {
-        defaultModes[col.id] = col.defaultModeId || (col.modes && col.modes[0] ? col.modes[0].modeId : null);
-      }
-      const colorVars = await figmaApi.variables.getLocalVariablesAsync('COLOR');
-      for (const v of colorVars || []) {
-        const val = v.valuesByMode ? v.valuesByMode[defaultModes[v.variableCollectionId]] : null;
-        if (val && typeof val === 'object' && val.type !== 'VARIABLE_ALIAS' && typeof val.r === 'number') {
-          const hex = rgbToHex(val, val.a !== undefined ? val.a : 1);
-          const name = safeStr(v.name, 'Color');
-          colors.push({
-            name,
-            value: hex,
-            role: detectColorRole(name),
-          });
-        }
+    if (collectTextDescendants(child).length === 0 && hasDescendantImageFill(child)) {
+      out.push(child);
+      continue;
+    }
+    if (includeVectors && isVectorGraphic(child)) {
+      const w = Number(child.width) || 0;
+      const h = Number(child.height) || 0;
+      if (minVectorSize <= 0 || w >= minVectorSize || h >= minVectorSize) {
+        out.push(child);
+        continue;
       }
     }
-  } catch (e) { }
-
-  try {
-    if (figmaApi && typeof figmaApi.getLocalPaintStylesAsync === 'function') {
-      const paintStyles = await figmaApi.getLocalPaintStylesAsync();
-      for (const ps of paintStyles || []) {
-        const hex = extractSolidColor(ps.paints);
-        if (hex) {
-          const name = safeStr(ps.name, 'Style');
-          colors.push({
-            name,
-            value: hex,
-            role: detectColorRole(name),
-          });
-        }
-      }
-    }
-  } catch (e) { }
-
-  try {
-    if (figmaApi && typeof figmaApi.getLocalTextStylesAsync === 'function') {
-      const textStyles = await figmaApi.getLocalTextStylesAsync();
-      for (const ts of textStyles || []) {
-        const fn = ts.fontName && typeof ts.fontName === 'object' ? ts.fontName : null;
-        const name = safeStr(ts.name, 'Text Style');
-        const entry = {
-          name,
-          role: detectTypographyRole(name),
-          fontSize: Math.round(safeNum(ts.fontSize, 16)),
-          fontFamily: fn ? safeStr(fn.family, 'Inter') : 'Inter',
-          fontWeight: fn ? fontWeightOf(fn.style) : '400',
-        };
-        if (ts.lineHeight && typeof ts.lineHeight === 'object' && ts.lineHeight.unit !== 'AUTO') {
-          entry.lineHeight = ts.lineHeight.unit === 'PERCENT'
-            ? Math.round(safeNum(ts.lineHeight.value, 140)) / 100
-            : Math.round(safeNum(ts.lineHeight.value, 24));
-          entry.lineHeightUnit = ts.lineHeight.unit === 'PERCENT' ? 'em' : 'px';
-        }
-        if (ts.letterSpacing && typeof ts.letterSpacing === 'object' && ts.letterSpacing.unit === 'PIXELS') {
-          entry.letterSpacing = Math.round(safeNum(ts.letterSpacing.value, 0) * 10) / 10;
-        }
-        typography.push(entry);
-      }
-    }
-  } catch (e) { }
-
-  // Extract Theme Styles (Typography H1-H6, Buttons, Form Fields)
-  const themeStyles = {
-    typography: {},
-    buttons: null,
-    formFields: null,
-  };
-
-  for (const t of typography) {
-    if (t.role && t.role !== 'custom' && !themeStyles.typography[t.role]) {
-      themeStyles.typography[t.role] = {
-        fontFamily: t.fontFamily,
-        fontSize: t.fontSize,
-        fontWeight: t.fontWeight,
-        lineHeight: t.lineHeight,
-        lineHeightUnit: t.lineHeightUnit,
-        letterSpacing: t.letterSpacing,
-      };
-    }
+    out.push(...collectVisualImageDescendants(child, options, depth + 1));
   }
-
-  // Find button candidate in active selection
-  const btnNode = findNodeCandidate(selection, (n) => {
-    const name = safeStr(n.name).toLowerCase();
-    const isTaggedBtn = typeof n.getPluginData === 'function' && n.getPluginData('f2e-widget') === 'button';
-    const isNamedBtn = name.includes('button') || name.includes('btn') || name.includes('cta');
-    return (isTaggedBtn || isNamedBtn) && (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE');
-  });
-
-  if (btnNode) {
-    const bg = extractSolidColor(btnNode.fills) || '#2563EB';
-    const textChild = findNodeCandidate(btnNode.children, (c) => c.type === 'TEXT');
-    const textColor = textChild ? (extractSolidColor(textChild.fills) || '#FFFFFF') : '#FFFFFF';
-    const textFn = textChild && textChild.fontName ? textChild.fontName : null;
-
-    const r = typeof btnNode.cornerRadius === 'number'
-      ? { top: btnNode.cornerRadius, right: btnNode.cornerRadius, bottom: btnNode.cornerRadius, left: btnNode.cornerRadius }
-      : {
-        top: safeNum(btnNode.topLeftRadius, 6),
-        right: safeNum(btnNode.topRightRadius, 6),
-        bottom: safeNum(btnNode.bottomRightRadius, 6),
-        left: safeNum(btnNode.bottomLeftRadius, 6),
-      };
-
-    const pad = {
-      top: safeNum(btnNode.paddingTop, 12),
-      right: safeNum(btnNode.paddingRight, 20),
-      bottom: safeNum(btnNode.paddingBottom, 12),
-      left: safeNum(btnNode.paddingLeft, 20),
-    };
-
-    themeStyles.buttons = {
-      backgroundColor: bg,
-      textColor,
-      typography: {
-        fontFamily: textFn ? safeStr(textFn.family, 'Inter') : 'Inter',
-        fontSize: textChild && typeof textChild.fontSize === 'number' ? Math.round(textChild.fontSize) : 15,
-        fontWeight: textFn ? fontWeightOf(textFn.style) : '500',
-      },
-      borderRadius: r,
-      padding: pad,
-    };
-  }
-
-  // Find input / form field candidate in active selection
-  const inputNode = findNodeCandidate(selection, (n) => {
-    const name = safeStr(n.name).toLowerCase();
-    const isTaggedForm = typeof n.getPluginData === 'function' && n.getPluginData('f2e-widget') === 'form';
-    const isNamedInput = name.includes('input') || name.includes('field') || name.includes('text-field');
-    return (isTaggedForm || isNamedInput) && (n.type === 'FRAME' || n.type === 'COMPONENT' || n.type === 'INSTANCE');
-  });
-
-  if (inputNode) {
-    const bg = extractSolidColor(inputNode.fills) || '#FFFFFF';
-    const border = extractSolidColor(inputNode.strokes) || '#E2E8F0';
-    const textChild = findNodeCandidate(inputNode.children, (c) => c.type === 'TEXT');
-    const textColor = textChild ? (extractSolidColor(textChild.fills) || '#1E293B') : '#1E293B';
-    const textFn = textChild && textChild.fontName ? textChild.fontName : null;
-
-    const r = typeof inputNode.cornerRadius === 'number'
-      ? { top: inputNode.cornerRadius, right: inputNode.cornerRadius, bottom: inputNode.cornerRadius, left: inputNode.cornerRadius }
-      : {
-        top: safeNum(inputNode.topLeftRadius, 6),
-        right: safeNum(inputNode.topRightRadius, 6),
-        bottom: safeNum(inputNode.bottomRightRadius, 6),
-        left: safeNum(inputNode.bottomLeftRadius, 6),
-      };
-
-    const pad = {
-      top: safeNum(inputNode.paddingTop, 10),
-      right: safeNum(inputNode.paddingRight, 14),
-      bottom: safeNum(inputNode.paddingBottom, 10),
-      left: safeNum(inputNode.paddingLeft, 14),
-    };
-
-    themeStyles.formFields = {
-      backgroundColor: bg,
-      borderColor: border,
-      textColor,
-      typography: {
-        fontFamily: textFn ? safeStr(textFn.family, 'Inter') : 'Inter',
-        fontSize: textChild && typeof textChild.fontSize === 'number' ? Math.round(textChild.fontSize) : 14,
-        fontWeight: textFn ? fontWeightOf(textFn.style) : '400',
-      },
-      borderRadius: r,
-      padding: pad,
-    };
-  }
-
-  // Extract General Settings (Layout width, background color)
-  const settings = {
-    layout: {},
-    background: {},
-  };
-
-  const rootNode = selection[0] || null;
-  if (rootNode && typeof rootNode.width === 'number') {
-    const rawW = Math.round(rootNode.width);
-    let containerWidth = 1200;
-    if (rawW >= 960 && rawW <= 1600) {
-      containerWidth = rawW;
-    } else if (rawW > 1600) {
-      containerWidth = 1440;
-    }
-    settings.layout.containerWidth = containerWidth;
-  }
-
-  if (rootNode && Array.isArray(rootNode.fills)) {
-    const bg = extractSolidColor(rootNode.fills);
-    if (bg) {
-      settings.background.color = bg;
-    }
-  }
-
-  return { colors, typography, themeStyles, settings };
+  return out;
 }
 
 export function findFirstVisualDescendant(node, depth = 0) {
@@ -1819,17 +1188,22 @@ export function findFirstVisualDescendant(node, depth = 0) {
   for (const child of kids) {
     if (child.type === 'TEXT') continue;
     if (hasImageFill(child)) return child;
+    const hasChildTexts = collectTextDescendants(child).length > 0;
+    if (!hasChildTexts && hasDescendantImageFill(child)) return child;
     if (isVectorGraphic(child)) return child;
     const t = child.type;
     if (t === 'VECTOR' || t === 'LINE' || t === 'ELLIPSE' || t === 'POLYGON' || t === 'STAR' || t === 'BOOLEAN_OPERATION') {
       return child;
     }
-    const lower = safeStr(child.name).toLowerCase();
-    if (['icon', 'ic', 'svg', 'logo', 'img', 'image', 'pic'].some((kw) => lower.includes(kw))) {
-      return child;
+    if (!hasChildTexts) {
+      const tokens = safeStr(child.name).toLowerCase().split(/[^a-z0-9]+/).filter(Boolean);
+      if (tokens.some((tok) => VISUAL_NAME_TOKENS.has(tok))) {
+        return child;
+      }
     }
     const found = findFirstVisualDescendant(child, depth + 1);
     if (found) return found;
   }
   return null;
 }
+

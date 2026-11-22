@@ -11,16 +11,16 @@
  *    Figma Auto-Layout frames and groups scattered vector paths into clean Icon Frames.
  */
 
-import { visibleChildren, isVectorGraphic } from '../tagging/widget-resolver.js';
+import { visibleChildren, isVectorGraphic, isDividerNode, detectCompositeBackgroundChildren } from '../tagging/widget-resolver.js';
 
 /**
  * Infers Flexbox or Grid layout parameters from child coordinates (x, y, width, height)
  * when `node.layoutMode === 'NONE'` or `node.type === 'GROUP'`.
  */
-export function inferVirtualLayout(node) {
+export function inferVirtualLayout(node, overrideChildren = null) {
   const nodeW = Math.round(Number(node.width) || 0);
   const nodeH = Math.round(Number(node.height) || 0);
-  const kids = visibleChildren(node);
+  const kids = Array.isArray(overrideChildren) ? overrideChildren : visibleChildren(node);
 
   if (kids.length === 0) {
     return {
@@ -204,52 +204,60 @@ function inferCrossAlign(items, posKey, centerKey, sizeKey) {
 }
 
 /**
- * Mutates the selected Figma nodes on the canvas to apply real Figma Auto Layout
- * where missing, without breaking visual appearance.
+ * NON-DESTRUCTIVE Smart Layout & Background Analyzer (ZERO visual mutations on Figma canvas!).
+ *
+ * Unlike destructive Auto-Layout conversion that shifts overlapping/freeform designs on Figma,
+ * this function ONLY writes lightweight `f2e-widget` pluginData tags:
+ * 1. Tags composite background layers (e.g. BG + Mask + Line + Main + Overlay behind text/menu)
+ *    as `background` so they bake cleanly into 1 WebP Container background image at export time.
+ * 2. Tags pure vector groups/frames as `icon` so they export as a single SVG instead of scattered paths.
+ * 3. Counts freeform frames that will safely use read-only Virtual Auto-Layout in memory during export.
  */
 export function fixAndOptimizeCanvasSelection(selection) {
-  let convertedFrames = 0;
+  let virtualLayoutFrames = 0;
   let taggedIcons = 0;
+  let taggedBackgrounds = 0;
 
   const processNode = (node) => {
     if (!node || node.visible === false) return;
 
-    // 1. If node is a pure vector group/frame, mark it as an Icon so children aren't split
+    const kids = visibleChildren(node);
+
+    // 0. Never tag 1px divider lines as SVG icons
+    if (node.type !== 'TEXT' && isDividerNode(node, kids)) {
+      return;
+    }
+
+    // 1. If node is a pure vector group/frame <= 128x128, mark it as an Icon so children aren't split
     if (isVectorGraphic(node)) {
-      if (typeof node.setPluginData === 'function' && !node.getPluginData('f2e-widget')) {
+      const w = Number(node.width) || 0;
+      const h = Number(node.height) || 0;
+      if (w <= 128 && h <= 128 && typeof node.setPluginData === 'function' && !node.getPluginData('f2e-widget')) {
         node.setPluginData('f2e-widget', 'icon');
         taggedIcons += 1;
       }
       return;
     }
 
-    const kids = visibleChildren(node);
-    for (const child of kids) {
-      processNode(child);
+    if (kids.length === 0) return;
+
+    // 2. Detect composite background layers behind foreground content (non-destructive tagging)
+    const { bgChildren, fgChildren } = detectCompositeBackgroundChildren(node);
+    for (const bgNode of bgChildren) {
+      if (typeof bgNode.setPluginData === 'function' && !bgNode.getPluginData('f2e-widget')) {
+        bgNode.setPluginData('f2e-widget', 'background');
+        taggedBackgrounds += 1;
+      }
     }
 
-    // 2. Convert non-Auto-Layout Frame to Auto-Layout if it has 1+ children
-    if (node.type === 'FRAME' && (!node.layoutMode || node.layoutMode === 'NONE') && kids.length > 0) {
-      const inferred = inferVirtualLayout(node);
-      try {
-        node.layoutMode = inferred.direction === 'row' ? 'HORIZONTAL' : 'VERTICAL';
-        node.primaryAxisSizingMode = 'FIXED';
-        node.counterAxisSizingMode = 'FIXED';
-        node.paddingTop = inferred.padding.top;
-        node.paddingRight = inferred.padding.right;
-        node.paddingBottom = inferred.padding.bottom;
-        node.paddingLeft = inferred.padding.left;
-        node.itemSpacing = inferred.gap;
-        node.primaryAxisAlignItems = inferred.justify;
-        node.counterAxisAlignItems = inferred.align;
-        if (inferred.mode === 'grid') {
-          node.layoutWrap = 'WRAP';
-          node.counterAxisSpacing = inferred.rowGap || inferred.gap;
-        }
-        convertedFrames += 1;
-      } catch (err) {
-        // Locked or component instance nodes cannot have layoutMode changed
-      }
+    // 3. Track freeform frames that will safely use read-only Virtual Auto-Layout at export time
+    if ((node.type === 'FRAME' || node.type === 'GROUP') && (!node.layoutMode || node.layoutMode === 'NONE')) {
+      virtualLayoutFrames += 1;
+    }
+
+    // Recurse only into foreground children (background layers will be baked into 1 composite image)
+    for (const child of fgChildren) {
+      processNode(child);
     }
   };
 
@@ -257,5 +265,5 @@ export function fixAndOptimizeCanvasSelection(selection) {
     processNode(root);
   }
 
-  return { convertedFrames, taggedIcons };
+  return { convertedFrames: 0, virtualLayoutFrames, taggedIcons, taggedBackgrounds };
 }

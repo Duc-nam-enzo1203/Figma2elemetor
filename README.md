@@ -32,7 +32,7 @@
 ## 📂 Cấu Trúc Thư Mục Dự Án
 
 ```text
-c:\Figma2elementor\
+figma2elemntor/
 ├── packages/
 │   ├── figma-plugin/                  # Plugin chạy trên Figma Desktop
 │   │   ├── manifest.json              # File manifest để import vào Figma Desktop
@@ -68,11 +68,11 @@ c:\Figma2elementor\
 1. Mở ứng dụng **Figma Desktop** và mở một file thiết kế bất kỳ.
 2. Trên thanh menu trên cùng, chọn **Plugins** → **Development** → **Import plugin from manifest...**
 3. Trỏ tới file:
-   `c:\Figma2elementor\packages\figma-plugin\manifest.json`
+   `packages/figma-plugin/manifest.json` trong thư mục repo của bạn.
 4. Chạy plugin bằng cách vào **Plugins** → **Development** → **F2E Bridge — Figma to Elementor (Free & Pro)**.
 
 ### Bước 2: Cài Đặt WordPress Plugin
-1. Copy thư mục `c:\Figma2elementor\packages\wordpress-plugin` vào thư mục `wp-content/plugins/figma-to-elementor-bridge` của website WordPress (hoặc nén thư mục `wordpress-plugin` thành file `.zip` rồi vào **WP Admin → Plugins → Add New → Upload Plugin**).
+1. Copy thư mục `packages/wordpress-plugin` vào thư mục `wp-content/plugins/figma-to-elementor-bridge` của website WordPress (hoặc nén thư mục `wordpress-plugin` thành file `.zip` rồi vào **WP Admin → Plugins → Add New → Upload Plugin**).
 2. Kích hoạt plugin **F2E Bridge — Figma to Elementor (Free & Pro)**.
 3. Trong menu quản trị WordPress, mở **F2E Bridge** để lấy **WordPress Site URL** và **Connection Token** (hoặc dùng khu vực **Import File Thủ Công**).
 
@@ -96,7 +96,7 @@ c:\Figma2elementor\
 Khi bạn chỉnh sửa mã nguồn của Figma Plugin trong `packages/figma-plugin/src/`, hãy chạy lệnh dưới đây để đóng gói lại `dist/code.js` và chạy bộ kiểm thử tự động:
 
 ```bash
-cd c:\Figma2elementor\packages\figma-plugin
+cd packages/figma-plugin
 node scripts/build.mjs
 node --test tests/plugin.test.mjs
 ```

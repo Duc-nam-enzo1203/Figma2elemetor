@@ -17,62 +17,305 @@
     _uploadCache: new Map(),
 
     async uploadDataUriIfNeeded(dataUri, title = 'Figma Pasted Asset') {
-      if (!dataUri || typeof dataUri !== 'string' || !dataUri.startsWith('data:image/')) {
+      if (!dataUri || typeof dataUri !== 'string') {
         return null;
       }
-      if (this._uploadCache.has(dataUri)) {
-        return this._uploadCache.get(dataUri);
+      let normalizedUri = dataUri.trim();
+      if (normalizedUri.startsWith('<svg') || normalizedUri.startsWith('<?xml')) {
+        normalizedUri = 'data:image/svg+xml;utf8,' + encodeURIComponent(normalizedUri);
       }
-      const match = /^data:(image\/[a-z0-9.+-]+);base64,(.+)$/i.exec(dataUri);
+      if (!normalizedUri.startsWith('data:image/')) {
+        return null;
+      }
+      if (this._uploadCache.has(normalizedUri)) {
+        return this._uploadCache.get(normalizedUri);
+      }
+
+      const match = /^data:(image\/[a-z0-9.+-]+)((?:;[a-z0-9._-]+(?:=[^;,]+)?)*),([\s\S]+)$/i.exec(normalizedUri);
       if (!match) return null;
 
+      const mime = match[1].toLowerCase();
+      const paramTokens = (match[2] || '').toLowerCase().split(';').filter(Boolean);
+      const rawPayload = match[3];
+      const isBase64 = paramTokens.includes('base64');
+
+      let base64Payload = '';
+      if (isBase64) {
+        base64Payload = rawPayload.trim();
+      } else if (mime === 'image/svg+xml') {
+        let svgText = rawPayload;
+        if (!rawPayload.trimStart().startsWith('<')) {
+          try {
+            svgText = decodeURIComponent(rawPayload);
+          } catch (_) {
+            svgText = rawPayload;
+          }
+        }
+        const bytes = new TextEncoder().encode(svgText);
+        let bin = '';
+        for (let i = 0; i < bytes.length; i += 0x8000) {
+          bin += String.fromCharCode(...bytes.subarray(i, i + 0x8000));
+        }
+        base64Payload = btoa(bin);
+      } else {
+        return null;
+      }
+
+      const baseUrl = (window.f2eEditorConfig?.restUrl || '/wp-json/f2e-bridge/v1').replace(/\/+$/, '');
       const uploadPromise = (async () => {
         try {
-          const res = await fetch(`${window.f2eEditorConfig?.restUrl || '/wp-json/f2e-bridge/v1'}/assets`, {
+          const res = await fetch(`${baseUrl}/assets`, {
             method: 'POST',
+            credentials: 'same-origin',
             headers: {
               'Content-Type': 'application/json',
               'X-WP-Nonce': window.f2eEditorConfig?.nonce || '',
             },
             body: JSON.stringify({
               sha256: '',
-              mime: match[1],
-              base64: match[2],
+              mime,
+              base64: base64Payload,
               name: title,
             }),
           });
+          if (!res.ok) {
+            this._uploadCache.delete(normalizedUri);
+            return null;
+          }
           const json = await res.json();
           if (json && json.success && json.data && json.data.id) {
             return { id: json.data.id, url: json.data.url };
           }
+          this._uploadCache.delete(normalizedUri);
         } catch (e) {
+          this._uploadCache.delete(normalizedUri);
           console.warn('[F2E Bridge] Could not auto-upload pasted Data-URI asset:', e);
         }
         return null;
       })();
 
-      this._uploadCache.set(dataUri, uploadPromise);
+      this._uploadCache.set(normalizedUri, uploadPromise);
       return uploadPromise;
+    },
+
+    _isInlineAssetString(val) {
+      return typeof val === 'string' && (val.startsWith('data:image/') || val.includes('<svg'));
+    },
+
+    _hydrateV4ImageProp(imageProp, title, tasks) {
+      if (!imageProp || typeof imageProp !== 'object' || !imageProp.value || typeof imageProp.value !== 'object') {
+        return;
+      }
+      // Official Elementor 4.4.1 schema: value.src.value.{id, url}
+      if (imageProp.value.src && imageProp.value.src.value && typeof imageProp.value.src.value === 'object') {
+        const srcVal = imageProp.value.src.value;
+        const rawUrl = (srcVal.url && typeof srcVal.url === 'object') ? srcVal.url.value : srcVal.url;
+        if (this._isInlineAssetString(rawUrl)) {
+          tasks.push(
+            this.uploadDataUriIfNeeded(rawUrl, title).then((uploaded) => {
+              if (uploaded) {
+                srcVal.id = { $$type: 'image-attachment-id', value: uploaded.id };
+                srcVal.url = null;
+              }
+            })
+          );
+        }
+        return;
+      }
+      // F2E flat v4 schema: value.{id, url}
+      if (this._isInlineAssetString(imageProp.value.url)) {
+        tasks.push(
+          this.uploadDataUriIfNeeded(imageProp.value.url, title).then((uploaded) => {
+            if (uploaded) {
+              imageProp.value.id = uploaded.id;
+              imageProp.value.url = uploaded.url;
+            }
+          })
+        );
+      }
     },
 
     async hydrateElementAssets(element) {
       if (!element || typeof element !== 'object') return element;
       const settings = element.settings || {};
+      const title = settings._title || 'Figma Asset';
 
       const tasks = [];
-      if (settings.image && typeof settings.image.url === 'string' && settings.image.url.startsWith('data:image/')) {
-        tasks.push(
-          this.uploadDataUriIfNeeded(settings.image.url, settings._title || 'Figma Image').then((uploaded) => {
-            if (uploaded) settings.image = uploaded;
-          })
-        );
+      const mediaKeys = [
+        'image',
+        'background_image',
+        '_background_image',
+        'background_overlay_image',
+        'background_hover_image',
+        '_background_hover_image',
+        'background_overlay_hover_image',
+        'background_a_image',
+        'background_b_image',
+        'custom_image',
+        'bg_image',
+        'testimonial_image',
+        'image_overlay',
+        'fallback_image',
+        'poster',
+      ];
+      for (const key of mediaKeys) {
+        if (key === 'image' && settings.image && settings.image.$$type === 'image') {
+          continue;
+        }
+        if (settings[key] && this._isInlineAssetString(settings[key].url)) {
+          tasks.push(
+            this.uploadDataUriIfNeeded(settings[key].url, `${title} ${key}`).then((uploaded) => {
+              if (uploaded) settings[key] = uploaded;
+            })
+          );
+        }
       }
-      if (settings.background_image && typeof settings.background_image.url === 'string' && settings.background_image.url.startsWith('data:image/')) {
-        tasks.push(
-          this.uploadDataUriIfNeeded(settings.background_image.url, settings._title || 'Figma BG').then((uploaded) => {
-            if (uploaded) settings.background_image = uploaded;
-          })
-        );
+
+      // Check gallery & carousel arrays
+      for (const gKey of ['gallery', 'wp_gallery', 'carousel']) {
+        if (Array.isArray(settings[gKey])) {
+          for (const item of settings[gKey]) {
+            if (item && this._isInlineAssetString(item.url)) {
+              tasks.push(
+                this.uploadDataUriIfNeeded(item.url, `${title} ${gKey}`).then((uploaded) => {
+                  if (uploaded) {
+                    item.id = uploaded.id;
+                    item.url = uploaded.url;
+                  }
+                })
+              );
+            }
+          }
+        }
+      }
+
+      // Check repeater lists (slides, icon_list, features_list, social_icon_list, tabs, items)
+      for (const listKey of ['slides', 'icon_list', 'features_list', 'social_icon_list', 'tabs', 'items']) {
+        if (!Array.isArray(settings[listKey])) continue;
+        for (const item of settings[listKey]) {
+          if (!item || typeof item !== 'object') continue;
+          if (this._isInlineAssetString(item.url)) {
+            tasks.push(
+              this.uploadDataUriIfNeeded(item.url, `${title} ${listKey}`).then((uploaded) => {
+                if (uploaded) {
+                  item.id = uploaded.id;
+                  item.url = uploaded.url;
+                }
+              })
+            );
+          }
+          for (const subKey of ['image', 'background_image', 'bg_image']) {
+            if (item[subKey] && this._isInlineAssetString(item[subKey].url)) {
+              tasks.push(
+                this.uploadDataUriIfNeeded(item[subKey].url, `${title} ${listKey} ${subKey}`).then((uploaded) => {
+                  if (uploaded) item[subKey] = uploaded;
+                })
+              );
+            }
+          }
+          for (const iconKey of ['selected_icon', 'social_icon']) {
+            const icon = item[iconKey];
+            if (icon && icon.library === 'svg') {
+              if (this._isInlineAssetString(icon.value)) {
+                tasks.push(
+                  this.uploadDataUriIfNeeded(icon.value, `${title} icon`).then((uploaded) => {
+                    if (uploaded) icon.value = uploaded;
+                  })
+                );
+              } else if (icon.value && this._isInlineAssetString(icon.value.url)) {
+                tasks.push(
+                  this.uploadDataUriIfNeeded(icon.value.url, `${title} icon`).then((uploaded) => {
+                    if (uploaded) icon.value = uploaded;
+                  })
+                );
+              }
+            }
+          }
+        }
+      }
+
+      // Check top-level selected_icon with library === 'svg'
+      if (settings.selected_icon && settings.selected_icon.library === 'svg') {
+        const icon = settings.selected_icon;
+        if (this._isInlineAssetString(icon.value)) {
+          tasks.push(
+            this.uploadDataUriIfNeeded(icon.value, `${title} selected_icon`).then((uploaded) => {
+              if (uploaded) icon.value = uploaded;
+            })
+          );
+        } else if (icon.value && this._isInlineAssetString(icon.value.url)) {
+          tasks.push(
+            this.uploadDataUriIfNeeded(icon.value.url, `${title} selected_icon`).then((uploaded) => {
+              if (uploaded) icon.value = uploaded;
+            })
+          );
+        }
+      }
+
+      // Elementor v4 e-image
+      if (settings.image && settings.image.$$type === 'image') {
+        this._hydrateV4ImageProp(settings.image, `${title} v4 image`, tasks);
+      }
+
+      // Elementor v4 e-svg
+      if (settings.svg && typeof settings.svg === 'object') {
+        const svgTarget = (settings.svg.value && typeof settings.svg.value === 'object') ? settings.svg.value : settings.svg;
+        if (svgTarget.url && typeof svgTarget.url === 'object' && svgTarget.url.$$type === 'url') {
+          if (this._isInlineAssetString(svgTarget.url.value)) {
+            tasks.push(
+              this.uploadDataUriIfNeeded(svgTarget.url.value, `${title} v4 svg`).then((uploaded) => {
+                if (uploaded) {
+                  svgTarget.id = { $$type: 'image-attachment-id', value: uploaded.id };
+                  svgTarget.url = { $$type: 'url', value: uploaded.url };
+                }
+              })
+            );
+          }
+        } else {
+          const rawSvg = svgTarget.url || svgTarget.markup || svgTarget.html;
+          if (this._isInlineAssetString(rawSvg)) {
+            tasks.push(
+              this.uploadDataUriIfNeeded(rawSvg, `${title} v4 svg`).then((uploaded) => {
+                if (uploaded) {
+                  svgTarget.id = uploaded.id;
+                  svgTarget.url = uploaded.url;
+                }
+              })
+            );
+          }
+        }
+      }
+
+      // Elementor v4 styles background images
+      if (element.styles && typeof element.styles === 'object') {
+        for (const styleDef of Object.values(element.styles)) {
+          if (!styleDef || !Array.isArray(styleDef.variants)) continue;
+          for (const variant of styleDef.variants) {
+            const props = variant?.props;
+            if (!props || typeof props !== 'object') continue;
+            if (props.background?.$$type === 'background') {
+              const overlays = props.background.value?.['background-overlay']?.value;
+              if (Array.isArray(overlays)) {
+                for (const overlay of overlays) {
+                  if (overlay?.$$type === 'background-image-overlay' && overlay.value?.image) {
+                    this._hydrateV4ImageProp(overlay.value.image, `${title} v4 bg`, tasks);
+                  }
+                }
+              }
+            }
+            if (props.backgroundImage && typeof props.backgroundImage === 'object') {
+              if (props.backgroundImage.$$type === 'image') {
+                this._hydrateV4ImageProp(props.backgroundImage, `${title} v4 bgImage`, tasks);
+              } else if (props.backgroundImage.$$type === 'url' && this._isInlineAssetString(props.backgroundImage.value)) {
+                tasks.push(
+                  this.uploadDataUriIfNeeded(props.backgroundImage.value, `${title} v4 bgImage`).then((uploaded) => {
+                    if (uploaded) props.backgroundImage.value = uploaded.url;
+                  })
+                );
+              }
+            }
+          }
+        }
       }
 
       if (Array.isArray(element.elements) && element.elements.length > 0) {
@@ -91,6 +334,10 @@
       }
       const list = Array.isArray(elements) ? elements : [];
       const rootContainer = elementor.getPreviewContainer();
+      if (!rootContainer) {
+        console.warn('[F2E Bridge] Elementor preview container is not ready.');
+        return;
+      }
 
       for (const rawEl of list) {
         const el = await this.hydrateElementAssets(JSON.parse(JSON.stringify(rawEl)));
@@ -105,24 +352,28 @@
 
   window.f2eEditorBridge = f2eEditorBridge;
 
-  // Listen for paste event in Elementor Editor to support instant Ctrl+V of F2E Clipboard JSON
+  // Listen for paste event in capture phase to prevent Elementor double-paste when pasting F2E Clipboard JSON
   window.addEventListener('paste', async (event) => {
     const activeTag = document.activeElement?.tagName?.toLowerCase();
     if (activeTag === 'input' || activeTag === 'textarea' || document.activeElement?.isContentEditable) {
       return;
     }
-    const text = event.clipboardData?.getData('text/plain') || '';
+    const text = (event.clipboardData?.getData('text/plain') || '').trim();
     if (!text.startsWith('{') || !text.includes('"_f2e_node_id"')) {
       return;
     }
+    let parsed;
     try {
-      const parsed = JSON.parse(text);
-      if (parsed && parsed.type === 'elementor' && Array.isArray(parsed.elements)) {
-        event.preventDefault();
-        await f2eEditorBridge.insertElements(parsed.elements);
-      }
-    } catch (e) {
-      // Not F2E JSON, let Elementor handle normally
+      parsed = JSON.parse(text);
+    } catch (_) {
+      // Not valid JSON, let Elementor handle normally
+      return;
     }
-  });
+    if (parsed && parsed.type === 'elementor' && Array.isArray(parsed.elements)) {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      await f2eEditorBridge.insertElements(parsed.elements);
+    }
+  }, true);
 })(window.jQuery);

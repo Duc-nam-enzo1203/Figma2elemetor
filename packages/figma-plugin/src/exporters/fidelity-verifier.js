@@ -17,6 +17,7 @@
  */
 
 import { shortId } from '../utils/crypto.js';
+import { escapeHtml, appendCustomCss, scopeSvgIds } from './compiler-helpers.js';
 
 const UNVERIFIED_GLOBAL_IDS = new Set([
   'globals/colors?id=primary',
@@ -81,134 +82,184 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
       }
     }
 
-    // ── 2. Auto-Heal `icon-box` with Raw `<svg>` String or Single-Text Card ──
+    // ── 2. Auto-Heal `icon-box` with Raster Asset or Raw `<svg>` String ──
     if (el.elType === 'widget' && el.widgetType === 'icon-box') {
       const selIcon = settings.selected_icon;
-      const hasRawSvg = selIcon && selIcon.library === 'svg' && typeof selIcon.value === 'string' && selIcon.value.includes('<svg');
-      const hasOnlyOneText = !settings.description_text || String(settings.description_text).trim() === '';
-      const hasRealSvgPaths = hasRawSvg && /<(path|circle|rect|polygon|polyline|line|g|ellipse)\b/i.test(selIcon.value);
+      const isStringRasterOrUrl = selIcon && selIcon.library === 'svg' && typeof selIcon.value === 'string' && !selIcon.value.includes('<svg') && selIcon.value.trim() !== '';
+      const isObjRaster = selIcon && selIcon.library === 'svg' && selIcon.value && typeof selIcon.value === 'object' && selIcon.value.url && /^data:image\/(png|jpeg|jpg|webp|gif)|(\.(png|jpe?g|webp|gif)(\?|$))/i.test(selIcon.value.url);
 
-      if (hasRawSvg && (hasOnlyOneText || hasRealSvgPaths)) {
-        const svgMarkup = selIcon.value.trim();
-        const wMatch = svgMarkup.match(/\bwidth=["'](\d+(?:\.\d+)?)/i);
-        const hMatch = svgMarkup.match(/\bheight=["'](\d+(?:\.\d+)?)/i);
-        const iconW = wMatch ? Math.round(parseFloat(wMatch[1])) : 40;
-        const iconH = hMatch ? Math.round(parseFloat(hMatch[1])) : 40;
-        const isRowBox = settings.position === 'left' || settings.position === 'right';
+      if (isStringRasterOrUrl || isObjRaster) {
+        const imgObj = typeof selIcon.value === 'object'
+          ? { id: selIcon.value.id || '', url: selIcon.value.url }
+          : { id: '', url: selIcon.value };
+        el.widgetType = 'image-box';
+        settings.image = imgObj;
+        settings.thumbnail_size = 'full';
+        if (settings.icon_space !== undefined && settings.image_space === undefined) {
+          settings.image_space = settings.icon_space;
+          delete settings.icon_space;
+        }
+        if (typeof settings.custom_css === 'string') {
+          settings.custom_css = settings.custom_css.replace(/\.elementor-icon-box-title/g, '.elementor-image-box-title');
+        }
+        delete settings.selected_icon;
+        delete settings.primary_color;
+        delete settings.icon_size;
+        recordFix(nodeId, title, 'Chuyển đổi Icon Box chứa ảnh raster sang Image Box hợp lệ');
+      } else {
+        const hasRawSvg = selIcon && selIcon.library === 'svg' && typeof selIcon.value === 'string' && selIcon.value.includes('<svg');
+        const hasOnlyOneText = !settings.description_text || String(settings.description_text).trim() === '';
+        const hasRealSvgPaths = hasRawSvg && /<(path|circle|rect|polygon|polyline|line|g|ellipse)\b/i.test(selIcon.value);
 
-        const iconWidget = {
-          id: shortId(`${el.id}-svg`),
-          elType: 'widget',
-          widgetType: 'html',
-          isInner: false,
-          settings: {
-            html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${iconW}px;height:${iconH}px;line-height:0;">${svgMarkup}</div>`,
-            _element_width: 'auto',
-            _flex_size: 'none',
-            _title: `${title} Icon`,
-          },
-          elements: [],
-        };
+        if (hasRawSvg && (hasOnlyOneText || hasRealSvgPaths)) {
+          const svgWidgetId = shortId(`${el.id}-svg`);
+          const svgMarkup = scopeSvgIds(selIcon.value.trim(), svgWidgetId);
+          const wMatch = svgMarkup.match(/\bwidth=["'](\d+(?:\.\d+)?)/i);
+          const hMatch = svgMarkup.match(/\bheight=["'](\d+(?:\.\d+)?)/i);
+          const iconW = wMatch ? Math.round(parseFloat(wMatch[1])) : 40;
+          const iconH = hMatch ? Math.round(parseFloat(hMatch[1])) : 40;
+          const isRowBox = settings.position === 'left' || settings.position === 'right';
 
-        const titleColor = settings.title_color || '#000000';
-        const fontFamily = settings.title_typography_font_family || 'Inter';
-        const fontWeight = String(settings.title_typography_font_weight || (hasOnlyOneText ? '400' : '600'));
-        const fontSize = settings.title_typography_font_size || { unit: 'px', size: 16, sizes: [] };
-        const fontSizeTablet = settings.title_typography_font_size_tablet || { unit: 'px', size: 15, sizes: [] };
-        const fontSizeMobile = settings.title_typography_font_size_mobile || { unit: 'px', size: 15, sizes: [] };
-        const lineHeight = settings.title_typography_line_height || { unit: 'px', size: 24, sizes: [] };
-        const rawTitle = String(settings.title_text || '').trim();
+          const iconWidget = {
+            id: svgWidgetId,
+            elType: 'widget',
+            widgetType: 'html',
+            isInner: false,
+            settings: {
+              html: `<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:${iconW}px;height:${iconH}px;line-height:0;">${svgMarkup}</div>`,
+              _element_width: 'auto',
+              _flex_size: 'none',
+              _title: `${title} Icon`,
+            },
+            elements: [],
+          };
 
-        const textWidget = {
-          id: shortId(`${el.id}-txt`),
-          elType: 'widget',
-          widgetType: 'text-editor',
-          isInner: false,
-          settings: {
-            editor: `<p style="margin:0;">${rawTitle}</p>`,
-            align: 'left',
-            text_color: titleColor,
-            typography_typography: 'custom',
-            typography_font_family: fontFamily,
-            typography_font_weight: fontWeight,
-            typography_font_style: 'normal',
-            typography_font_size: fontSize,
-            typography_font_size_tablet: fontSizeTablet,
-            typography_font_size_mobile: fontSizeMobile,
-            typography_line_height: lineHeight,
-            _title: `${title} Text`,
-          },
-          elements: [],
-        };
+          const titleColor = settings.title_color || '#000000';
+          const fontFamily = settings.title_typography_font_family || 'Inter';
+          const fontWeight = String(settings.title_typography_font_weight || (hasOnlyOneText ? '400' : '600'));
+          const fontSize = settings.title_typography_font_size || { unit: 'px', size: 16, sizes: [] };
+          const fontSizeTablet = settings.title_typography_font_size_tablet || { unit: 'px', size: 15, sizes: [] };
+          const fontSizeMobile = settings.title_typography_font_size_mobile || { unit: 'px', size: 15, sizes: [] };
+          const lineHeight = settings.title_typography_line_height || { unit: 'px', size: 24, sizes: [] };
+          const rawTitle = String(settings.title_text || '').trim();
 
-        const childElements = [iconWidget, textWidget];
-
-        if (!hasOnlyOneText) {
-          const rawDesc = String(settings.description_text || '').trim();
-          childElements.push({
-            id: shortId(`${el.id}-desc`),
+          const textWidget = {
+            id: shortId(`${el.id}-txt`),
             elType: 'widget',
             widgetType: 'text-editor',
             isInner: false,
             settings: {
-              editor: `<p style="margin:0;">${rawDesc}</p>`,
+              editor: `<p style="margin:0;">${escapeHtml(rawTitle)}</p>`,
               align: 'left',
-              text_color: settings.description_color || 'rgba(0,0,0,0.7)',
+              text_color: titleColor,
               typography_typography: 'custom',
-              typography_font_family: settings.description_typography_font_family || fontFamily,
-              typography_font_weight: String(settings.description_typography_font_weight || '400'),
-              typography_font_size: settings.description_typography_font_size || { unit: 'px', size: 14, sizes: [] },
-              typography_line_height: settings.description_typography_line_height || { unit: 'px', size: 20, sizes: [] },
-              _title: `${title} Description`,
+              typography_font_family: fontFamily,
+              typography_font_weight: fontWeight,
+              typography_font_style: 'normal',
+              typography_font_size: fontSize,
+              typography_font_size_tablet: fontSizeTablet,
+              typography_font_size_mobile: fontSizeMobile,
+              typography_line_height: lineHeight,
+              _title: `${title} Text`,
             },
             elements: [],
-          });
-        }
-
-        const itemGap = (irNode && irNode.layout && typeof irNode.layout.gap === 'number') ? irNode.layout.gap : 24;
-        const irPad = (irNode && irNode.layout && irNode.layout.padding) || { top: 0, right: 0, bottom: 0, left: 0 };
-        const irBw = irNode && irNode.style && irNode.style.borderWidth;
-        const irBc = irNode && irNode.style && irNode.style.borderColor;
-
-        el.elType = 'container';
-        delete el.widgetType;
-        el.isInner = true;
-        el.settings = {
-          container_type: 'flex',
-          flex_direction: isRowBox ? 'row' : 'column',
-          flex_gap: { unit: 'px', size: itemGap, column: String(itemGap), row: String(itemGap), isLinked: true },
-          flex_justify_content: 'flex-start',
-          flex_align_items: isRowBox ? 'center' : 'flex-start',
-          content_width: 'full',
-          padding: {
-            unit: 'px',
-            top: String(irPad.top || 0),
-            right: String(irPad.right || 0),
-            bottom: String(irPad.bottom || 0),
-            left: String(irPad.left || 0),
-            isLinked: irPad.top === irPad.right && irPad.right === irPad.bottom && irPad.bottom === irPad.left,
-          },
-          margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true },
-          _flex_size: settings._flex_size || 'grow',
-          _f2e_node_id: nodeId,
-          _title: title,
-        };
-        if (irBw && irBc) {
-          el.settings.border_border = 'solid';
-          el.settings.border_width = {
-            unit: 'px',
-            top: String(irBw.top || 0),
-            right: String(irBw.right || 0),
-            bottom: String(irBw.bottom || 0),
-            left: String(irBw.left || 0),
-            isLinked: Boolean(irBw.isLinked),
           };
-          el.settings.border_color = irBc;
-        }
-        el.elements = childElements;
-        el._healedFromIconBox = true;
 
-        recordFix(nodeId, title, 'Chuyển đổi Icon Box chứa Inline SVG thành Flexbox Container (SVG + Text) để hiển thị 100% icon vector và căn lề trái');
+          const childElements = [iconWidget, textWidget];
+
+          if (!hasOnlyOneText) {
+            const rawDesc = String(settings.description_text || '').trim();
+            const descHtml = rawDesc
+              .split(/\n+/)
+              .map((line) => `<p style="margin:0;">${escapeHtml(line)}</p>`)
+              .join('');
+            childElements.push({
+              id: shortId(`${el.id}-desc`),
+              elType: 'widget',
+              widgetType: 'text-editor',
+              isInner: false,
+              settings: {
+                editor: descHtml || '<p style="margin:0;"></p>',
+                align: 'left',
+                text_color: settings.description_color || 'rgba(0,0,0,0.7)',
+                typography_typography: 'custom',
+                typography_font_family: settings.description_typography_font_family || fontFamily,
+                typography_font_weight: String(settings.description_typography_font_weight || '400'),
+                typography_font_size: settings.description_typography_font_size || { unit: 'px', size: 14, sizes: [] },
+                typography_line_height: settings.description_typography_line_height || { unit: 'px', size: 20, sizes: [] },
+                _title: `${title} Description`,
+              },
+              elements: [],
+            });
+          }
+
+          const itemGap = (irNode && irNode.layout && typeof irNode.layout.gap === 'number') ? irNode.layout.gap : 24;
+          const irPad = (irNode && irNode.layout && irNode.layout.padding) || { top: 0, right: 0, bottom: 0, left: 0 };
+          const irBw = irNode && irNode.style && irNode.style.borderWidth;
+          const irBc = irNode && irNode.style && irNode.style.borderColor;
+          const prevSettings = settings;
+
+          el.elType = 'container';
+          delete el.widgetType;
+          el.isInner = true;
+          el.settings = {
+            container_type: 'flex',
+            flex_direction: isRowBox ? 'row' : 'column',
+            flex_gap: { unit: 'px', size: itemGap, column: String(itemGap), row: String(itemGap), isLinked: true },
+            flex_justify_content: 'flex-start',
+            flex_align_items: isRowBox ? 'center' : 'flex-start',
+            content_width: 'full',
+            padding: {
+              unit: 'px',
+              top: String(irPad.top || 0),
+              right: String(irPad.right || 0),
+              bottom: String(irPad.bottom || 0),
+              left: String(irPad.left || 0),
+              isLinked: irPad.top === irPad.right && irPad.right === irPad.bottom && irPad.bottom === irPad.left,
+            },
+            margin: { unit: 'px', top: '0', right: '0', bottom: '0', left: '0', isLinked: true },
+            _flex_size: prevSettings._flex_size || 'grow',
+            _f2e_node_id: nodeId,
+            _title: title,
+          };
+          if (prevSettings._background_background) {
+            el.settings.background_background = prevSettings._background_background;
+            if (prevSettings._background_color) el.settings.background_color = prevSettings._background_color;
+            if (prevSettings._background_gradient_type) el.settings.background_gradient_type = prevSettings._background_gradient_type;
+            if (prevSettings._background_color_stop) el.settings.background_color_stop = prevSettings._background_color_stop;
+            if (prevSettings._background_color_b) el.settings.background_color_b = prevSettings._background_color_b;
+            if (prevSettings._background_color_b_stop) el.settings.background_color_b_stop = prevSettings._background_color_b_stop;
+            if (prevSettings._background_gradient_angle) el.settings.background_gradient_angle = prevSettings._background_gradient_angle;
+            if (prevSettings._background_image) el.settings.background_image = prevSettings._background_image;
+          }
+          if (prevSettings._border_radius) {
+            el.settings.border_radius = prevSettings._border_radius;
+          }
+          if (prevSettings._box_shadow_box_shadow_type) {
+            el.settings.box_shadow_box_shadow_type = prevSettings._box_shadow_box_shadow_type;
+            if (prevSettings._box_shadow_box_shadow) el.settings.box_shadow_box_shadow = prevSettings._box_shadow_box_shadow;
+            if (prevSettings._box_shadow_box_shadow_position) el.settings.box_shadow_box_shadow_position = prevSettings._box_shadow_box_shadow_position;
+          }
+          if (prevSettings.custom_css) {
+            el.settings.custom_css = prevSettings.custom_css;
+          }
+          if (irBw && irBc) {
+            el.settings.border_border = 'solid';
+            el.settings.border_width = {
+              unit: 'px',
+              top: String(irBw.top || 0),
+              right: String(irBw.right || 0),
+              bottom: String(irBw.bottom || 0),
+              left: String(irBw.left || 0),
+              isLinked: Boolean(irBw.isLinked),
+            };
+            el.settings.border_color = irBc;
+          }
+          el.elements = childElements;
+          el._healedFromIconBox = true;
+
+          recordFix(nodeId, title, 'Chuyển đổi Icon Box chứa Inline SVG thành Flexbox Container (SVG + Text) để hiển thị 100% icon vector và căn lề trái');
+        }
       }
     }
 
@@ -257,7 +308,7 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
               widgetType: 'text-editor',
               isInner: false,
               settings: {
-                editor: `<p style="margin:0;">${it.body || it.title || ''}</p>`,
+                editor: `<p style="margin:0;">${escapeHtml(it.body || it.title || '')}</p>`,
                 align: 'left',
               },
               elements: [],
@@ -310,7 +361,7 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
           counterHealed = true;
         }
         if (gradCss && (!settings.custom_css || !settings.custom_css.includes('background-clip'))) {
-          settings.custom_css = `selector .elementor-counter-number-wrapper, selector .elementor-counter-number {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+          appendCustomCss(settings, `selector .elementor-counter-number-wrapper, selector .elementor-counter-number {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`);
           counterHealed = true;
         }
         if (counterHealed) {
@@ -319,7 +370,7 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
       } else if ((el.widgetType === 'heading' || el.widgetType === 'text-editor') && gradCss) {
         if (!settings.custom_css || !settings.custom_css.includes('background-clip')) {
           const targetSel = el.widgetType === 'heading' ? 'selector .elementor-heading-title' : 'selector';
-          settings.custom_css = `${targetSel} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
+          appendCustomCss(settings, `${targetSel} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`);
           recordFix(nodeId, title, 'Bổ sung hiệu ứng chữ chuyển màu (background-clip: text) từ Figma Dev Mode');
         }
       }
@@ -414,11 +465,21 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
       }
     }
 
+    if (Array.isArray(el.elements)) {
+      for (const child of el.elements) {
+        if (child && '_healedFromIconBox' in child) {
+          delete child._healedFromIconBox;
+        }
+      }
+    }
     return el;
   };
 
   for (let i = 0; i < list.length; i += 1) {
     list[i] = healElement(list[i], null);
+    if (list[i] && '_healedFromIconBox' in list[i]) {
+      delete list[i]._healedFromIconBox;
+    }
   }
 
   return {

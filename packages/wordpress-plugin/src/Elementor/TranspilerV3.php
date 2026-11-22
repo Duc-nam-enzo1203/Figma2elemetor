@@ -111,6 +111,9 @@ final class TranspilerV3
             'slides' => $this->buildProSlides($node, $nodes),
             'loop-grid', 'loop-carousel', 'posts', 'portfolio', 'woocommerce-products' => $this->buildProLoopGrid($node),
             'theme-site-logo', 'site-logo' => $this->buildSiteLogo($node),
+            'theme-post-featured-image' => (defined('ELEMENTOR_PRO_VERSION') || class_exists('\\ElementorPro\\Plugin'))
+                ? $this->wrapElement('widget', 'theme-post-featured-image', ['image_size' => 'full'], [], [])
+                : $this->buildImage($node),
             default => $this->buildContainer($node, $nodes, $isRoot),
         };
 
@@ -269,6 +272,15 @@ final class TranspilerV3
                             $settings['background_background'] = 'classic';
                             $settings['background_color'] = $child['style']['background'];
                             $this->bindColor($settings, $globals, 'background_color', (string) $child['style']['background']);
+                        } elseif (!empty($child['style']['backgroundImage']) || !empty($child['style']['backgroundImageDataUri'])) {
+                            $bgMedia = $this->resolveStyleBgMedia($child['style']);
+                            if ($bgMedia['url'] !== '' || $bgMedia['id'] > 0) {
+                                $settings['background_background'] = 'classic';
+                                $settings['background_image'] = $bgMedia;
+                                $settings['background_size'] = 'cover';
+                                $settings['background_position'] = 'center center';
+                                $settings['background_repeat'] = 'no-repeat';
+                            }
                         }
                     }
                     if (empty($settings['border_radius']) && !empty($child['style']['radius'])) {
@@ -319,9 +331,12 @@ final class TranspilerV3
             }
 
             // Do not unwrap if child has distinct background and parent already has a different background
-            $parentHasBg = !empty($settings['background_background']) || !empty($settings['background_color']);
-            $childHasBg = !empty($singleChild['style']['background']);
-            if ($parentHasBg && $childHasBg && ($settings['background_color'] ?? '') !== $singleChild['style']['background'] && $childWType !== 'unwrap') {
+            $parentHasBg = !empty($settings['background_background']) || !empty($settings['background_color']) || !empty($settings['background_image']['url']);
+            $childHasBg = !empty($singleChild['style']['background'])
+                || is_array($singleChild['style']['gradient'] ?? null)
+                || !empty($singleChild['style']['backgroundImage'])
+                || !empty($singleChild['style']['backgroundImageDataUri']);
+            if ($parentHasBg && $childHasBg && ($settings['background_color'] ?? '') !== ($singleChild['style']['background'] ?? '') && $childWType !== 'unwrap') {
                 break;
             }
             $parentHasBorder = !empty($settings['border_border']) || !empty($settings['border_width']);
@@ -351,7 +366,7 @@ final class TranspilerV3
                 $settings['flex_wrap_tablet'] = 'wrap';
             }
 
-            // If parent had no background but child does, absorb child's background (classic or gradient)
+            // If parent had no background but child does, absorb child's background (classic, gradient, or image)
             if (!$parentHasBg) {
                 if (is_array($singleChild['style']['gradient'] ?? null)) {
                     $g = $singleChild['style']['gradient'];
@@ -366,6 +381,16 @@ final class TranspilerV3
                     $settings['background_background'] = 'classic';
                     $settings['background_color'] = $singleChild['style']['background'];
                     $this->bindColor($settings, $globals, 'background_color', (string) $singleChild['style']['background']);
+                }
+                if (!empty($singleChild['style']['backgroundImage']) || !empty($singleChild['style']['backgroundImageDataUri'])) {
+                    $bgMedia = $this->resolveStyleBgMedia($singleChild['style']);
+                    if ($bgMedia['url'] !== '' || $bgMedia['id'] > 0) {
+                        $settings['background_background'] = 'classic';
+                        $settings['background_image'] = $bgMedia;
+                        $settings['background_size'] = 'cover';
+                        $settings['background_position'] = 'center center';
+                        $settings['background_repeat'] = 'no-repeat';
+                    }
                 }
             }
 
@@ -527,14 +552,24 @@ final class TranspilerV3
     /** @param array<string,mixed> $node @return array<string,mixed> */
     private function buildSiteLogo(array $node): array
     {
-        $sha = (string) ($node['image']['sha256'] ?? $node['svg']['sha256'] ?? '');
-        $fallback = (string) ($node['image']['dataUri'] ?? '');
-        $media = $sha !== '' ? $this->resolveMedia($sha, $fallback) : ['id' => 0, 'url' => ''];
+        $media = $this->resolveNodeMedia($node);
         $w = max(20, (int) ($node['layout']['width'] ?? 120));
 
         $isProActive = defined('ELEMENTOR_PRO_VERSION') || class_exists('\\ElementorPro\\Plugin');
 
         if ($isProActive) {
+            if ($media['url'] === '' && !empty($node['svg']['markup'])) {
+                $cleanSvg = AssetStore::sanitizeSvg((string) $node['svg']['markup']);
+                if ($cleanSvg !== '') {
+                    $svgSha = (string) ($node['svg']['sha256'] ?? '');
+                    $stored = $this->assets->storeBase64Asset($svgSha, base64_encode($cleanSvg), 'image/svg+xml', (string) ($node['content']['name'] ?? 'Site Logo'));
+                    if ($stored !== null && !empty($stored['url'])) {
+                        $media = ['id' => (int) ($stored['id'] ?? 0), 'url' => (string) $stored['url']];
+                    } else {
+                        $media = ['id' => 0, 'url' => 'data:image/svg+xml;base64,' . base64_encode($cleanSvg)];
+                    }
+                }
+            }
             $settings = [
                 'custom_image' => $media,
                 'use_custom_image' => 'yes',
@@ -578,9 +613,7 @@ final class TranspilerV3
     /** @param array<string,mixed> $node @return array<string,mixed> */
     private function buildImage(array $node): array
     {
-        $sha = (string) ($node['image']['sha256'] ?? $node['svg']['sha256'] ?? '');
-        $fallback = (string) ($node['image']['dataUri'] ?? '');
-        $media = $this->resolveMedia($sha, $fallback);
+        $media = $this->resolveNodeMedia($node);
         $w = (int) ($node['layout']['width'] ?? 0);
         $h = (int) ($node['layout']['height'] ?? 0);
 
@@ -686,11 +719,11 @@ final class TranspilerV3
     private function buildBoxWidget(array $node, array $nodes, string $wType): array
     {
         $content = is_array($node['content'] ?? null) ? $node['content'] : [];
+        $texts = $this->collectSubtreeTexts($node, $nodes);
         $title = (string) ($content['title_text'] ?? '');
         $desc = (string) ($content['description_text'] ?? '');
 
         if ($title === '') {
-            $texts = $this->collectSubtreeTexts($node, $nodes);
             $title = (string) ($texts[0]['text']['characters'] ?? $content['name'] ?? 'Feature Title');
             $desc = (string) ($texts[1]['text']['characters'] ?? '');
         }
@@ -703,52 +736,100 @@ final class TranspilerV3
             'position' => $pos,
         ];
 
-        $sha = (string) ($node['raster']['sha256'] ?? $node['svg']['sha256'] ?? '');
-        $fallback = (string) ($node['raster']['dataUri'] ?? '');
-        $media = $sha !== '' ? $this->resolveMedia($sha, $fallback) : ['id' => 0, 'url' => ''];
-
-        if ($wType === 'image-box') {
-            if (!empty($node['raster']['dataUri'])) {
-                $media = ['id' => 0, 'url' => (string) $node['raster']['dataUri']];
-            }
-            if ($media['url'] === '') {
-                $imgs = $this->collectSubtreeImages($node, $nodes);
-                $media = !empty($imgs[0]) ? $this->resolveMedia((string) ($imgs[0]['sha256'] ?? ''), (string) ($imgs[0]['dataUri'] ?? '')) : ['id' => 0, 'url' => ''];
-            }
-            $settings['image'] = $media;
-        } else {
-            // Icon box
-            if (!empty($media['url'])) {
-                $settings['selected_icon'] = ['value' => $media['url'], 'library' => 'svg'];
-            } elseif (!empty($node['svg']['markup'])) {
-                $cleanSvg = AssetStore::sanitizeSvg((string) $node['svg']['markup']);
-                if ($cleanSvg !== '') {
-                    $settings['selected_icon'] = ['value' => $cleanSvg, 'library' => 'svg'];
-                } else {
-                    $settings['selected_icon'] = ['value' => 'fas fa-star', 'library' => 'fa-solid'];
-                }
-            } else {
-                $settings['selected_icon'] = ['value' => 'fas fa-star', 'library' => 'fa-solid'];
-            }
-        }
-
         $globals = [];
-        $titleText = is_array($texts[0]['text'] ?? null) ? $texts[0]['text'] : [];
-        $descText = is_array($texts[1]['text'] ?? null) ? $texts[1]['text'] : [];
+        $titleText = is_array($content['titleTypography'] ?? null)
+            ? $content['titleTypography']
+            : (is_array($node['text'] ?? null) ? $node['text'] : (is_array($texts[0]['text'] ?? null) ? $texts[0]['text'] : []));
+        $descText = is_array($content['descriptionTypography'] ?? null)
+            ? $content['descriptionTypography']
+            : (is_array($texts[1]['text'] ?? null) ? $texts[1]['text'] : []);
+        $responsive = is_array($node['responsive'] ?? null) ? $node['responsive'] : [];
+
         if (!empty($titleText['color'])) {
             $this->bindColor($settings, $globals, 'title_color', (string) $titleText['color']);
         }
         if (!empty($titleText)) {
-            $this->bindTypography($settings, $globals, 'title_typography', $titleText, is_array($node['responsive'] ?? null) ? $node['responsive'] : []);
+            $this->bindTypography($settings, $globals, 'title_typography', $titleText, $responsive);
         }
         if (!empty($descText['color'])) {
             $this->bindColor($settings, $globals, 'description_color', (string) $descText['color']);
         }
         if (!empty($descText)) {
-            $this->bindTypography($settings, $globals, 'description_typography', $descText, is_array($node['responsive'] ?? null) ? $node['responsive'] : []);
+            $this->bindTypography($settings, $globals, 'description_typography', $descText, $responsive);
         }
 
-        return $this->wrapElement('widget', $wType, $settings, $globals, []);
+        $finalWidgetType = $wType;
+
+        if ($wType === 'image-box') {
+            $media = $this->resolveNodeMedia($node, ['raster', 'image', 'style', 'svg']);
+            if ($media['id'] === 0 && $media['url'] === '') {
+                $imgs = $this->collectSubtreeImages($node, $nodes);
+                if (!empty($imgs[0])) {
+                    $media = $this->resolveMedia((string) ($imgs[0]['sha256'] ?? ''), (string) ($imgs[0]['dataUri'] ?? ''));
+                }
+            }
+            $settings['image'] = $media;
+        } else {
+            // Icon box: check uploaded SVG first, then inline SVG markup, then raster fallback to image-box
+            $svgSha = (string) ($node['svg']['sha256'] ?? '');
+            $svgMedia = $svgSha !== '' ? $this->resolveMedia($svgSha, '') : ['id' => 0, 'url' => ''];
+
+            if ($svgMedia['id'] > 0 && $svgMedia['url'] !== '') {
+                $settings['selected_icon'] = [
+                    'value' => ['id' => (int) $svgMedia['id'], 'url' => (string) $svgMedia['url']],
+                    'library' => 'svg',
+                ];
+            } elseif (!empty($node['svg']['markup'])) {
+                $cleanSvg = AssetStore::sanitizeSvg((string) $node['svg']['markup']);
+                if ($cleanSvg !== '') {
+                    $stored = $this->assets->storeBase64Asset($svgSha, base64_encode($cleanSvg), 'image/svg+xml', $title);
+                    if ($stored !== null && (int) ($stored['id'] ?? 0) > 0 && !empty($stored['url'])) {
+                        $settings['selected_icon'] = [
+                            'value' => ['id' => (int) $stored['id'], 'url' => (string) $stored['url']],
+                            'library' => 'svg',
+                        ];
+                    } else {
+                        // Inline SVG Flexbox container fallback (never put raw <svg> inside selected_icon['value'])
+                        $iconW = max(16, (int) ($node['svg']['width'] ?? 32));
+                        $iconH = max(16, (int) ($node['svg']['height'] ?? 32));
+                        $children = [
+                            $this->wrapElement('widget', 'html', [
+                                'html' => sprintf(
+                                    '<div class="f2e-inline-svg" style="display:inline-flex;align-items:center;justify-content:center;width:%dpx;height:%dpx;line-height:0;">%s</div>',
+                                    $iconW,
+                                    $iconH,
+                                    $cleanSvg
+                                ),
+                            ], [], []),
+                            $this->wrapElement('widget', 'text-editor', [
+                                'editor' => '<h4 style="margin:0 0 6px 0;">' . self::escapeHtml($title) . '</h4>'
+                                    . ($desc !== '' ? '<p style="margin:0;">' . self::escapeHtml($desc) . '</p>' : ''),
+                                'align' => $pos === 'left' ? 'left' : 'center',
+                            ], [], []),
+                        ];
+                        return $this->wrapElement('container', null, [
+                            'container_type' => 'flex',
+                            'flex_direction' => $pos === 'left' ? 'row' : 'column',
+                            'flex_align_items' => $pos === 'left' ? 'flex-start' : 'center',
+                            'flex_gap' => ['unit' => 'px', 'size' => 12, 'column' => '12', 'row' => '12', 'isLinked' => true],
+                        ], [], $children, true);
+                    }
+                } else {
+                    $settings['selected_icon'] = ['value' => 'fas fa-star', 'library' => 'fa-solid'];
+                }
+            } else {
+                // Check raster fallback: emit image-box instead of putting PNG/WebP into library => 'svg'
+                $rasterMedia = $this->resolveNodeMedia($node, ['raster', 'image', 'style']);
+                if ($rasterMedia['id'] > 0 || $rasterMedia['url'] !== '') {
+                    $finalWidgetType = 'image-box';
+                    $settings['image'] = $rasterMedia;
+                } else {
+                    $settings['selected_icon'] = ['value' => 'fas fa-star', 'library' => 'fa-solid'];
+                }
+            }
+        }
+
+        return $this->wrapElement('widget', $finalWidgetType, $settings, $globals, []);
     }
 
     /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
@@ -819,8 +900,20 @@ final class TranspilerV3
         $items = [];
         $panels = [];
         $extractedItems = is_array($node['content']['accordionItems'] ?? null) ? $node['content']['accordionItems'] : [];
-        $childIds = is_array($node['children'] ?? null) ? $node['children'] : [];
-        $count = max(count($childIds), count($extractedItems));
+        $rawChildIds = is_array($node['children'] ?? null) ? $node['children'] : [];
+        $childIds = [];
+        foreach ($rawChildIds as $rcid) {
+            $cNode = $nodes[(string) $rcid] ?? null;
+            if (!is_array($cNode)) {
+                continue;
+            }
+            $cw = (string) ($cNode['widget'] ?? '');
+            if (in_array($cw, ['icon', 'divider', 'spacer', 'skip'], true)) {
+                continue;
+            }
+            $childIds[] = $rcid;
+        }
+        $count = !empty($extractedItems) ? count($extractedItems) : count($childIds);
 
         $firstTitleTypo = null;
         $activeTitleColor = null;
@@ -878,7 +971,7 @@ final class TranspilerV3
             $bTypo = $bodyTypo ?? $firstBodyTypo ?? ['fontFamily' => 'Inter', 'fontWeight' => '400', 'fontSize' => 16, 'lineHeight' => 24, 'color' => 'rgba(0, 0, 0, 0.7)'];
 
             $textWidget = $this->wrapElement('widget', 'text-editor', [
-                'editor' => '<p style="margin:0;">' . $effectiveBody . '</p>',
+                'editor' => '<p style="margin:0;">' . self::escapeHtml($effectiveBody) . '</p>',
                 'align' => 'left',
                 'text_color' => (string) ($bTypo['color'] ?? 'rgba(0, 0, 0, 0.7)'),
                 'typography_typography' => 'custom',
@@ -973,12 +1066,17 @@ final class TranspilerV3
     {
         $imgs = [];
         foreach ($this->collectSubtreeImages($node, $nodes) as $img) {
-            $imgs[] = $this->resolveMedia((string) ($img['sha256'] ?? ''), (string) ($img['dataUri'] ?? ''));
+            $resolved = $this->resolveMedia((string) ($img['sha256'] ?? ''), (string) ($img['dataUri'] ?? ''));
+            if ($resolved['id'] > 0 || $resolved['url'] !== '') {
+                $imgs[] = $resolved;
+            }
         }
-        $settings = $wType === 'image-carousel'
+        $isCarousel = str_contains($wType, 'carousel');
+        $finalWidget = $isCarousel ? 'image-carousel' : 'image-gallery';
+        $settings = $isCarousel
             ? ['carousel' => $imgs, 'slides_to_show' => '3', 'navigation' => 'both']
             : ['wp_gallery' => $imgs, 'gallery_columns' => '3', 'open_lightbox' => 'yes'];
-        return $this->wrapElement('widget', $wType, $settings, [], []);
+        return $this->wrapElement('widget', $finalWidget, $settings, [], []);
     }
 
     /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
@@ -1218,7 +1316,7 @@ final class TranspilerV3
         $linkElements = [];
         foreach ($items as $idx => $label) {
             $linkElements[] = $this->wrapElement('widget', 'heading', [
-                'title' => sprintf('<a href="#" style="text-decoration:none;color:inherit;">%s</a>', esc_html($label)),
+                'title' => sprintf('<a href="#" style="text-decoration:none;color:inherit;">%s</a>', self::escapeHtml($label)),
                 'header_size' => 'custom',
                 'align' => 'left',
                 'title_color' => $node['text']['color'] ?? '#1E293B',
@@ -1229,7 +1327,7 @@ final class TranspilerV3
             ], [], []);
         }
 
-        return $this->wrapElement('container', 'container', [
+        return $this->wrapElement('container', null, [
             'container_type' => 'flex',
             'flex_direction' => 'row',
             'flex_wrap' => 'nowrap',
@@ -1400,9 +1498,9 @@ final class TranspilerV3
             $this->bindColor($settings, $globals, 'background_color', (string) $style['background']);
         }
 
-        if (!empty($style['backgroundImage'])) {
-            $media = $this->resolveMedia((string) $style['backgroundImage'], (string) ($style['backgroundImageDataUri'] ?? ''));
-            if ($media['url'] !== '') {
+        if (!empty($style['backgroundImage']) || !empty($style['backgroundImageDataUri'])) {
+            $media = $this->resolveStyleBgMedia($style);
+            if ($media['url'] !== '' || $media['id'] > 0) {
                 $settings['background_background'] = 'classic';
                 $settings['background_image'] = $media;
                 $settings['background_size'] = 'cover';
@@ -1515,6 +1613,61 @@ final class TranspilerV3
         }
     }
 
+    private static function escapeHtml(string $value): string
+    {
+        return function_exists('esc_html')
+            ? esc_html($value)
+            : htmlspecialchars($value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+    }
+
+    /**
+     * @param array<string,mixed> $style
+     * @return array{id:int,url:string}
+     */
+    private function resolveStyleBgMedia(array $style): array
+    {
+        $bgRef = (string) ($style['backgroundImage'] ?? '');
+        $bgData = (string) ($style['backgroundImageDataUri'] ?? '');
+        $isDirectUrl = preg_match('/^(https?:\/\/|data:image\/)/i', $bgRef) === 1;
+        $sha = $isDirectUrl ? '' : $bgRef;
+        $fallback = $bgData !== '' ? $bgData : ($isDirectUrl ? $bgRef : '');
+        return ($sha !== '' || $fallback !== '') ? $this->resolveMedia($sha, $fallback) : ['id' => 0, 'url' => ''];
+    }
+
+    /**
+     * @param array<string,mixed> $node
+     * @param list<string> $order
+     * @return array{id:int,url:string}
+     */
+    private function resolveNodeMedia(array $node, array $order = ['image', 'raster', 'style', 'svg']): array
+    {
+        foreach ($order as $source) {
+            if ($source === 'style') {
+                $style = is_array($node['style'] ?? null) ? $node['style'] : [];
+                if (!empty($style['backgroundImage']) || !empty($style['backgroundImageDataUri'])) {
+                    $media = $this->resolveStyleBgMedia($style);
+                    if ($media['id'] > 0 || $media['url'] !== '') {
+                        return $media;
+                    }
+                }
+                continue;
+            }
+            $slot = $node[$source] ?? null;
+            if (!is_array($slot)) {
+                continue;
+            }
+            $sha = (string) ($slot['sha256'] ?? '');
+            $fallback = (string) ($slot['dataUri'] ?? '');
+            if ($sha !== '' || $fallback !== '') {
+                $media = $this->resolveMedia($sha, $fallback);
+                if ($media['id'] > 0 || $media['url'] !== '') {
+                    return $media;
+                }
+            }
+        }
+        return ['id' => 0, 'url' => ''];
+    }
+
     /** @return array{id:int,url:string} */
     private function resolveMedia(string $sha256, string $fallbackUrl = ''): array
     {
@@ -1571,8 +1724,18 @@ final class TranspilerV3
     {
         $out = [];
         $walk = function (array $n) use (&$walk, &$out, $nodes): void {
-            if (is_array($n['image'] ?? null)) {
+            if (is_array($n['image'] ?? null) && (!empty($n['image']['sha256']) || !empty($n['image']['dataUri']))) {
                 $out[] = $n['image'];
+            } elseif (is_array($n['raster'] ?? null) && (!empty($n['raster']['sha256']) || !empty($n['raster']['dataUri']))) {
+                $out[] = $n['raster'];
+            } elseif (!empty($n['style']['backgroundImage']) || !empty($n['style']['backgroundImageDataUri'])) {
+                $bgRef = (string) ($n['style']['backgroundImage'] ?? '');
+                $bgData = (string) ($n['style']['backgroundImageDataUri'] ?? '');
+                $isDirectUrl = preg_match('/^(https?:\/\/|data:image\/)/i', $bgRef) === 1;
+                $out[] = [
+                    'sha256' => $isDirectUrl ? '' : $bgRef,
+                    'dataUri' => $bgData !== '' ? $bgData : ($isDirectUrl ? $bgRef : ''),
+                ];
             }
             foreach ((array) ($n['children'] ?? []) as $cid) {
                 if (isset($nodes[(string) $cid]) && is_array($nodes[(string) $cid])) {

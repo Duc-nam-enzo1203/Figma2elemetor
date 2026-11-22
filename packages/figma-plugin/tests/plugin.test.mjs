@@ -93,11 +93,11 @@ test('Auto-Layout Fixer & Virtual Layout Inference for non-Auto-Layout frames', 
   assert.equal(inferred.padding.left, 40);
   assert.equal(inferred.padding.top, 30);
 
-  // Canvas Fixer mutates the frame into a real Figma HORIZONTAL Auto-Layout frame
+  // Non-destructive Canvas Analyzer must NOT mutate Figma layoutMode or shift the design
   const fixStats = fixAndOptimizeCanvasSelection([rowFrame]);
-  assert.equal(fixStats.convertedFrames, 1);
-  assert.equal(rowFrame.layoutMode, 'HORIZONTAL');
-  assert.equal(rowFrame.itemSpacing, 40);
+  assert.equal(fixStats.convertedFrames, 0);
+  assert.equal(fixStats.virtualLayoutFrames, 1);
+  assert.equal(rowFrame.layoutMode, 'NONE');
 });
 
 test('End-to-End Extraction & Compilation to Elementor v3, v4 Atomic, and Clipboard Ctrl+V', async () => {
@@ -1769,6 +1769,868 @@ test('Situations 4-Column Right-Only Border, Proportional Tablet Padding & Zero 
 
   // 3. No fake __globals__ injected & stripped
   assert.equal(out.fidelityReport.fixes.filter((f) => f.detail.includes('__globals__')).length, 0);
+});
+
+test('FAQ Card Nested Accordion: Preserves single item (no fake Plus wrap item), #FFFFFF bg, 1px #E2E8F0 border, 14px radius, 20px padding & #ECF6EE/#16A34A Plus icon circle', async () => {
+  const faq1 = {
+    id: '47:6642',
+    name: 'FAQ 1',
+    type: 'FRAME',
+    visible: true,
+    width: 560,
+    height: 64,
+    layoutMode: 'HORIZONTAL',
+    paddingTop: 20,
+    paddingRight: 20,
+    paddingBottom: 20,
+    paddingLeft: 20,
+    itemSpacing: 16,
+    getCSSAsync: async () => ({
+      display: 'flex',
+      height: '64px',
+      padding: '20px',
+      'align-items': 'center',
+      gap: '16px',
+      'border-radius': '14px',
+      border: '1px solid #E2E8F0',
+      background: '#FFF',
+    }),
+    children: [
+      {
+        id: '47:6643',
+        name: 'Question',
+        type: 'TEXT',
+        visible: true,
+        characters: 'Lắp thiết bị có ảnh hưởng bảo hành xe không?',
+        getCSSAsync: async () => ({
+          color: '#000',
+          'font-family': 'Inter',
+          'font-size': '16px',
+          'font-weight': '500',
+          'line-height': '24px /* 150% */',
+        }),
+      },
+      {
+        id: '47:6644',
+        name: 'Plus wrap',
+        type: 'FRAME',
+        visible: true,
+        width: 32,
+        height: 32,
+        getCSSAsync: async () => ({
+          display: 'flex',
+          width: '32px',
+          height: '32px',
+          'border-radius': '16px',
+          background: '#ECF6EE',
+        }),
+        children: [
+          {
+            id: '47:6645',
+            name: 'Plus',
+            type: 'VECTOR',
+            visible: true,
+            width: 14,
+            height: 14,
+            getCSSAsync: async () => ({
+              width: '14px',
+              height: '14px',
+              'stroke-width': '1.75px',
+              stroke: '#16A34A',
+            }),
+          },
+        ],
+      },
+    ],
+  };
+
+  const { document } = await extractDesignSelection([faq1], { fileKey: 'faq-card-test' });
+  const out = compileElementorClipboard(document);
+  const acc = out.elements[0];
+  const s = acc.settings;
+
+  assert.equal(acc.widgetType, 'nested-accordion');
+  assert.equal(s.items.length, 1);
+  assert.equal(s.items[0].item_title, 'Lắp thiết bị có ảnh hưởng bảo hành xe không?');
+  assert.equal(acc.elements.length, 1);
+  assert.equal(s.default_state, 'all_collapsed');
+  assert.equal(s.accordion_padding.top, '20');
+  assert.equal(s.accordion_padding.right, '20');
+  assert.equal(s.accordion_padding.bottom, '20');
+  assert.equal(s.accordion_padding.left, '20');
+  assert.equal(s.accordion_background_normal_background, 'classic');
+  assert.equal(s.accordion_background_normal_color, '#FFFFFF');
+  assert.equal(s.accordion_border_normal_border, 'solid');
+  assert.equal(s.accordion_border_normal_width.top, '1');
+  assert.equal(s.accordion_border_normal_width.right, '1');
+  assert.equal(s.accordion_border_normal_width.bottom, '1');
+  assert.equal(s.accordion_border_normal_width.left, '1');
+  assert.equal(s.accordion_border_normal_color, '#E2E8F0');
+  assert.equal(s.accordion_border_radius.top, '14');
+  assert.equal(s.normal_icon_color, '#16A34A');
+  assert.equal(s.active_icon_color, '#16A34A');
+  assert.ok(s.custom_css.includes('background: #ECF6EE'));
+  assert.ok(s.custom_css.includes('border-radius: 16px'));
+});
+
+test('Contact Section preserves styled Contact band card, padding-top:0, icon-list colors/icons, and multi-field Form', async () => {
+  const section = {
+    id: '47:6683',
+    name: 'Section',
+    type: 'FRAME',
+    visible: true,
+    width: 1440,
+    height: 600,
+    layoutMode: 'HORIZONTAL',
+    paddingTop: 0,
+    paddingRight: 100,
+    paddingBottom: 80,
+    paddingLeft: 100,
+    itemSpacing: 64,
+    getCSSAsync: async () => ({
+      display: 'flex',
+      padding: '0 100px 80px 100px',
+      'justify-content': 'center',
+      'align-items': 'flex-start',
+      gap: '64px',
+      background: '#FFF',
+    }),
+    children: [
+      {
+        id: '47:6684',
+        name: 'Contact band',
+        type: 'FRAME',
+        visible: true,
+        width: 1240,
+        height: 520,
+        layoutMode: 'HORIZONTAL',
+        layoutGrow: 1,
+        paddingTop: 32,
+        paddingRight: 32,
+        paddingBottom: 32,
+        paddingLeft: 32,
+        itemSpacing: 64,
+        cornerRadius: 20,
+        getCSSAsync: async () => ({
+          display: 'flex',
+          padding: '32px',
+          'align-items': 'flex-start',
+          gap: '64px',
+          flex: '1 0 0',
+          'border-radius': '20px',
+          border: '1.5px solid #64A14F',
+          background: 'linear-gradient(97deg, #F6F5F1 0%, #ECF6EE 100%)',
+        }),
+        children: [
+          {
+            id: '47:6685',
+            name: 'Section header',
+            type: 'FRAME',
+            visible: true,
+            width: 433,
+            height: 400,
+            layoutMode: 'VERTICAL',
+            itemSpacing: 32,
+            children: [
+              {
+                id: '47:6695',
+                name: 'Container',
+                type: 'FRAME',
+                visible: true,
+                width: 433,
+                height: 120,
+                layoutMode: 'VERTICAL',
+                itemSpacing: 12,
+                getPluginData: (k) => (k === 'f2e-widget' ? 'icon-list' : ''),
+                children: [
+                  {
+                    id: '47:6696',
+                    name: 'Link',
+                    type: 'FRAME',
+                    visible: true,
+                    layoutMode: 'HORIZONTAL',
+                    children: [
+                      {
+                        id: '47:6697',
+                        name: 'Icon',
+                        type: 'FRAME',
+                        visible: true,
+                        width: 20,
+                        height: 20,
+                        children: [
+                          {
+                            id: '47:6698',
+                            name: 'Vector',
+                            type: 'VECTOR',
+                            visible: true,
+                            width: 16,
+                            height: 16,
+                            getCSSAsync: async () => ({ stroke: '#16A34A', 'stroke-width': '1.5px' }),
+                          },
+                        ],
+                      },
+                      {
+                        id: '47:6699',
+                        name: 'Text',
+                        type: 'TEXT',
+                        visible: true,
+                        characters: 'Địa chỉ: 123 Nguyễn Trãi, Hà Nội',
+                        getCSSAsync: async () => ({ color: '#000', 'font-size': '14px', 'font-family': 'Inter' }),
+                      },
+                    ],
+                  },
+                  {
+                    id: '47:6700',
+                    name: 'Link',
+                    type: 'FRAME',
+                    visible: true,
+                    layoutMode: 'HORIZONTAL',
+                    children: [
+                      {
+                        id: '47:6701',
+                        name: 'Icon',
+                        type: 'FRAME',
+                        visible: true,
+                        width: 20,
+                        height: 20,
+                        children: [
+                          {
+                            id: '47:6702',
+                            name: 'Vector',
+                            type: 'VECTOR',
+                            visible: true,
+                            width: 16,
+                            height: 16,
+                            getCSSAsync: async () => ({ stroke: '#16A34A', 'stroke-width': '1.5px' }),
+                          },
+                        ],
+                      },
+                      {
+                        id: '47:6703',
+                        name: 'Text',
+                        type: 'TEXT',
+                        visible: true,
+                        characters: 'Hotline: 0912 345 678',
+                        getCSSAsync: async () => ({ color: '#000', 'font-size': '14px', 'font-family': 'Inter' }),
+                      },
+                    ],
+                  },
+                  {
+                    id: '47:6704',
+                    name: 'Link',
+                    type: 'FRAME',
+                    visible: true,
+                    layoutMode: 'HORIZONTAL',
+                    children: [
+                      {
+                        id: '47:6705',
+                        name: 'Icon',
+                        type: 'FRAME',
+                        visible: true,
+                        width: 20,
+                        height: 20,
+                        children: [
+                          {
+                            id: '47:6706',
+                            name: 'Vector',
+                            type: 'VECTOR',
+                            visible: true,
+                            width: 16,
+                            height: 16,
+                            getCSSAsync: async () => ({ stroke: '#16A34A', 'stroke-width': '1.5px' }),
+                          },
+                        ],
+                      },
+                      {
+                        id: '47:6707',
+                        name: 'Text',
+                        type: 'TEXT',
+                        visible: true,
+                        characters: 'contact@pinagroup.vn',
+                        getCSSAsync: async () => ({ color: '#000', 'font-size': '14px', 'font-family': 'Inter' }),
+                      },
+                    ],
+                  },
+                ],
+              },
+            ],
+          },
+          {
+            id: '47:6710',
+            name: 'Form',
+            type: 'FRAME',
+            visible: true,
+            width: 679,
+            height: 450,
+            layoutMode: 'VERTICAL',
+            layoutGrow: 1,
+            itemSpacing: 16,
+            getPluginData: (k) => (k === 'f2e-widget' ? 'form' : ''),
+            children: [
+              {
+                id: '47:6711',
+                name: 'Fields',
+                type: 'FRAME',
+                visible: true,
+                width: 679,
+                height: 360,
+                layoutMode: 'VERTICAL',
+                itemSpacing: 16,
+                children: [
+                  {
+                    id: '47:6712',
+                    name: 'Row',
+                    type: 'FRAME',
+                    visible: true,
+                    width: 679,
+                    height: 76,
+                    layoutMode: 'HORIZONTAL',
+                    itemSpacing: 16,
+                    children: [
+                      {
+                        id: '47:6713',
+                        name: 'Field 1',
+                        type: 'FRAME',
+                        visible: true,
+                        width: 330,
+                        height: 76,
+                        layoutMode: 'VERTICAL',
+                        children: [
+                          {
+                            id: '47:6714',
+                            name: 'Label',
+                            type: 'FRAME',
+                            visible: true,
+                            layoutMode: 'HORIZONTAL',
+                            children: [
+                              {
+                                id: '47:6715',
+                                name: 'Họ và tên',
+                                type: 'TEXT',
+                                visible: true,
+                                characters: 'Họ và tên',
+                                getCSSAsync: async () => ({ color: '#1E293B', 'font-size': '14px', 'font-weight': '500' }),
+                              },
+                              {
+                                id: '47:6716',
+                                name: '*',
+                                type: 'TEXT',
+                                visible: true,
+                                characters: '*',
+                                getCSSAsync: async () => ({ color: '#FF0000', 'font-size': '14px' }),
+                              },
+                            ],
+                          },
+                          {
+                            id: '47:6717',
+                            name: 'Input',
+                            type: 'FRAME',
+                            visible: true,
+                            width: 330,
+                            height: 44,
+                            getCSSAsync: async () => ({
+                              background: '#FFFFFF',
+                              border: '1px solid #CBD5E1',
+                              'border-radius': '10px',
+                            }),
+                            children: [
+                              {
+                                id: '47:6718',
+                                name: 'Placeholder',
+                                type: 'TEXT',
+                                visible: true,
+                                characters: 'Nhập họ và tên',
+                                getCSSAsync: async () => ({ color: '#64748B', 'font-size': '14px' }),
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                      {
+                        id: '47:6719',
+                        name: 'Field 2',
+                        type: 'FRAME',
+                        visible: true,
+                        width: 330,
+                        height: 76,
+                        layoutMode: 'VERTICAL',
+                        children: [
+                          {
+                            id: '47:6720',
+                            name: 'Số điện thoại *',
+                            type: 'TEXT',
+                            visible: true,
+                            characters: 'Số điện thoại *',
+                            getCSSAsync: async () => ({ color: '#1E293B', 'font-size': '14px', 'font-weight': '500' }),
+                          },
+                          {
+                            id: '47:6721',
+                            name: 'Input',
+                            type: 'FRAME',
+                            visible: true,
+                            width: 330,
+                            height: 44,
+                            getCSSAsync: async () => ({
+                              background: '#FFFFFF',
+                              border: '1px solid #CBD5E1',
+                              'border-radius': '10px',
+                            }),
+                            children: [
+                              {
+                                id: '47:6722',
+                                name: 'Placeholder',
+                                type: 'TEXT',
+                                visible: true,
+                                characters: 'Nhập số điện thoại',
+                                getCSSAsync: async () => ({ color: '#64748B', 'font-size': '14px' }),
+                              },
+                            ],
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                  {
+                    id: '47:6723',
+                    name: 'Field 3',
+                    type: 'FRAME',
+                    visible: true,
+                    width: 679,
+                    height: 140,
+                    layoutMode: 'VERTICAL',
+                    children: [
+                      {
+                        id: '47:6724',
+                        name: 'Label',
+                        type: 'FRAME',
+                        visible: true,
+                        layoutMode: 'HORIZONTAL',
+                        children: [
+                          {
+                            id: '47:6724a',
+                            name: 'Nội dung',
+                            type: 'TEXT',
+                            visible: true,
+                            characters: 'Nội dung cần tư vấn',
+                            getCSSAsync: async () => ({ color: '#1E293B', 'font-size': '14px', 'font-weight': '500' }),
+                          },
+                          {
+                            id: '47:6724b',
+                            name: '*',
+                            type: 'TEXT',
+                            visible: true,
+                            characters: '*',
+                            getCSSAsync: async () => ({ color: '#FF0000', 'font-size': '14px' }),
+                          },
+                        ],
+                      },
+                      {
+                        id: '47:6725',
+                        name: 'Textarea',
+                        type: 'FRAME',
+                        visible: true,
+                        width: 679,
+                        height: 100,
+                        getCSSAsync: async () => ({
+                          background: '#FFFFFF',
+                          border: '1px solid #CBD5E1',
+                          'border-radius': '10px',
+                        }),
+                        children: [
+                          {
+                            id: '47:6726',
+                            name: 'Placeholder',
+                            type: 'TEXT',
+                            visible: true,
+                            characters: 'Nhập nhu cầu của bạn...',
+                            getCSSAsync: async () => ({ color: '#64748B', 'font-size': '14px' }),
+                          },
+                        ],
+                      },
+                    ],
+                  },
+                ],
+              },
+              {
+                id: '47:6727',
+                name: 'Submit Button',
+                type: 'FRAME',
+                visible: true,
+                width: 679,
+                height: 48,
+                getPluginData: (k) => (k === 'f2e-widget' ? 'button' : ''),
+                getCSSAsync: async () => ({
+                  background: '#16A34A',
+                  'border-radius': '12px',
+                  padding: '12px 24px',
+                }),
+                children: [
+                  {
+                    id: '47:6728',
+                    name: 'Gửi yêu cầu tư vấn',
+                    type: 'TEXT',
+                    visible: true,
+                    characters: 'Gửi yêu cầu tư vấn',
+                    getCSSAsync: async () => ({ color: '#FFFFFF', 'font-size': '16px', 'font-weight': '600' }),
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+
+  const { document } = await extractDesignSelection([section], { fileKey: 'contact-band-test' });
+  const out = compileElementorClipboard(document);
+
+  // 1. Root Section preserved with padding-top: 0 and #FFFFFF background
+  assert.equal(out.elements.length, 1);
+  const rootEl = out.elements[0];
+  assert.equal(rootEl.elType, 'container');
+  assert.equal(rootEl.settings.padding.top, '0');
+  assert.equal(rootEl.settings.padding.bottom, '80');
+  assert.equal(rootEl.settings.background_background, 'classic');
+  assert.equal(rootEl.settings.background_color, '#FFFFFF');
+
+  // 2. Inner Contact band NOT unwrapped: keeps gradient, border, radius, padding 32, and 100% inner width
+  assert.equal(rootEl.elements.length, 1);
+  const bandEl = rootEl.elements[0];
+  assert.equal(bandEl.elType, 'container');
+  assert.equal(bandEl.settings._title, 'Contact band');
+  assert.equal(bandEl.settings.width.size, 100);
+  assert.equal(bandEl.settings.background_background, 'gradient');
+  assert.equal(bandEl.settings.background_color, '#F6F5F1');
+  assert.equal(bandEl.settings.background_color_b, '#ECF6EE');
+  assert.equal(bandEl.settings.border_border, 'solid');
+  assert.equal(bandEl.settings.border_color, '#64A14F');
+  assert.equal(bandEl.settings.border_radius.top, '20');
+  assert.equal(bandEl.settings.padding.top, '32');
+
+  // 3. Icon list has #16A34A icon color and semantic FA icons
+  const headerEl = bandEl.elements[0];
+  const iconListEl = headerEl.elements[0];
+  assert.equal(iconListEl.widgetType, 'icon-list');
+  assert.equal(iconListEl.settings.icon_color, '#16A34A');
+  assert.equal(iconListEl.settings.icon_list[0].selected_icon.value, 'fas fa-map-marker-alt');
+  assert.equal(iconListEl.settings.icon_list[1].selected_icon.value, 'fas fa-phone-alt');
+  assert.equal(iconListEl.settings.icon_list[2].selected_icon.value, 'fas fa-envelope');
+
+  // 4. Form extracts 3 fields (2 in 50% row + 1 textarea), required=true, mark_required=yes, no red #FF0000 input text
+  const formEl = bandEl.elements[1];
+  assert.equal(formEl.widgetType, 'form');
+  assert.equal(formEl.settings._flex_size, 'grow');
+  assert.equal(formEl.settings.form_fields.length, 3);
+  assert.equal(formEl.settings.form_fields[0].field_label, 'Họ và tên');
+  assert.equal(formEl.settings.form_fields[0].required, 'true');
+  assert.equal(formEl.settings.form_fields[0].width, '50');
+  assert.equal(formEl.settings.form_fields[1].field_type, 'tel');
+  assert.equal(formEl.settings.form_fields[1].required, 'true');
+  assert.equal(formEl.settings.form_fields[1].width, '50');
+  assert.equal(formEl.settings.form_fields[2].field_type, 'textarea');
+  assert.equal(formEl.settings.form_fields[2].width, '100');
+  assert.equal(formEl.settings.mark_required, 'yes');
+  assert.equal(formEl.settings.label_color, '#1E293B');
+  assert.equal(formEl.settings.field_text_color, '#64748B');
+  assert.equal(formEl.settings.field_background_color, '#FFFFFF');
+  assert.equal(formEl.settings.field_border_color, '#CBD5E1');
+  assert.equal(formEl.settings.button_text, 'Gửi yêu cầu tư vấn');
+  assert.equal(formEl.settings.button_background_color, '#16A34A');
+});
+
+test('Dev Mode Design System Auto-Synthesis & Base64 Round-trip for WebP Compression', async () => {
+  const { bytesToBase64, base64ToBytes } = await import('../src/utils/crypto.js');
+  const { extractLocalDesignSystem } = await import('../src/extraction/extractor.js');
+
+  // 1. Verify base64ToBytes round-trip used by on-the-spot WebP compressor
+  const sampleBytes = new Uint8Array([82, 73, 70, 70, 0, 255, 128, 64, 17, 42]);
+  const b64 = bytesToBase64(sampleBytes);
+  const decoded = base64ToBytes(b64);
+  assert.deepEqual([...decoded], [...sampleBytes]);
+
+  // 2. Mock Figma with ZERO Local Variables/Styles — must auto-synthesize Design System from Dev Mode CSS & selection!
+  const emptyFigma = {
+    variables: {
+      getLocalVariablesAsync: async () => [],
+      getLocalVariableCollectionsAsync: async () => [],
+    },
+    getLocalPaintStylesAsync: async () => [],
+    getLocalTextStylesAsync: async () => [],
+  };
+
+  const mockFrame = {
+    id: '900:1',
+    name: 'Hero Section',
+    type: 'FRAME',
+    visible: true,
+    width: 1440,
+    height: 600,
+    getCSSAsync: async () => ({ background: '#FFFFFF' }),
+    children: [
+      {
+        id: '900:2',
+        name: 'Hero Title',
+        type: 'TEXT',
+        visible: true,
+        characters: 'Giải pháp GPS thông minh',
+        getCSSAsync: async () => ({
+          color: 'var(--ink-dark, #0F172A)',
+          'font-family': '"Bricolage Grotesque", sans-serif',
+          'font-size': '44px',
+          'font-weight': '700',
+          'line-height': '52px',
+        }),
+      },
+      {
+        id: '900:3',
+        name: 'Body Copy',
+        type: 'TEXT',
+        visible: true,
+        characters: 'Theo dõi vị trí xe theo thời gian thực.',
+        getCSSAsync: async () => ({
+          color: '#334155',
+          'font-family': 'Inter',
+          'font-size': '16px',
+          'font-weight': '400',
+          'line-height': '24px',
+        }),
+      },
+      {
+        id: '900:4',
+        name: 'CTA Button',
+        type: 'FRAME',
+        visible: true,
+        width: 180,
+        height: 48,
+        cornerRadius: 12,
+        getCSSAsync: async () => ({
+          background: 'var(--brand-green, #16A34A)',
+          'border-radius': '12px',
+        }),
+        children: [
+          {
+            id: '900:5',
+            name: 'Btn Text',
+            type: 'TEXT',
+            visible: true,
+            characters: 'Đăng ký ngay',
+            getCSSAsync: async () => ({
+              color: '#FFFFFF',
+              'font-family': 'Inter',
+              'font-size': '15px',
+              'font-weight': '600',
+            }),
+          },
+        ],
+      },
+    ],
+  };
+
+  const ds = await extractLocalDesignSystem(emptyFigma, [mockFrame]);
+  assert.ok(ds.colors.length >= 3, 'Should synthesize colors from Dev Mode CSS');
+  const primaryColor = ds.colors.find((c) => c.role === 'primary');
+  assert.ok(primaryColor, 'Should auto-assign primary role');
+  assert.equal(primaryColor.value, '#16A34A');
+  assert.equal(primaryColor.name, 'Brand Green');
+  assert.equal(primaryColor.source, 'devmode');
+
+  const textColor = ds.colors.find((c) => c.role === 'text');
+  assert.ok(textColor, 'Should auto-assign text role');
+  assert.equal(textColor.value, '#0F172A');
+
+  const h1 = ds.typography.find((t) => t.role === 'h1');
+  assert.ok(h1, 'Should auto-synthesize H1 typography');
+  assert.equal(h1.fontFamily, 'Bricolage Grotesque');
+  assert.equal(h1.fontSize, 44);
+  assert.equal(h1.fontWeight, '700');
+
+  const body = ds.typography.find((t) => t.role === 'body');
+  assert.ok(body, 'Should auto-synthesize Body typography');
+  assert.equal(body.fontSize, 16);
+  assert.ok(ds.themeStyles.typography.h1, 'Should populate themeStyles.typography.h1');
+  assert.ok(ds.themeStyles.typography.body, 'Should populate themeStyles.typography.body');
+});
+
+test('Composite Background Baking & Non-Destructive Analysis: 16x9 Hero bakes 5 BG layers into 1 Container background without mutating Figma canvas', async () => {
+  const { fixAndOptimizeCanvasSelection } = await import('../src/optimizer/auto-layout-fixer.js');
+
+  const pluginDataStore = new Map();
+  const makeNode = (base) => ({
+    visible: true,
+    getPluginData: (k) => pluginDataStore.get(`${base.id}:${k}`) || '',
+    setPluginData: (k, v) => pluginDataStore.set(`${base.id}:${k}`, v),
+    ...base,
+  });
+
+  // In Figma API: children[0] is bottom-most (lowest z-index), children[n-1] is top-most
+  const bgBase = makeNode({ id: 'hero:bg1', name: 'BG', type: 'RECTANGLE', x: 0, y: 0, width: 1440, height: 810 });
+  const bgPhoto = makeNode({ id: 'hero:bg2', name: 'BG', type: 'GROUP', x: 0, y: 0, width: 1440, height: 810, children: [] });
+  const bgLine = makeNode({ id: 'hero:line', name: 'Line', type: 'GROUP', x: 0, y: 120, width: 1440, height: 600, children: [] });
+  const bgMain = makeNode({ id: 'hero:main', name: 'Main', type: 'GROUP', x: 880, y: 120, width: 500, height: 680, children: [] });
+  const bgOverlay = makeNode({ id: 'hero:rect', name: 'Rectangle 427', type: 'RECTANGLE', x: 0, y: 0, width: 1440, height: 810 });
+
+  const fgMenu = makeNode({
+    id: 'hero:menu',
+    name: 'Menu',
+    type: 'FRAME',
+    x: 420,
+    y: 36,
+    width: 600,
+    height: 40,
+    layoutMode: 'HORIZONTAL',
+    children: [
+      makeNode({ id: 'hero:m1', name: 'Giới thiệu', type: 'TEXT', characters: 'Giới thiệu', fontSize: 14 }),
+      makeNode({ id: 'hero:m2', name: 'Vị trí', type: 'TEXT', characters: 'Vị trí', fontSize: 14 }),
+    ],
+  });
+  const fgText = makeNode({
+    id: 'hero:text',
+    name: 'Text',
+    type: 'GROUP',
+    x: 420,
+    y: 160,
+    width: 480,
+    height: 220,
+    children: [
+      makeNode({ id: 'hero:h1', name: 'Headline', type: 'TEXT', characters: 'XANH thời thượng CHẠM tương lai', fontSize: 42 }),
+    ],
+  });
+  const fgGroup = makeNode({
+    id: 'hero:group',
+    name: 'Group',
+    type: 'GROUP',
+    x: 520,
+    y: 420,
+    width: 240,
+    height: 48,
+    children: [
+      makeNode({ id: 'hero:hotline', name: 'Hotline', type: 'TEXT', characters: 'Hotline: 1900 232389', fontSize: 15 }),
+    ],
+  });
+
+  let fgHiddenDuringExport = false;
+  const heroFrame = makeNode({
+    id: 'hero:root',
+    name: '16×9.',
+    type: 'FRAME',
+    x: 0,
+    y: 0,
+    width: 1440,
+    height: 810,
+    layoutMode: 'NONE',
+    children: [bgBase, bgPhoto, bgLine, bgMain, bgOverlay, fgMenu, fgText, fgGroup],
+    exportAsync: async () => {
+      fgHiddenDuringExport = !fgMenu.visible && !fgText.visible && !fgGroup.visible;
+      return new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3, 4]);
+    },
+  });
+
+  // 1. Non-destructive Step 1 analysis must NEVER mutate heroFrame.layoutMode
+  const analysis = fixAndOptimizeCanvasSelection([heroFrame]);
+  assert.equal(heroFrame.layoutMode, 'NONE', 'Must NOT mutate Figma layoutMode on canvas');
+  assert.equal(analysis.convertedFrames, 0);
+  assert.equal(analysis.taggedBackgrounds, 5, 'Should tag all 5 background layers as background');
+
+  // 2. Extraction bakes 5 BG layers into 1 composite Container background & restores foreground visibility
+  const { document, assetPayloads } = await extractDesignSelection([heroFrame], { fileKey: 'hero-composite-bg' });
+  assert.equal(fgHiddenDuringExport, true, 'Foreground nodes must be hidden during composite BG export');
+  assert.equal(fgMenu.visible, true, 'Foreground visibility must be restored after export');
+  assert.equal(fgText.visible, true);
+  assert.equal(fgGroup.visible, true);
+  assert.equal(assetPayloads.length, 1, 'Should produce 1 composite background image asset');
+
+  // 3. Compiled Elementor container has background_image and ONLY foreground widgets (no 5 BG layers!)
+  const v3 = compileElementorV3(document);
+  const rootEl = v3.content[0];
+  assert.equal(rootEl.elType, 'container');
+  assert.equal(rootEl.settings.background_background, 'classic');
+  assert.ok(rootEl.settings.background_image && rootEl.settings.background_image.url.startsWith('data:image/png;base64,'));
+  assert.equal(rootEl.settings.background_size, 'cover');
+  assert.equal(rootEl.settings.min_height && rootEl.settings.min_height.size, 810, 'Composite-BG Hero must preserve 810px min_height');
+  const childTitles = rootEl.elements.map((e) => e.settings._title);
+  assert.equal(rootEl.elements.length, 3, `Expected only 3 foreground children, got: ${childTitles.join(', ')}`);
+  assert.ok(!childTitles.includes('BG'));
+  assert.ok(!childTitles.includes('Rectangle 427'));
+  assert.ok(!childTitles.includes('Main'));
+});
+
+test('Zero-Loss Dev Mode CSS -> Elementor Compiler: preserves min-height, dashed border, multi-stop gradient, box-shadow, text-shadow, opacity & glassmorphism backdrop-filter', async () => {
+  const glassCard = {
+    id: 'dm:card',
+    name: 'Glass Hero Card',
+    type: 'FRAME',
+    visible: true,
+    x: 0,
+    y: 0,
+    width: 1200,
+    height: 620,
+    layoutMode: 'VERTICAL',
+    getCSSAsync: async () => ({
+      display: 'flex',
+      'flex-direction': 'column',
+      'min-height': '620px',
+      'max-width': '1200px',
+      padding: '48px 32px',
+      gap: '20px',
+      background: 'linear-gradient(135deg, #0F172A 0%, #1E3A8A 50%, #16A34A 100%)',
+      border: '2px dashed #22C55E',
+      'border-radius': '20px',
+      'box-shadow': '0px 10px 30px rgba(0, 0, 0, 0.25), 0px 2px 6px rgba(0, 0, 0, 0.12)',
+      'backdrop-filter': 'blur(16px)',
+      'mix-blend-mode': 'normal',
+      opacity: '0.95',
+      overflow: 'hidden',
+    }),
+    children: [
+      {
+        id: 'dm:title',
+        name: 'Hero Title',
+        type: 'TEXT',
+        visible: true,
+        x: 32,
+        y: 48,
+        width: 600,
+        height: 60,
+        characters: 'Sống xanh thời thượng',
+        fontSize: 48,
+        fontName: { family: 'Inter', style: 'Bold' },
+        fills: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, visible: true, opacity: 1 }],
+        getCSSAsync: async () => ({
+          'font-family': 'Inter',
+          'font-size': '48px',
+          'font-weight': '700',
+          color: '#FFFFFF',
+          'text-decoration': 'underline',
+          'text-shadow': '0px 4px 12px rgba(0, 0, 0, 0.4)',
+          '-webkit-text-stroke': '1px #16A34A',
+          'align-self': 'center',
+        }),
+      },
+    ],
+  };
+
+  const { document } = await extractDesignSelection([glassCard], { fileKey: 'devmode-zero-loss' });
+  const v3 = compileElementorV3(document);
+  const root = v3.content[0];
+
+  assert.equal(root.elType, 'container');
+  assert.equal(root.settings.min_height.size, 620, 'Dev Mode min-height must map to min_height');
+  assert.equal(root.settings.border_border, 'dashed', 'Dev Mode dashed border must not be hardcoded to solid');
+  assert.equal(root.settings.box_shadow_box_shadow_type, 'yes');
+  assert.equal(root.settings.box_shadow_box_shadow.blur, 30);
+  assert.ok(root.settings.custom_css.includes('backdrop-filter: blur(16px);'), 'Glassmorphism backdrop-filter must be preserved in custom_css');
+  assert.ok(root.settings.custom_css.includes('opacity: 0.95;'), 'Dev Mode opacity must be preserved');
+  assert.ok(root.settings.custom_css.includes('linear-gradient(135deg, #0F172A 0%, #1E3A8A 50%, #16A34A 100%)'), '3-stop gradient must be preserved in custom_css');
+  assert.ok(root.settings.custom_css.includes('0px 2px 6px rgba(0, 0, 0, 0.12)'), 'Multi-layer box-shadow must be preserved in custom_css');
+
+  const heading = root.elements[0];
+  assert.equal(heading.widgetType, 'heading');
+  assert.equal(heading.settings.typography_text_decoration, 'underline');
+  assert.equal(heading.settings.text_shadow_text_shadow_type, 'yes');
+  assert.equal(heading.settings.text_shadow_text_shadow.blur, 12);
+  assert.equal(heading.settings._flex_align_self, 'center');
+  assert.ok(heading.settings.custom_css.includes('-webkit-text-stroke: 1px #16A34A;'));
 });
 
 

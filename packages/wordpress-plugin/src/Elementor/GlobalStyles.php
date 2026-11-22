@@ -33,7 +33,7 @@ final class GlobalStyles
         }
 
         $kitId = (int) get_option('elementor_active_kit', 0);
-        if ($kitId <= 0) {
+        if (!$this->isValidActiveKit($kitId)) {
             return [
                 'kitId' => 0,
                 'colors' => ['created' => [], 'updated' => []],
@@ -52,7 +52,7 @@ final class GlobalStyles
         $settingsReport = $this->mergeGeneralSettings($settings, $generalSettings);
 
         update_post_meta($kitId, self::KIT_META_KEY, $settings);
-        $this->clearElementorCache();
+        $this->clearElementorCache($kitId);
 
         return [
             'kitId' => $kitId,
@@ -106,6 +106,15 @@ final class GlobalStyles
         return $index;
     }
 
+    public static function isValidColor(string $color): bool
+    {
+        $c = trim($color);
+        if ($c === '') {
+            return false;
+        }
+        return preg_match('/^(?:#(?:[a-f0-9]{3,4}|[a-f0-9]{6}|[a-f0-9]{8})|(?:rgba?|hsla?)\([^)]+\)|transparent|var\(--[^)]+\))$/i', $c) === 1;
+    }
+
     public static function normalizeColorKey(string $color): string
     {
         return strtoupper(preg_replace('/\s+/', '', trim($color)) ?? '');
@@ -113,7 +122,13 @@ final class GlobalStyles
 
     public static function normalizeTypoKey(string $family, float $size, string $weight): string
     {
-        return strtolower(trim($family)) . '|' . round($size, 1) . '|' . trim($weight);
+        $w = strtolower(trim($weight));
+        if ($w === 'normal' || $w === 'regular' || $w === '') {
+            $w = '400';
+        } elseif ($w === 'bold') {
+            $w = '700';
+        }
+        return strtolower(trim($family)) . '|' . round($size, 1) . '|' . $w;
     }
 
     /**
@@ -147,6 +162,17 @@ final class GlobalStyles
             'icon_color',
             'heading_color',
             'description_color',
+            'normal_title_color',
+            'active_title_color',
+            'number_color',
+            'color_menu_item',
+            'label_color',
+            'field_text_color',
+            'field_background_color',
+            'field_border_color',
+            'name_text_color',
+            'job_text_color',
+            'content_content_color',
         ];
 
         $typoPrefixes = [
@@ -216,6 +242,26 @@ final class GlobalStyles
         return $walk($elements);
     }
 
+    private function isValidActiveKit(int $kitId): bool
+    {
+        if ($kitId <= 0) {
+            return false;
+        }
+        if (function_exists('get_post')) {
+            $post = get_post($kitId);
+            if (!$post) {
+                return false;
+            }
+            $status = is_object($post)
+                ? (string) ($post->post_status ?? '')
+                : (is_array($post) ? (string) ($post['post_status'] ?? '') : '');
+            if ($status === 'trash') {
+                return false;
+            }
+        }
+        return true;
+    }
+
     /** @return array<string,mixed> */
     private function getKitSettings(): array
     {
@@ -223,7 +269,7 @@ final class GlobalStyles
             return [];
         }
         $kitId = (int) get_option('elementor_active_kit', 0);
-        if ($kitId <= 0) {
+        if (!$this->isValidActiveKit($kitId)) {
             return [];
         }
         $settings = get_post_meta($kitId, self::KIT_META_KEY, true);
@@ -242,11 +288,15 @@ final class GlobalStyles
         $updated = [];
 
         foreach ($colors as $c) {
-            $name = trim((string) ($c['name'] ?? ''));
-            $val = self::normalizeColorKey((string) ($c['value'] ?? ''));
-            if ($name === '' || $val === '') {
+            if (!is_array($c)) {
                 continue;
             }
+            $name = trim((string) ($c['name'] ?? ''));
+            $rawVal = (string) ($c['value'] ?? '');
+            if ($name === '' || !self::isValidColor($rawVal)) {
+                continue;
+            }
+            $val = self::normalizeColorKey($rawVal);
             $slug = $this->slugify($name);
             $foundIdx = null;
             foreach ($custom as $i => $item) {
@@ -276,9 +326,16 @@ final class GlobalStyles
         $system = is_array($settings['system_colors'] ?? null) ? $settings['system_colors'] : [];
         $knownSystemIds = ['primary', 'secondary', 'text', 'accent'];
         foreach ($colors as $c) {
+            if (!is_array($c)) {
+                continue;
+            }
             $role = strtolower(trim((string) ($c['role'] ?? '')));
             if (in_array($role, $knownSystemIds, true)) {
-                $val = self::normalizeColorKey((string) ($c['value'] ?? ''));
+                $rawVal = (string) ($c['value'] ?? '');
+                if (!self::isValidColor($rawVal)) {
+                    continue;
+                }
+                $val = self::normalizeColorKey($rawVal);
                 $matchedSys = false;
                 foreach ($system as &$sysItem) {
                     if (is_array($sysItem) && ($sysItem['_id'] ?? '') === $role) {
@@ -316,6 +373,9 @@ final class GlobalStyles
         $updated = [];
 
         foreach ($typography as $t) {
+            if (!is_array($t)) {
+                continue;
+            }
             $name = trim((string) ($t['name'] ?? ''));
             if ($name === '') {
                 continue;
@@ -325,13 +385,17 @@ final class GlobalStyles
                 'typography_typography' => 'custom',
                 'typography_font_family' => (string) ($t['fontFamily'] ?? 'Inter'),
                 'typography_font_weight' => (string) ($t['fontWeight'] ?? '400'),
-                'typography_font_size' => [
-                    'unit' => 'px',
-                    'size' => (float) ($t['fontSize'] ?? 16),
-                    'sizes' => [],
-                ],
             ];
-            if (isset($t['lineHeight']) && is_numeric($t['lineHeight'])) {
+            if (!isset($t['fontSize'])) {
+                $fields['typography_font_size'] = ['unit' => 'px', 'size' => 16.0, 'sizes' => []];
+            } elseif (is_numeric($t['fontSize']) && (float) $t['fontSize'] > 0) {
+                $fields['typography_font_size'] = [
+                    'unit' => 'px',
+                    'size' => (float) $t['fontSize'],
+                    'sizes' => [],
+                ];
+            }
+            if (isset($t['lineHeight']) && is_numeric($t['lineHeight']) && (float) $t['lineHeight'] > 0) {
                 $fields['typography_line_height'] = [
                     'unit' => (string) ($t['lineHeightUnit'] ?? 'px'),
                     'size' => (float) $t['lineHeight'],
@@ -390,7 +454,7 @@ final class GlobalStyles
             if (!empty($item['fontFamily'])) {
                 $settings[$prefix . 'font_family'] = (string) $item['fontFamily'];
             }
-            if (isset($item['fontSize']) && is_numeric($item['fontSize'])) {
+            if (isset($item['fontSize']) && is_numeric($item['fontSize']) && (float) $item['fontSize'] > 0) {
                 $settings[$prefix . 'font_size'] = [
                     'unit' => 'px',
                     'size' => (float) $item['fontSize'],
@@ -400,14 +464,14 @@ final class GlobalStyles
             if (!empty($item['fontWeight'])) {
                 $settings[$prefix . 'font_weight'] = (string) $item['fontWeight'];
             }
-            if (isset($item['lineHeight']) && is_numeric($item['lineHeight'])) {
+            if (isset($item['lineHeight']) && is_numeric($item['lineHeight']) && (float) $item['lineHeight'] > 0) {
                 $settings[$prefix . 'line_height'] = [
                     'unit' => (string) ($item['lineHeightUnit'] ?? 'px'),
                     'size' => (float) $item['lineHeight'],
                     'sizes' => [],
                 ];
             }
-            if (!empty($item['color'])) {
+            if (!empty($item['color']) && self::isValidColor((string) $item['color'])) {
                 $colorKey = ($tag === 'body') ? 'body_color' : (($tag === 'link') ? 'link_color' : "{$tag}_color");
                 $settings[$colorKey] = self::normalizeColorKey((string) $item['color']);
             }
@@ -421,7 +485,7 @@ final class GlobalStyles
             if (!empty($btn['typography']['fontFamily'])) {
                 $settings['button_typography_font_family'] = (string) $btn['typography']['fontFamily'];
             }
-            if (isset($btn['typography']['fontSize']) && is_numeric($btn['typography']['fontSize'])) {
+            if (isset($btn['typography']['fontSize']) && is_numeric($btn['typography']['fontSize']) && (float) $btn['typography']['fontSize'] > 0) {
                 $settings['button_typography_font_size'] = [
                     'unit' => 'px',
                     'size' => (float) $btn['typography']['fontSize'],
@@ -431,10 +495,10 @@ final class GlobalStyles
             if (!empty($btn['typography']['fontWeight'])) {
                 $settings['button_typography_font_weight'] = (string) $btn['typography']['fontWeight'];
             }
-            if (!empty($btn['textColor'])) {
+            if (!empty($btn['textColor']) && self::isValidColor((string) $btn['textColor'])) {
                 $settings['button_text_color'] = self::normalizeColorKey((string) $btn['textColor']);
             }
-            if (!empty($btn['backgroundColor'])) {
+            if (!empty($btn['backgroundColor']) && self::isValidColor((string) $btn['backgroundColor'])) {
                 $settings['button_background_color'] = self::normalizeColorKey((string) $btn['backgroundColor']);
             }
             if (isset($btn['borderRadius']) && is_array($btn['borderRadius'])) {
@@ -469,20 +533,20 @@ final class GlobalStyles
             if (!empty($fields['typography']['fontFamily'])) {
                 $settings['form_fields_typography_font_family'] = (string) $fields['typography']['fontFamily'];
             }
-            if (isset($fields['typography']['fontSize']) && is_numeric($fields['typography']['fontSize'])) {
+            if (isset($fields['typography']['fontSize']) && is_numeric($fields['typography']['fontSize']) && (float) $fields['typography']['fontSize'] > 0) {
                 $settings['form_fields_typography_font_size'] = [
                     'unit' => 'px',
                     'size' => (float) $fields['typography']['fontSize'],
                     'sizes' => [],
                 ];
             }
-            if (!empty($fields['textColor'])) {
+            if (!empty($fields['textColor']) && self::isValidColor((string) $fields['textColor'])) {
                 $settings['form_fields_text_color'] = self::normalizeColorKey((string) $fields['textColor']);
             }
-            if (!empty($fields['backgroundColor'])) {
+            if (!empty($fields['backgroundColor']) && self::isValidColor((string) $fields['backgroundColor'])) {
                 $settings['form_fields_background_color'] = self::normalizeColorKey((string) $fields['backgroundColor']);
             }
-            if (!empty($fields['borderColor'])) {
+            if (!empty($fields['borderColor']) && self::isValidColor((string) $fields['borderColor'])) {
                 $settings['form_fields_border_color'] = self::normalizeColorKey((string) $fields['borderColor']);
             }
             if (isset($fields['borderRadius']) && is_array($fields['borderRadius'])) {
@@ -537,7 +601,7 @@ final class GlobalStyles
         }
 
         $bg = is_array($general['background'] ?? null) ? $general['background'] : [];
-        if (!empty($bg['color'])) {
+        if (!empty($bg['color']) && self::isValidColor((string) $bg['color'])) {
             $settings['site_background_color'] = self::normalizeColorKey((string) $bg['color']);
             $updated[] = 'Site Background Color';
         }
@@ -549,11 +613,21 @@ final class GlobalStyles
     {
         $slug = strtolower(trim($title));
         $slug = preg_replace('/[^a-z0-9]+/', '', $slug) ?? '';
-        return substr($slug !== '' ? $slug : 'f2e' . bin2hex(random_bytes(3)), 0, 16);
+        if ($slug === '') {
+            return 'f2e' . substr(hash('sha256', trim($title)), 0, 13);
+        }
+        if (strlen($slug) > 16) {
+            return substr($slug, 0, 11) . substr(hash('sha256', trim($title)), 0, 5);
+        }
+        return $slug;
     }
 
-    private function clearElementorCache(): void
+    private function clearElementorCache(int $kitId = 0): void
     {
+        if ($kitId > 0 && function_exists('delete_post_meta')) {
+            delete_post_meta($kitId, '_elementor_css');
+            delete_post_meta($kitId, '_elementor_element_cache');
+        }
         if (class_exists('Elementor\\Plugin')) {
             $plugin = \Elementor\Plugin::$instance ?? null;
             if (is_object($plugin) && isset($plugin->files_manager) && method_exists($plugin->files_manager, 'clear_cache')) {
