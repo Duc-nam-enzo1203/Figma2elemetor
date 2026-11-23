@@ -11,7 +11,7 @@ export function buildProForm(node, nodes, allocId) {
 
   if (Array.isArray(content.formFields) && content.formFields.length > 0) {
     for (const [idx, f] of content.formFields.entries()) {
-      formFields.push({
+      const fieldEntry = {
         _id: shortId(`${node.id}-fld-${idx}`),
         custom_id: `field_${idx + 1}`,
         field_type: f.type || 'text',
@@ -19,7 +19,11 @@ export function buildProForm(node, nodes, allocId) {
         placeholder: f.placeholder || f.label,
         required: f.required ? 'true' : '',
         width: f.width || '100',
-      });
+      };
+      if (f.type === 'select') {
+        fieldEntry.field_options = f.options || `${f.placeholder || f.label}\nOption 1\nOption 2\nOption 3`;
+      }
+      formFields.push(fieldEntry);
     }
   } else {
     let idx = 1;
@@ -64,6 +68,7 @@ export function buildProForm(node, nodes, allocId) {
     form_fields: formFields,
     button_text: submitLabel,
     button_size: 'md',
+    show_labels: content.hasExternalLabels ? 'yes' : '',
     ...(hasRequired ? { mark_required: 'yes' } : {}),
   };
 

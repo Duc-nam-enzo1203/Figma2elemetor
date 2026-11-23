@@ -2828,5 +2828,131 @@ test('Button Wrapper Guard: div.utility-nav wrapping a button instance remains c
   assert.equal(btnWidget.settings.selected_icon, undefined, 'No fake arrow icon should be injected');
 });
 
+test('Form Extraction: Preserves all 5 input fields, distinguishes select & date, prevents input misclassification as button, and hides duplicate labels', async () => {
+  const makeInputField = (id, name, textVal, vectorName, hasBackground = false) => ({
+    id,
+    name: 'input',
+    type: 'INSTANCE',
+    visible: true,
+    width: 336,
+    height: 44,
+    cornerRadius: 12,
+    fills: hasBackground ? [{ type: 'SOLID', color: { r: 0.349, g: 0.216, b: 0.878 }, visible: true }] : [],
+    children: [
+      {
+        id: `${id}_content`,
+        name: 'content',
+        type: 'FRAME',
+        visible: true,
+        children: [
+          {
+            id: `${id}_txt`,
+            name: 'Placeholder',
+            type: 'TEXT',
+            visible: true,
+            characters: textVal,
+            fontSize: 16,
+          },
+          {
+            id: `${id}_adornment`,
+            name: vectorName,
+            type: 'INSTANCE',
+            visible: true,
+            children: [{ id: `${id}_vec`, name: 'Vector', type: 'VECTOR', visible: true }],
+          },
+        ],
+      },
+    ],
+  });
+
+  const formGroup = {
+    id: '3003:3349',
+    name: 'Group 13',
+    type: 'GROUP',
+    visible: true,
+    width: 336,
+    height: 350,
+    getPluginData: (key) => (key === 'f2e-widget' ? 'form' : ''),
+    children: [
+      {
+        id: '1:8280',
+        name: 'Inputs',
+        type: 'FRAME',
+        visible: true,
+        layoutMode: 'VERTICAL',
+        itemSpacing: 20,
+        children: [
+          makeInputField('1:8281', 'input', 'Car type', 'selectarrow', false),
+          makeInputField('1:8282', 'input', 'Place of rental', 'selectarrow', false),
+          makeInputField('1:8283', 'input', 'Place of return', 'selectarrow', true),
+          makeInputField('1:8284', 'input', 'Rental date', 'calendar-icon', true),
+          makeInputField('1:8285', 'input', 'Return date', 'calendar-icon', true),
+        ],
+      },
+      {
+        id: '1:8286',
+        name: 'Button',
+        type: 'FRAME',
+        visible: true,
+        width: 336,
+        height: 48,
+        fills: [{ type: 'SOLID', color: { r: 1, g: 0.62, b: 0.047 }, visible: true }],
+        children: [
+          {
+            id: '1:8287',
+            name: 'Book now',
+            type: 'TEXT',
+            visible: true,
+            characters: 'Book now',
+            fontSize: 16,
+          },
+        ],
+      },
+    ],
+  };
+
+  // 1. None of the input instances should resolve to button!
+  for (const child of formGroup.children[0].children) {
+    const res = resolveWidget(child);
+    assert.notEqual(res.widget, 'button', `Field "${child.children[0].children[0].characters}" should not be button`);
+  }
+
+  // 2. Button frame MUST resolve to button!
+  const btnChoice = resolveWidget(formGroup.children[1]);
+  assert.equal(btnChoice.widget, 'button');
+
+  // 3. Extract and compile Form
+  const { document } = await extractDesignSelection([formGroup], { fileKey: 'form-test' });
+  const formNode = document.nodes[document.roots[0]];
+  assert.equal(formNode.widget, 'form');
+  assert.equal(formNode.content.formFields.length, 5, 'All 5 fields must be preserved');
+  assert.equal(formNode.content.submitLabel, 'Book now');
+
+  const clipboard = compileElementorClipboard(document, 'https://localhost');
+  const formWidget = clipboard.elements[0];
+  assert.equal(formWidget.widgetType, 'form');
+  assert.equal(formWidget.settings.form_fields.length, 5);
+
+  const fields = formWidget.settings.form_fields;
+  assert.equal(fields[0].field_label, 'Car type');
+  assert.equal(fields[0].field_type, 'select');
+  assert.ok(fields[0].field_options.includes('Car type'));
+
+  assert.equal(fields[1].field_label, 'Place of rental');
+  assert.equal(fields[1].field_type, 'select');
+
+  assert.equal(fields[2].field_label, 'Place of return');
+  assert.equal(fields[2].field_type, 'select');
+
+  assert.equal(fields[3].field_label, 'Rental date');
+  assert.equal(fields[3].field_type, 'date');
+
+  assert.equal(fields[4].field_label, 'Return date');
+  assert.equal(fields[4].field_type, 'date');
+
+  assert.equal(formWidget.settings.button_text, 'Book now');
+  assert.equal(formWidget.settings.show_labels, '', 'show_labels must be empty to avoid duplicate labels when placeholders are used');
+});
+
 
 

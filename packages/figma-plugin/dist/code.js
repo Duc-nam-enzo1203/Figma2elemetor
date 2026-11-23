@@ -709,10 +709,11 @@ function isButtonNode(node, kids) {
   if (kids.length === 0 || kids.length > 3) return false;
 
   const lower = String(node.name || '').toLowerCase();
-  // Guard: Container / Nav / Utility / Wrapper / Header / Card names should NEVER be classified as a button!
-  if (/^(div\.|nav|utility|menu|header|footer|wrapper|container|col|row|section|sidebar|bar)/i.test(lower) ||
-      /[-_ .](nav|menu|utility|wrapper|container|header|footer|section|sidebar|bar)([-_ .]|$)/i.test(lower) ||
-      lower.includes('chip') || lower.includes('badge') || lower.includes('tag') || lower.includes('check')) {
+  // Guard: Container / Nav / Utility / Wrapper / Header / Card / Form Input names should NEVER be classified as a button!
+  if (/^(div\.|nav|utility|menu|header|footer|wrapper|container|col|row|section|sidebar|bar|input|field|select|dropdown|picker|date|time|search|textarea|textbox|form)/i.test(lower) ||
+      /[-_ .](nav|menu|utility|wrapper|container|header|footer|section|sidebar|bar|input|field|select|dropdown|picker|date|time|search|textarea|textbox|form)([-_ .]|$)/i.test(lower) ||
+      lower.includes('chip') || lower.includes('badge') || lower.includes('tag') || lower.includes('check') ||
+      lower.includes('input') || lower.includes('field') || lower.includes('placeholder') || lower.includes('dropdown') || lower.includes('select')) {
     return false;
   }
 
@@ -3683,6 +3684,7 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
     if (choice.widget === 'form' || choice.widget === 'login' || choice.widget === 'search-form') {
       const formFields = [];
       let submitLabel = 'Send Message';
+      let hasAnyExternalLabel = false;
 
       const isPureRedAsterisk = (color) => {
         if (!color || typeof color !== 'string') return false;
@@ -3690,12 +3692,32 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
         return c === '#FF0000' || c === '#F00' || c === '#EF4444' || c === '#DC2626' || c === '#E11D48';
       };
 
-      const isButtonLikeNode = (n) => {
+      const isInputLikeName = (name) => {
+        const lower = safeStr(name).toLowerCase();
+        return (
+          lower.includes('input') ||
+          lower.includes('field') ||
+          lower.includes('select') ||
+          lower.includes('dropdown') ||
+          lower.includes('picker') ||
+          lower.includes('date') ||
+          lower.includes('time') ||
+          lower.includes('search') ||
+          lower.includes('textarea') ||
+          lower.includes('textbox') ||
+          lower.includes('placeholder')
+        );
+      };
+
+      const isButtonLikeNode = (n, parentRef = null) => {
         if (!n || n.type === 'TEXT') return false;
+        const lower = safeStr(n.name).toLowerCase();
+        if (isInputLikeName(lower)) return false;
+        if (parentRef && safeStr(parentRef.name).toLowerCase().includes('input')) return false;
+
         const tCount = collectTextDescendants(n).length;
         if (tCount === 0 || tCount > 2) return false;
-        const lower = safeStr(n.name).toLowerCase();
-        if (lower.includes('btn') || lower.includes('button') || lower.includes('submit') || lower.includes('cta')) return true;
+        if (lower.includes('btn') || lower.includes('button') || lower.includes('submit') || lower.includes('cta') || lower.includes('book')) return true;
         const resolved = resolveWidget(n);
         return resolved && resolved.widget === 'button';
       };
@@ -3713,13 +3735,13 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
           kName.includes('textarea') ||
           kName.includes('select') ||
           kName.includes('box') ||
-          kName.includes('field')
+          kName.includes('field') ||
+          kName.includes('content')
         );
       };
 
       const findInputBoxNode = (fieldNode) => {
         const kids = visibleChildren(fieldNode);
-        // Look for a styled child box (has background, border, or radius and is not a label/TEXT node)
         for (const k of kids) {
           if (isInputBoxLike(k)) return k;
         }
@@ -3744,19 +3766,35 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
         return firstLooksLikeLabel && isInputBoxLike(second);
       };
 
+      const hasVectorMatching = (n, matchFn) => {
+        const q = [n];
+        while (q.length > 0) {
+          const cur = q.shift();
+          if (!cur) continue;
+          const nm = safeStr(cur.name).toLowerCase();
+          if (matchFn(nm, cur)) return true;
+          for (const ch of visibleChildren(cur)) q.push(ch);
+        }
+        return false;
+      };
+
       const parseSingleField = async (fieldNode, parentRef, widthPct = '100') => {
         const lowerName = safeStr(fieldNode.name).toLowerCase();
         const childTextNodes = collectTextDescendants(fieldNode);
         const texts = childTextNodes.map((t) => safeStr(t.characters || t.name).trim()).filter(Boolean);
         if (texts.length === 0) return;
 
-        // If label is split across two text nodes (e.g. "Họ và tên" + "*"), combine them cleanly
+        const fieldKids = visibleChildren(fieldNode);
+        const isPair = isSingleFieldPair(fieldNode, fieldKids);
+        if (isPair) hasAnyExternalLabel = true;
+
         let label = texts[0];
-        let placeholderIdx = 1;
+        let placeholderIdx = (isPair || texts.length > 1) ? 1 : 0;
         if (texts.length >= 2 && texts[1] === '*') {
           label = `${texts[0]} *`;
-          placeholderIdx = 2;
+          placeholderIdx = (isPair || texts.length > 2) ? 2 : 0;
         }
+
         const placeholder = texts[placeholderIdx] || label.replace(/\s*\*$/, '').trim();
         const isRequired = label.includes('*') || lowerName.includes('required');
         const cleanLabel = label.replace(/\s*\*$/, '').trim() || label;
@@ -3775,12 +3813,30 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
         }
         const inputHeight = Number(inputBoxEntry.layout.height || inputBox.height || 0);
 
+        const hasCalendarIcon = hasVectorMatching(fieldNode, (nm) => nm.includes('calendar') || nm.includes('lịch') || nm.includes('date'));
+        const hasDropdownIcon = hasVectorMatching(fieldNode, (nm) => nm.includes('select') || nm.includes('arrow') || nm.includes('chevron') || nm.includes('dropdown') || nm.includes('down'));
+        const hasClockIcon = hasVectorMatching(fieldNode, (nm) => nm.includes('clock') || nm.includes('time') || nm.includes('giờ'));
+
         let fieldType = 'text';
         if (combinedSearch.includes('email') || combinedSearch.includes('mail')) {
           fieldType = 'email';
-        } else if (combinedSearch.includes('phone') || combinedSearch.includes('tel') || combinedSearch.includes('điện thoại') || combinedSearch.includes('sđt')) {
+        } else if (combinedSearch.includes('phone') || combinedSearch.includes('tel') || combinedSearch.includes('điện thoại') || combinedSearch.includes('sđt') || combinedSearch.includes('hotline')) {
           fieldType = 'tel';
-        } else if (combinedSearch.includes('số lượng') || combinedSearch.includes('quantity')) {
+        } else if (combinedSearch.includes('date') || combinedSearch.includes('ngày') || hasCalendarIcon) {
+          fieldType = 'date';
+        } else if (combinedSearch.includes('time') || combinedSearch.includes('giờ') || hasClockIcon) {
+          fieldType = 'time';
+        } else if (
+          combinedSearch.includes('select') ||
+          combinedSearch.includes('choose') ||
+          combinedSearch.includes('chọn') ||
+          combinedSearch.includes('type') ||
+          combinedSearch.includes('loại') ||
+          combinedSearch.includes('dropdown') ||
+          hasDropdownIcon
+        ) {
+          fieldType = 'select';
+        } else if (combinedSearch.includes('số lượng') || combinedSearch.includes('quantity') || combinedSearch.includes('tuổi') || combinedSearch.includes('age') || combinedSearch.includes('number')) {
           fieldType = 'number';
         } else if (
           combinedSearch.includes('message') ||
@@ -3792,6 +3848,10 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
           inputHeight >= 80
         ) {
           fieldType = 'textarea';
+        } else if (combinedSearch.includes('password') || combinedSearch.includes('mật khẩu')) {
+          fieldType = 'password';
+        } else if (combinedSearch.includes('url') || combinedSearch.includes('website') || combinedSearch.includes('link')) {
+          fieldType = 'url';
         }
 
         // Extract label typography (from label text, ignoring pure red '*' color)
@@ -3822,6 +3882,7 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
           placeholder,
           required: isRequired || fieldType === 'email' ? 'true' : '',
           width: widthPct,
+          options: fieldType === 'select' ? `${placeholder}\nOption 1\nOption 2\nOption 3` : undefined,
         });
       };
 
@@ -3829,7 +3890,7 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
         for (const child of kids) {
           if (!child || child.visible === false) continue;
 
-          if (isButtonLikeNode(child)) {
+          if (isButtonLikeNode(child, parentRef)) {
             const btnEntry = { layout: extractLayout(child, parentRef), style: extractStyle(child) };
             if (useDevModeCss && typeof child.getCSSAsync === 'function') {
               try {
@@ -3858,28 +3919,28 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
           }
 
           // Case 1: Wrapper container holding multiple field rows or a 2-column horizontal row of fields
-          if (depth < 3 && grandFrameKids.length >= 2) {
+          if (depth < 4 && grandFrameKids.length >= 2) {
             const isHorizontalRow = child.layoutMode === 'HORIZONTAL';
             if (isHorizontalRow) {
-              const nonBtnCols = grandFrameKids.filter((gk) => !isButtonLikeNode(gk));
+              const nonBtnCols = grandFrameKids.filter((gk) => !isButtonLikeNode(gk, child));
               const colPct = nonBtnCols.length === 2 ? '50' : (nonBtnCols.length === 3 ? '33' : '100');
               for (const colField of grandKids) {
-                if (isButtonLikeNode(colField)) {
+                if (isButtonLikeNode(colField, child)) {
                   await walkFormChildren([colField], child, depth + 1);
-      } else {
+                } else {
                   await parseSingleField(colField, child, colPct);
                 }
               }
               continue;
             }
-            // Vertical wrapper (e.g. "Fields" group containing multiple fields)
-            if (allTextsInChild.length >= 3 || grandFrameKids.every((gk) => collectTextDescendants(gk).length >= 1)) {
+            // Vertical wrapper (e.g. "Fields" or "Inputs" group containing multiple fields)
+            if (allTextsInChild.length >= 2 || grandFrameKids.every((gk) => collectTextDescendants(gk).length >= 1)) {
               await walkFormChildren(grandKids, child, depth + 1);
               continue;
             }
           }
 
-          // Case 2: Single field node (e.g. Field -> [Label, Input Box])
+          // Case 2: Single field node (e.g. Field -> [Label, Input Box] or single input instance)
           await parseSingleField(child, parentRef, '100');
         }
       };
@@ -3887,6 +3948,7 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
       await walkFormChildren(rawKids, node, 0);
       entry.content.formFields = formFields;
       entry.content.submitLabel = submitLabel;
+      entry.content.hasExternalLabels = hasAnyExternalLabel;
     }
 
     const isVisualAssetWidget = [
@@ -5691,7 +5753,7 @@ function buildV4Variant(breakpoint, layout = {}, style = {}, text = {}, resolveM
 
   if (Array.isArray(content.formFields) && content.formFields.length > 0) {
     for (const [idx, f] of content.formFields.entries()) {
-      formFields.push({
+      const fieldEntry = {
         _id: shortId(`${node.id}-fld-${idx}`),
         custom_id: `field_${idx + 1}`,
         field_type: f.type || 'text',
@@ -5699,7 +5761,11 @@ function buildV4Variant(breakpoint, layout = {}, style = {}, text = {}, resolveM
         placeholder: f.placeholder || f.label,
         required: f.required ? 'true' : '',
         width: f.width || '100',
-      });
+      };
+      if (f.type === 'select') {
+        fieldEntry.field_options = f.options || `${f.placeholder || f.label}\nOption 1\nOption 2\nOption 3`;
+      }
+      formFields.push(fieldEntry);
     }
   } else {
     let idx = 1;
@@ -5744,6 +5810,7 @@ function buildV4Variant(breakpoint, layout = {}, style = {}, text = {}, resolveM
     form_fields: formFields,
     button_text: submitLabel,
     button_size: 'md',
+    show_labels: content.hasExternalLabels ? 'yes' : '',
     ...(hasRequired ? { mark_required: 'yes' } : {}),
   };
 

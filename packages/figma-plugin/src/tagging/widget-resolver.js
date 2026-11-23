@@ -564,10 +564,11 @@ function isButtonNode(node, kids) {
   if (kids.length === 0 || kids.length > 3) return false;
 
   const lower = String(node.name || '').toLowerCase();
-  // Guard: Container / Nav / Utility / Wrapper / Header / Card names should NEVER be classified as a button!
-  if (/^(div\.|nav|utility|menu|header|footer|wrapper|container|col|row|section|sidebar|bar)/i.test(lower) ||
-      /[-_ .](nav|menu|utility|wrapper|container|header|footer|section|sidebar|bar)([-_ .]|$)/i.test(lower) ||
-      lower.includes('chip') || lower.includes('badge') || lower.includes('tag') || lower.includes('check')) {
+  // Guard: Container / Nav / Utility / Wrapper / Header / Card / Form Input names should NEVER be classified as a button!
+  if (/^(div\.|nav|utility|menu|header|footer|wrapper|container|col|row|section|sidebar|bar|input|field|select|dropdown|picker|date|time|search|textarea|textbox|form)/i.test(lower) ||
+      /[-_ .](nav|menu|utility|wrapper|container|header|footer|section|sidebar|bar|input|field|select|dropdown|picker|date|time|search|textarea|textbox|form)([-_ .]|$)/i.test(lower) ||
+      lower.includes('chip') || lower.includes('badge') || lower.includes('tag') || lower.includes('check') ||
+      lower.includes('input') || lower.includes('field') || lower.includes('placeholder') || lower.includes('dropdown') || lower.includes('select')) {
     return false;
   }
 

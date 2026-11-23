@@ -1283,15 +1283,19 @@ final class TranspilerV3
                 $fType = (string) ($f['type'] ?? 'text');
                 $label = (string) ($f['label'] ?? ('Field ' . ($idx + 1)));
                 $placeholder = (string) ($f['placeholder'] ?? $label);
-                $fields[] = [
+                $fieldItem = [
                     '_id' => $this->nextId(),
                     'custom_id' => 'field_' . ($idx + 1),
                     'field_type' => $fType,
                     'field_label' => $label,
                     'placeholder' => $placeholder,
                     'required' => !empty($f['required']) ? 'true' : '',
-                    'width' => '100',
+                    'width' => (string) ($f['width'] ?? '100'),
                 ];
+                if ($fType === 'select') {
+                    $fieldItem['field_options'] = (string) ($f['options'] ?? "{$placeholder}\nOption 1\nOption 2\nOption 3");
+                }
+                $fields[] = $fieldItem;
             }
         } else {
             $idx = 1;
@@ -1300,22 +1304,29 @@ final class TranspilerV3
                 if (!is_array($child)) {
                     continue;
                 }
-                if (($child['widget'] ?? '') === 'button') {
+                $childName = strtolower((string) ($child['content']['name'] ?? ''));
+                if (($child['widget'] ?? '') === 'button' && !str_contains($childName, 'input') && !str_contains($childName, 'field')) {
                     $submitLabel = (string) ($child['content']['characters'] ?? $child['content']['name'] ?? $submitLabel);
                     continue;
                 }
                 $texts = array_map(static fn (array $n): string => (string) ($n['text']['characters'] ?? ''), $this->collectSubtreeTexts($child, $nodes));
                 $label = $texts[0] ?? (string) ($child['content']['name'] ?? 'Field ' . $idx);
-                $lower = strtolower($label);
+                $lower = strtolower($label . ' ' . $childName);
                 $type = 'text';
                 if (str_contains($lower, 'email') || str_contains($lower, 'mail')) {
                     $type = 'email';
-                } elseif (str_contains($lower, 'phone') || str_contains($lower, 'tel')) {
+                } elseif (str_contains($lower, 'phone') || str_contains($lower, 'tel') || str_contains($lower, 'điện thoại')) {
                     $type = 'tel';
+                } elseif (str_contains($lower, 'date') || str_contains($lower, 'ngày') || str_contains($lower, 'calendar')) {
+                    $type = 'date';
+                } elseif (str_contains($lower, 'time') || str_contains($lower, 'giờ')) {
+                    $type = 'time';
+                } elseif (str_contains($lower, 'select') || str_contains($lower, 'type') || str_contains($lower, 'loại') || str_contains($lower, 'dropdown')) {
+                    $type = 'select';
                 } elseif (str_contains($lower, 'message') || ((int) ($child['layout']['height'] ?? 0)) >= 90) {
                     $type = 'textarea';
                 }
-                $fields[] = [
+                $fieldItem = [
                     '_id' => $this->nextId(),
                     'custom_id' => 'field_' . $idx,
                     'field_type' => $type,
@@ -1324,17 +1335,23 @@ final class TranspilerV3
                     'required' => (str_contains($lower, 'email') || str_contains($lower, 'name')) ? 'true' : '',
                     'width' => '100',
                 ];
+                if ($type === 'select') {
+                    $fieldItem['field_options'] = "{$fieldItem['placeholder']}\nOption 1\nOption 2\nOption 3";
+                }
+                $fields[] = $fieldItem;
                 $idx++;
             }
         }
         if ($fields === []) {
             $fields[] = ['_id' => $this->nextId(), 'custom_id' => 'email', 'field_type' => 'email', 'field_label' => 'Email', 'placeholder' => 'your@email.com', 'required' => 'true', 'width' => '100'];
         }
+        $hasExt = !empty($node['content']['hasExternalLabels']);
         return $this->wrapElement('widget', 'form', [
             'form_name' => (string) ($node['content']['name'] ?? 'Figma Form'),
             'form_fields' => $fields,
             'button_text' => $submitLabel,
             'button_size' => 'md',
+            'show_labels' => $hasExt ? 'yes' : '',
         ], [], []);
     }
 
