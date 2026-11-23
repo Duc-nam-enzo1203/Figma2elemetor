@@ -1183,8 +1183,6 @@ function inferCrossAlign(items, posKey, centerKey, sizeKey) {
 /**
  * Low-level Figma node primitive extractors (layout, style, typography, responsive).
  */
-
-
 const WEIGHT_MAP = {
   thin: '100',
   hairline: '100',
@@ -1204,8 +1202,7 @@ const WEIGHT_MAP = {
   heavy: '900',
 };
 
-/** Safe number coercion that never throws on `Symbol(figma.mixed)` */
-function safeNum(val, fallback = 0) {
+/** Safe number coercion that never throws on `Symbol(figma.mixed)` */function safeNum(val, fallback = 0) {
   if (typeof val === 'number' && Number.isFinite(val)) return val;
   if (typeof val === 'string') {
     const n = Number(val);
@@ -1214,17 +1211,14 @@ function safeNum(val, fallback = 0) {
   return fallback;
 }
 
-/** Safe string coercion that never throws on `Symbol(figma.mixed)` */
-function safeStr(val, fallback = '') {
+/** Safe string coercion that never throws on `Symbol(figma.mixed)` */function safeStr(val, fallback = '') {
   if (typeof val === 'string') return val;
   if (typeof val === 'number') return String(val);
   return fallback;
-}
-function fontWeightOf(styleName) {
+}function fontWeightOf(styleName) {
   const key = safeStr(styleName, '').toLowerCase().replace(/[\s_-]|italic|oblique/g, '');
   return WEIGHT_MAP[key] || '400';
-}
-function rgbToHex(color, alpha = 1) {
+}function rgbToHex(color, alpha = 1) {
   if (!color || typeof color !== 'object') return '#000000';
   const r = Math.round(Math.max(0, Math.min(1, safeNum(color.r, 0))) * 255);
   const g = Math.round(Math.max(0, Math.min(1, safeNum(color.g, 0))) * 255);
@@ -1234,16 +1228,14 @@ function rgbToHex(color, alpha = 1) {
     return `rgba(${r}, ${g}, ${b}, ${Math.round(a * 100) / 100})`;
   }
   return `#${[r, g, b].map((c) => c.toString(16).padStart(2, '0')).join('')}`.toUpperCase();
-}
-function extractSolidColor(paints) {
+}function extractSolidColor(paints) {
   if (!Array.isArray(paints)) return null;
   const paint = [...paints].reverse().find(
     (item) => item && item.type === 'SOLID' && item.visible !== false && safeNum(item.opacity, 1) > 0
   );
   if (!paint || !paint.color) return null;
   return rgbToHex(paint.color, safeNum(paint.opacity, 1));
-}
-function extractGradient(paints) {
+}function extractGradient(paints) {
   if (!Array.isArray(paints)) return null;
   const paint = [...paints].reverse().find(
     (item) => item && safeStr(item.type).startsWith('GRADIENT_') && item.visible !== false && safeNum(item.opacity, 1) > 0
@@ -1270,8 +1262,7 @@ function extractGradient(paints) {
     stop2: Math.round(safeNum(stop1.position, 1) * 100),
     angle,
   };
-}
-function extractLayout(node, parentNode = null) {
+}function extractLayout(node, parentNode = null) {
   let width = Math.round(safeNum(node.width, 0));
   let height = Math.round(safeNum(node.height, 0));
   const strokeW = Math.max(1, Math.round(safeNum(node.strokeWeight, 1)));
@@ -1376,8 +1367,7 @@ function extractLayout(node, parentNode = null) {
   }
 
   return layout;
-}
-function extractStyle(node) {
+}function extractStyle(node) {
   const style = {};
 
   if (node.type !== 'TEXT') {
@@ -1466,8 +1456,7 @@ function extractStyle(node) {
   }
 
   return style;
-}
-function extractTypography(node) {
+}function extractTypography(node) {
   if (!node) return null;
   const characters = safeStr(node.characters, '');
 
@@ -1580,8 +1569,7 @@ function extractTypography(node) {
   if (color) text.color = color;
 
   return text;
-}
-function extractLink(node) {
+}function extractLink(node) {
   const reactions = Array.isArray(node && node.reactions) ? node.reactions : [];
   for (const reaction of reactions) {
     const action = (reaction && reaction.action) || (Array.isArray(reaction && reaction.actions) ? reaction.actions[0] : null);
@@ -1590,8 +1578,7 @@ function extractLink(node) {
     }
   }
   return null;
-}
-function extractButtonIcon(node) {
+}function extractButtonIcon(node) {
   if (!node || !Array.isArray(node.children)) return null;
   const kids = node.children.filter((c) => c && c.visible !== false);
   const textChild = kids.find((c) => c.type === 'TEXT');
@@ -1642,8 +1629,7 @@ function extractButtonIcon(node) {
     library: 'fa-solid',
     align,
   };
-}
-function captureResponsiveTree(rootNode) {
+}function captureResponsiveTree(rootNode) {
   const walk = (node, path = [], parent = null) => {
     const kids = visibleChildren(node);
     const name = safeStr(node.name).trim();
@@ -1660,8 +1646,7 @@ function captureResponsiveTree(rootNode) {
     };
   };
   return walk(rootNode, [], null);
-}
-function matchResponsiveOverride(capturedTree, pathNames, expectedType) {
+}function matchResponsiveOverride(capturedTree, pathNames, expectedType) {
   if (!capturedTree) return null;
   let current = capturedTree;
   for (const seg of pathNames) {
@@ -1685,13 +1670,10 @@ function matchResponsiveOverride(capturedTree, pathNames, expectedType) {
 /**
  * Figma Dev Mode CSS (`node.getCSSAsync()`) parser, normalizer & live inspector.
  */
-
-
 /**
  * Unwraps CSS variables generated by Figma Dev Mode (`var(--token-name, fallback)`)
  * and strips CSS comments (`/* 140% *\/`) so exact values are extracted deterministically.
- */
-function resolveCssVars(rawVal) {
+ */function resolveCssVars(rawVal) {
   if (typeof rawVal !== 'string') return '';
   let s = rawVal.replace(/\/\*[\s\S]*?\*\//g, '').trim();
   for (let pass = 0; pass < 64; pass += 1) {
@@ -1750,8 +1732,7 @@ function splitTopLevelCssLayers(str) {
   const tail = str.slice(start).trim();
   if (tail) layers.push(tail);
   return layers;
-}
-function sanitizeDevModeBackgroundCss(devBg) {
+}function sanitizeDevModeBackgroundCss(devBg) {
   if (!devBg || typeof devBg !== 'string') return '';
   const layers = splitTopLevelCssLayers(devBg);
   const cleanLayers = layers.filter((layer) => !/url\(\s*<[^>]*>\s*\)/i.test(layer));
@@ -1760,8 +1741,7 @@ function sanitizeDevModeBackgroundCss(devBg) {
 
 /**
  * Normalizes CSS color strings from Figma Dev Mode (e.g. `#FFF` -> `#FFFFFF`, `#000` -> `#000000`, `var(--c, #16A34A)` -> `#16A34A`).
- */
-function normalizeCssColor(rawColor) {
+ */function normalizeCssColor(rawColor) {
   const s = resolveCssVars(rawColor);
   if (!s) return null;
   const hex3 = /^#([0-9a-fA-F])([0-9a-fA-F])([0-9a-fA-F])$/.exec(s);
@@ -1782,8 +1762,7 @@ function normalizeCssColor(rawColor) {
 /**
  * Apply full Dev Mode CSS from Figma (node.getCSSAsync()) to an IR entry.
  * Treats Figma Dev Mode as the authoritative source of truth for borders, padding, flex layout, and typography.
- */
-function applyDevModeCSSToNode(entry, devModeCSS) {
+ */function applyDevModeCSSToNode(entry, devModeCSS) {
   if (!entry || !devModeCSS || typeof devModeCSS !== 'object') return;
   entry.devModeCSS = devModeCSS;
   entry.devModeCSSString = Object.entries(devModeCSS)
@@ -2286,8 +2265,7 @@ function applyDevModeCSSToNode(entry, devModeCSS) {
  * Live Inspector for Figma Dev Mode CSS (`await node.getCSSAsync()`).
  * Extracts raw Dev Mode CSS, unwraps `var(--token, fallback)` values, identifies CSS variables
  * and color swatches, and computes the exact Elementor widget & control mapping for display in the Plugin UI.
- */
-async function inspectNodeDevMode(node, options = {}) {
+ */async function inspectNodeDevMode(node, options = {}) {
   if (!node) return null;
   const { includeSubtree = false, maxSubtreeNodes = 20 } = options;
 
@@ -2478,16 +2456,14 @@ async function inspectNodeDevMode(node, options = {}) {
   // ── Module: src/extraction/design-system.js ──
 /**
  * Design System & Site Settings extraction (Local Variables/Styles + Dev Mode auto-synthesis).
- */
-function detectColorRole(name) {
+ */function detectColorRole(name) {
   const lower = safeStr(name).toLowerCase();
   if (/(^|[-_/ ])(primary|brand|main)([-_/ ]|$)/i.test(lower)) return 'primary';
   if (/(^|[-_/ ])(secondary)([-_/ ]|$)/i.test(lower)) return 'secondary';
   if (/(^|[-_/ ])(text|body|content|foreground)([-_/ ]|$)/i.test(lower)) return 'text';
   if (/(^|[-_/ ])(accent|highlight)([-_/ ]|$)/i.test(lower)) return 'accent';
   return 'custom';
-}
-function detectTypographyRole(name) {
+}function detectTypographyRole(name) {
   const lower = safeStr(name).toLowerCase();
   if (/^h1\b|heading[\s_/-]?1/i.test(lower)) return 'h1';
   if (/^h2\b|heading[\s_/-]?2/i.test(lower)) return 'h2';
@@ -2511,8 +2487,7 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
     }
   }
   return null;
-}
-async function extractLocalDesignSystem(figmaApi, activeSelection = null) {
+}async function extractLocalDesignSystem(figmaApi, activeSelection = null) {
   const colors = [];
   const typography = [];
   const selection = Array.isArray(activeSelection)
@@ -3047,11 +3022,9 @@ async function extractLocalDesignSystem(figmaApi, activeSelection = null) {
  * - Exports Vector/Icon/Logo groups as clean inline SVG strings + SHA-256 hash
  * - Exports Image nodes as PNG/JPG (1x/2x) + Base64 & SHA-256 hash
  */
-
 /**
  * Full extraction of selected Figma nodes into the F2E Intermediate Representation (IR)
- */
-async function extractDesignSelection(selection, options = {}) {
+ */async function extractDesignSelection(selection, options = {}) {
   const {
     fileKey = 'local-figma',
     imageFormat = 'PNG',
@@ -4166,8 +4139,7 @@ async function extractDesignSelection(selection, options = {}) {
   return { document, assetPayloads };
 }
 
-const VISUAL_NAME_TOKENS = new Set(['icon', 'ic', 'svg', 'logo', 'img', 'image', 'pic', 'photo', 'avatar', 'thumb', 'thumbnail']);
-function collectVisualImageDescendants(node, options = {}, depth = 0) {
+const VISUAL_NAME_TOKENS = new Set(['icon', 'ic', 'svg', 'logo', 'img', 'image', 'pic', 'photo', 'avatar', 'thumb', 'thumbnail']);function collectVisualImageDescendants(node, options = {}, depth = 0) {
   if (!node || depth > 4) return [];
   const { includeVectors = true, minVectorSize = 0 } = options;
   const out = [];
@@ -4192,8 +4164,7 @@ function collectVisualImageDescendants(node, options = {}, depth = 0) {
     out.push(...collectVisualImageDescendants(child, options, depth + 1));
   }
   return out;
-}
-function findFirstVisualDescendant(node, depth = 0) {
+}function findFirstVisualDescendant(node, depth = 0) {
   if (!node || depth > 4) return null;
   const kids = visibleChildren(node);
   for (const child of kids) {
@@ -4223,8 +4194,7 @@ function findFirstVisualDescendant(node, depth = 0) {
   // ── Module: src/exporters/compiler-helpers.js ──
 /**
  * Shared Elementor v3/v4 compiler helpers (box values, typography, box styles, subtree collectors).
- */
-function boxValue(box, isLinked = false) {
+ */function boxValue(box, isLinked = false) {
   const t = Math.round(Number(box && box.top) || 0);
   const r = Math.round(Number(box && box.right) || 0);
   const b = Math.round(Number(box && box.bottom) || 0);
@@ -4237,8 +4207,7 @@ function boxValue(box, isLinked = false) {
     left: String(l),
     isLinked: Boolean(box && box.isLinked !== undefined ? box.isLinked : (isLinked || (t === r && r === b && b === l))),
   };
-}
-function scaleBox(box, factor, cap) {
+}function scaleBox(box, factor, cap) {
   if (box && box.unit && box.unit !== 'px') {
     return {
       top: Number(box.top) || 0,
@@ -4257,8 +4226,7 @@ function scaleBox(box, factor, cap) {
     isLinked: false,
     unit: 'px',
   };
-}
-function flexGapValue(layout) {
+}function flexGapValue(layout) {
   const main = Math.round(Number(layout && layout.gap) || 0);
   // If Figma gap is massive (>160px) because designer used fixed itemSpacing instead of SPACE_BETWEEN,
   // clamp gap to 24px and let justify: space-between handle distribution!
@@ -4274,12 +4242,10 @@ function flexGapValue(layout) {
     row: String(row),
     isLinked: col === row,
   };
-}
-function applyGlobalColor() {
+}function applyGlobalColor() {
   // Exact Figma hex colors are preserved directly on Elementor controls.
   // Verified Active Kit `__globals__` IDs are bound server-side by WordPress `GlobalStyles::bindGlobalsToElements()`.
-}
-function appendCustomCss(settings, cssBlock) {
+}function appendCustomCss(settings, cssBlock) {
   if (!settings || !cssBlock || !String(cssBlock).trim()) return;
   const block = String(cssBlock).trim();
   settings.custom_css = settings.custom_css ? `${settings.custom_css}\n${block}` : block;
@@ -4290,8 +4256,7 @@ function appendCustomCss(settings, cssBlock) {
  * Emits Figma Dev Mode properties that Elementor has no native UI control for
  * (multi-stop gradients, multi-layer box-shadow, backdrop-filter, filter, mix-blend-mode,
  * transform, aspect-ratio, clip-path, opacity, -webkit-text-stroke) into `custom_css`.
- */
-function applyDevModeResidualCss(settings, style = {}, targetSelector = 'selector') {
+ */function applyDevModeResidualCss(settings, style = {}, targetSelector = 'selector') {
   if (!settings || !style) return;
   const decls = [];
   if (style.devModeBackgroundCss && !style.backgroundImage && !/url\(\s*</i.test(style.devModeBackgroundCss)) {
@@ -4314,8 +4279,7 @@ function applyDevModeResidualCss(settings, style = {}, targetSelector = 'selecto
   if (decls.length > 0) {
     appendCustomCss(settings, `${targetSelector} {\n${decls.join('\n')}\n}`);
   }
-}
-function applyTextShadowAndEffects(settings, text = {}, selectorTarget = 'selector') {
+}function applyTextShadowAndEffects(settings, text = {}, selectorTarget = 'selector') {
   if (!settings || !text) return;
   if (text.textShadow && typeof text.textShadow === 'object') {
     settings.text_shadow_text_shadow_type = 'yes';
@@ -4329,8 +4293,7 @@ function applyTextShadowAndEffects(settings, text = {}, selectorTarget = 'select
   if (text.textStrokeCss) {
     appendCustomCss(settings, `${selectorTarget} {\n  -webkit-text-stroke: ${text.textStrokeCss};\n}`);
   }
-}
-function applyCommonBoxStyle(settings, style = {}, resolveMedia, options = {}) {
+}function applyCommonBoxStyle(settings, style = {}, resolveMedia, options = {}) {
   if (style.gradient) {
     settings.background_background = 'gradient';
     settings.background_gradient_type = style.gradient.type;
@@ -4413,8 +4376,7 @@ function applyCommonBoxStyle(settings, style = {}, resolveMedia, options = {}) {
   }
 
   applyDevModeResidualCss(settings, style, 'selector');
-}
-function applyTypographySettings(settings, prefix, text = {}, responsive = {}) {
+}function applyTypographySettings(settings, prefix, text = {}, responsive = {}) {
   if (!text) return;
   settings[`${prefix}_typography`] = 'custom';
   if (text.fontFamily) settings[`${prefix}_font_family`] = text.fontFamily;
@@ -4474,8 +4436,7 @@ function applyTypographySettings(settings, prefix, text = {}, responsive = {}) {
       sizes: [],
     };
   }
-}
-function inferHeadingTag(node) {
+}function inferHeadingTag(node) {
   const name = String((node.content && (node.content.rawName || node.content.name)) || '').toLowerCase();
   const match = /\bh([1-6])\b/.exec(name);
   if (match) return `h${match[1]}`;
@@ -4485,8 +4446,7 @@ function inferHeadingTag(node) {
   if (size >= 24) return 'h3';
   if (size >= 20) return 'h4';
   return 'h5';
-}
-function getTextGradientCss(text) {
+}function getTextGradientCss(text) {
   if (!text) return null;
   if (typeof text.gradientCss === 'string' && text.gradientCss.includes('gradient')) {
     return text.gradientCss.trim();
@@ -4496,11 +4456,9 @@ function getTextGradientCss(text) {
     return `linear-gradient(${g.angle ?? 180}deg, ${g.color1} ${g.stop1 ?? 0}%, ${g.color2} ${g.stop2 ?? 100}%)`;
   }
   return null;
-}
-function buildTextClipRule(selectorTarget, gradCss) {
+}function buildTextClipRule(selectorTarget, gradCss) {
   return `${selectorTarget} {\n  background: ${gradCss};\n  background-clip: text;\n  -webkit-background-clip: text;\n  -webkit-text-fill-color: transparent;\n}`;
-}
-function collectSubtreeTexts(node, nodes) {
+}function collectSubtreeTexts(node, nodes) {
   if (!node) return [];
   if (Array.isArray(node.extractedTexts) && node.extractedTexts.length > 0 && (!node.children || node.children.length === 0)) {
     return node.extractedTexts.map((t, idx) => ({
@@ -4517,8 +4475,7 @@ function collectSubtreeTexts(node, nodes) {
   };
   walk(node);
   return out;
-}
-function scopeSvgIds(svgMarkup, scopeSuffix) {
+}function scopeSvgIds(svgMarkup, scopeSuffix) {
   if (typeof svgMarkup !== 'string' || !svgMarkup.includes('<svg')) return svgMarkup || '';
   const suffix = String(scopeSuffix || 'f2e').replace(/[^a-zA-Z0-9_-]/g, '');
   if (!suffix) return svgMarkup;
@@ -4545,12 +4502,10 @@ function scopeSvgIds(svgMarkup, scopeSuffix) {
       .replace(new RegExp(`((?:xlink:)?href\\s*=\\s*)(["'])#${eId}\\2`, 'g'), `$1$2#${newId}$2`);
   }
   return out;
-}
-function svgMarkupToDataUri(markup) {
+}function svgMarkupToDataUri(markup) {
   if (!markup || typeof markup !== 'string') return '';
   return `data:image/svg+xml;base64,${bytesToBase64(utf8Bytes(markup))}`;
-}
-function collectSubtreeImages(node, nodes) {
+}function collectSubtreeImages(node, nodes) {
   if (!node) return [];
   if (Array.isArray(node.extractedImages) && node.extractedImages.length > 0) {
     return node.extractedImages.filter(Boolean);
@@ -4584,8 +4539,7 @@ function collectSubtreeImages(node, nodes) {
   };
   walk(node);
   return out;
-}
-function escapeHtml(str) {
+}function escapeHtml(str) {
   return String(str || '')
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')
@@ -5085,8 +5039,6 @@ const UNVERIFIED_GLOBAL_IDS = new Set([
 /**
  * Elementor v4 Atomic Widgets Compiler (`e-flexbox`, `e-heading`, `e-paragraph`, `e-button`, `e-image`, `e-svg`).
  */
-
-
 function buildV4ImageSrcProp(media) {
   if (media && Number(media.id) > 0) {
     return {
@@ -5107,8 +5059,7 @@ function buildV4ImageSrcProp(media) {
     };
   }
   return null;
-}
-function compileElementorV4(doc, options = {}) {
+}function compileElementorV4(doc, options = {}) {
   const { attachmentMap = {} } = options;
   const nodes = doc.nodes || {};
 
@@ -5307,8 +5258,7 @@ function buildV4Variant(breakpoint, layout = {}, style = {}, text = {}, resolveM
   // ── Module: src/exporters/nested-widgets.js ──
 /**
  * Elementor Nested Container Widgets (`nested-accordion`, `nested-tabs`).
- */
-function buildNestedAccordion(node, nodes, allocId, buildElement) {
+ */function buildNestedAccordion(node, nodes, allocId, buildElement) {
   const items = [];
   const panels = [];
   const extractedItems = (node.content && Array.isArray(node.content.accordionItems)) ? node.content.accordionItems : [];
@@ -5633,8 +5583,7 @@ function buildNestedAccordion(node, nodes, allocId, buildElement) {
     settings,
     elements: panels,
   };
-}
-function buildNestedTabs(node, nodes, allocId, buildElement) {
+}function buildNestedTabs(node, nodes, allocId, buildElement) {
   const tabs = [];
   const panels = [];
   const extractedItems = (node.content && Array.isArray(node.content.accordionItems)) ? node.content.accordionItems : [];
@@ -5675,8 +5624,7 @@ function buildNestedTabs(node, nodes, allocId, buildElement) {
   // ── Module: src/exporters/pro-widgets.js ──
 /**
  * Elementor Pro Widget Builders (`form`, `nav-menu`, `call-to-action`, `price-table`, `flip-box`, `slides`, `loop-grid`).
- */
-function buildProForm(node, nodes, allocId) {
+ */function buildProForm(node, nodes, allocId) {
   const formFields = [];
   const content = node.content || {};
   let submitLabel = content.submitLabel || 'Send Message';
@@ -5786,8 +5734,7 @@ function buildProForm(node, nodes, allocId) {
     settings,
     elements: [],
   };
-}
-function buildProNavMenu(node, nodes, allocId) {
+}function buildProNavMenu(node, nodes, allocId) {
   const menuItems = (node.content && node.content.menuItems) || [];
   const textItems = collectSubtreeTexts(node, nodes);
   let items = menuItems.map((m) => (typeof m === 'string' ? m : m.name));
@@ -5825,8 +5772,7 @@ function buildProNavMenu(node, nodes, allocId) {
     settings,
     elements: [],
   };
-}
-function buildProCta(node, nodes, allocId, resolveMedia) {
+}function buildProCta(node, nodes, allocId, resolveMedia) {
   const textItems = collectSubtreeTexts(node, nodes);
   const texts = textItems.map((t) => t.text.characters);
   const imgs = collectSubtreeImages(node, nodes);
@@ -5862,8 +5808,7 @@ function buildProCta(node, nodes, allocId, resolveMedia) {
     settings,
     elements: [],
   };
-}
-function buildProPriceTable(node, nodes, allocId) {
+}function buildProPriceTable(node, nodes, allocId) {
   const textItems = collectSubtreeTexts(node, nodes);
   const texts = textItems.map((t) => t.text.characters);
   const priceNode = textItems.find((t) => /[$€£₫¥]|\d+\s*\/\s*(mo|yr|tháng|năm)/i.test(t.text.characters) || /^\$?\d+$/.test(t.text.characters.trim()));
@@ -5915,8 +5860,7 @@ function buildProPriceTable(node, nodes, allocId) {
     settings,
     elements: [],
   };
-}
-function buildProFlipBox(node, nodes, allocId, resolveMedia) {
+}function buildProFlipBox(node, nodes, allocId, resolveMedia) {
   const textItems = collectSubtreeTexts(node, nodes);
   const texts = textItems.map((t) => t.text.characters);
   const imgs = collectSubtreeImages(node, nodes);
@@ -5961,8 +5905,7 @@ function buildProFlipBox(node, nodes, allocId, resolveMedia) {
     settings,
     elements: [],
   };
-}
-function buildProSlides(node, nodes, allocId, resolveMedia) {
+}function buildProSlides(node, nodes, allocId, resolveMedia) {
   const slides = [];
   const extractedSlides = (node.content && Array.isArray(node.content.slides)) ? node.content.slides : [];
   if (extractedSlides.length > 0) {
@@ -6007,8 +5950,7 @@ function buildProSlides(node, nodes, allocId, resolveMedia) {
     },
     elements: [],
   };
-}
-function buildProLoopGrid(node, allocId, wType = 'loop-grid') {
+}function buildProLoopGrid(node, allocId, wType = 'loop-grid') {
   const cols = Number(node.layout && node.layout.columns) || 3;
   return {
     id: allocId(node.id),
@@ -6023,8 +5965,7 @@ function buildProLoopGrid(node, allocId, wType = 'loop-grid') {
     },
     elements: [],
   };
-}
-function buildGenericProWidget(node, nodes, wType, allocId, resolveMedia) {
+}function buildGenericProWidget(node, nodes, wType, allocId, resolveMedia) {
   const textItems = collectSubtreeTexts(node, nodes);
   const texts = textItems.map((t) => t.text.characters);
   const firstTypo = node.text || (textItems[0] && textItems[0].text) || null;
@@ -6093,15 +6034,13 @@ function buildGenericProWidget(node, nodes, wType, allocId, resolveMedia) {
  *    when pasted via Clipboard (`Ctrl+V`) or when no WP attachment ID exists yet, so multi-color SVG paths render
  *    with 100% visual accuracy instead of falling back to a generic FontAwesome star!
  */
-
 const FLEX_ALIGN_MAP = {
   MIN: 'flex-start',
   CENTER: 'center',
   MAX: 'flex-end',
   SPACE_BETWEEN: 'space-between',
   BASELINE: 'baseline',
-};
-function compileElementorV3(doc, options = {}) {
+};function compileElementorV3(doc, options = {}) {
   const { attachmentMap = {}, autoUnwrap = true, linearBorder = true } = options;
   const nodes = doc.nodes || {};
   const usedIds = new Set();
@@ -6519,8 +6458,7 @@ function applyWidgetWrapperBoxStyles(el, node, resolveMedia) {
       settings._box_shadow_box_shadow_position = 'inset';
     }
   }
-}
-function compileElementorClipboard(doc, options = {}) {
+}function compileElementorClipboard(doc, options = {}) {
   const v3 = compileElementorV3(doc, options);
   return {
     type: 'elementor',
