@@ -518,6 +518,43 @@ assertTrue(($boundElements[0]['settings']['__globals__']['background_color'] ?? 
 assertTrue(($boundElements[0]['elements'][0]['settings']['__globals__']['title_color'] ?? '') === 'globals/colors?id=purewhite', 'GlobalStyles binds verified Active Kit color ID to heading title_color');
 assertTrue(($boundElements[0]['elements'][0]['settings']['__globals__']['typography_typography'] ?? '') === 'globals/typography?id=heroh1', 'GlobalStyles binds verified Active Kit typography ID to heading typography');
 
+$boundCounterAccordion = $globalsHelper->bindGlobalsToElements(
+    [
+        [
+            'id' => 'c1',
+            'elType' => 'widget',
+            'widgetType' => 'counter',
+            'settings' => [
+                'number_color' => '#123456',
+                'typography_number_typography' => 'custom',
+                'typography_number_font_family' => 'Inter',
+                'typography_number_font_size' => ['unit' => 'px', 'size' => 48],
+                'typography_number_font_weight' => '700',
+            ],
+            'elements' => [],
+        ],
+        [
+            'id' => 'a1',
+            'elType' => 'widget',
+            'widgetType' => 'accordion',
+            'settings' => [
+                'tab_color' => '#123456',
+                'tab_typography_typography' => 'custom',
+                'tab_typography_font_family' => 'Inter',
+                'tab_typography_font_size' => ['unit' => 'px', 'size' => 16],
+                'tab_typography_font_weight' => '600',
+            ],
+            'elements' => [],
+        ],
+    ],
+    ['#123456' => 'brandblue'],
+    ['inter|48|700' => 'counternum', 'inter|16|600' => 'tabtitle']
+);
+assertTrue(($boundCounterAccordion[0]['settings']['__globals__']['number_color'] ?? '') === 'globals/colors?id=brandblue', 'GlobalStyles binds number_color to Active Kit color');
+assertTrue(($boundCounterAccordion[0]['settings']['__globals__']['typography_number_typography'] ?? '') === 'globals/typography?id=counternum', 'GlobalStyles binds typography_number_typography to Active Kit typo');
+assertTrue(($boundCounterAccordion[1]['settings']['__globals__']['tab_color'] ?? '') === 'globals/colors?id=brandblue', 'GlobalStyles binds tab_color to Active Kit color');
+assertTrue(($boundCounterAccordion[1]['settings']['__globals__']['tab_typography_typography'] ?? '') === 'globals/typography?id=tabtitle', 'GlobalStyles binds tab_typography_typography to Active Kit typo');
+
 // 6. Test Data-URI SVG (utf8/urlencoded) decoding in AssetStore & comprehensive hydration in RestController
 $store = new AssetStore();
 $rawSvgDataUri = 'data:image/svg+xml;utf8,' . rawurlencode('<svg width="24" height="24" viewBox="0 0 24 24"><path d="M5 12h14"/></svg>');

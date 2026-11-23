@@ -2713,5 +2713,57 @@ test('Boxed vs Full Width layout detection: Child containers strictly full-width
   assert.equal(rootFreeform.settings.boxed_width.size, 1200);
 });
 
+test('Design System: VARIABLE_ALIAS chain resolves cleanly to RGBA hex values', async () => {
+  const { extractLocalDesignSystem } = await import('../src/extraction/design-system.js');
+
+  const mockAliasedFigma = {
+    variables: {
+      getLocalVariablesAsync: async (type) => {
+        if (type === 'COLOR') {
+          return [
+            {
+              id: 'var:semantic-primary',
+              name: 'Color/Brand/Primary',
+              variableCollectionId: 'col:semantic',
+              valuesByMode: { 'mode:sem': { type: 'VARIABLE_ALIAS', id: 'var:primitive-blue' } },
+            },
+            {
+              id: 'var:primitive-blue',
+              name: 'blue/600',
+              variableCollectionId: 'col:primitive',
+              valuesByMode: { 'mode:prim': { r: 0.1, g: 0.4, b: 0.9, a: 1 } },
+            },
+          ];
+        }
+        return [];
+      },
+      getLocalVariableCollectionsAsync: async () => [
+        { id: 'col:semantic', defaultModeId: 'mode:sem', modes: [{ modeId: 'mode:sem' }] },
+        { id: 'col:primitive', defaultModeId: 'mode:prim', modes: [{ modeId: 'mode:prim' }] },
+      ],
+      getVariableByIdAsync: async (id) => {
+        if (id === 'var:primitive-blue') {
+          return {
+            id: 'var:primitive-blue',
+            name: 'blue/600',
+            variableCollectionId: 'col:primitive',
+            valuesByMode: { 'mode:prim': { r: 0.1, g: 0.4, b: 0.9, a: 1 } },
+          };
+        }
+        return null;
+      },
+    },
+    getLocalPaintStylesAsync: async () => [],
+    getLocalTextStylesAsync: async () => [],
+  };
+
+  const ds = await extractLocalDesignSystem(mockAliasedFigma, []);
+  assert.equal(ds.colors.length, 2);
+  const primary = ds.colors.find((c) => c.name === 'Brand Primary');
+  assert.ok(primary, 'Brand Primary alias must be resolved and formatted');
+  assert.equal(primary.role, 'primary');
+  assert.equal(primary.value, '#1A66E6');
+});
+
 
 

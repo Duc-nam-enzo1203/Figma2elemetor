@@ -164,6 +164,10 @@ final class GlobalStyles
             'description_color',
             'normal_title_color',
             'active_title_color',
+            'tab_color',
+            'tab_active_color',
+            'content_color',
+            'tab_content_color',
             'number_color',
             'color_menu_item',
             'label_color',
@@ -183,6 +187,15 @@ final class GlobalStyles
             'content_typography',
             'icon_typography',
             'button_typography',
+            'typography_number',
+            'typography_title',
+            'name_typography',
+            'job_typography',
+            'label_typography',
+            'field_typography',
+            'tab_typography',
+            'tab_title_typography',
+            'tab_content_typography',
         ];
 
         $walk = function (array $list) use (&$walk, $colors, $typos, $colorFields, $typoPrefixes): array {

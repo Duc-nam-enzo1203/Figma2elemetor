@@ -2456,7 +2456,32 @@ function splitTopLevelCssLayers(str) {
   // ── Module: src/extraction/design-system.js ──
 /**
  * Design System & Site Settings extraction (Local Variables/Styles + Dev Mode auto-synthesis).
- */function detectColorRole(name) {
+ */function formatTokenTitle(name) {
+  const clean = safeStr(name, 'Color')
+    .replace(/^(color|colors|theme|mode|tokens?)[/_ -]+/i, '')
+    .replace(/[/_]+/g, ' ')
+    .trim();
+  return clean || safeStr(name, 'Color');
+}
+
+async function resolveColorVariableVal(figmaApi, rawVal, defaultModes, depth = 0) {
+  if (!rawVal || depth > 5) return null;
+  if (rawVal.type === 'VARIABLE_ALIAS' && rawVal.id && typeof figmaApi?.variables?.getVariableByIdAsync === 'function') {
+    try {
+      const targetVar = await figmaApi.variables.getVariableByIdAsync(rawVal.id);
+      if (targetVar && targetVar.valuesByMode) {
+        const targetMode = defaultModes[targetVar.variableCollectionId] || Object.keys(targetVar.valuesByMode)[0];
+        const nextVal = targetVar.valuesByMode[targetMode];
+        return resolveColorVariableVal(figmaApi, nextVal, defaultModes, depth + 1);
+      }
+    } catch (e) {}
+    return null;
+  }
+  if (typeof rawVal === 'object' && typeof rawVal.r === 'number') {
+    return rawVal;
+  }
+  return null;
+}function detectColorRole(name) {
   const lower = safeStr(name).toLowerCase();
   if (/(^|[-_/ ])(primary|brand|main)([-_/ ]|$)/i.test(lower)) return 'primary';
   if (/(^|[-_/ ])(secondary)([-_/ ]|$)/i.test(lower)) return 'secondary';
@@ -2505,14 +2530,15 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
       }
       const colorVars = await figmaApi.variables.getLocalVariablesAsync('COLOR');
       for (const v of colorVars || []) {
-        const val = v.valuesByMode ? v.valuesByMode[defaultModes[v.variableCollectionId]] : null;
-        if (val && typeof val === 'object' && val.type !== 'VARIABLE_ALIAS' && typeof val.r === 'number') {
+        const rawVal = v.valuesByMode ? v.valuesByMode[defaultModes[v.variableCollectionId]] : null;
+        const val = await resolveColorVariableVal(figmaApi, rawVal, defaultModes);
+        if (val && typeof val === 'object' && typeof val.r === 'number') {
           const hex = rgbToHex(val, val.a !== undefined ? val.a : 1);
-          const name = safeStr(v.name, 'Color');
+          const rawName = safeStr(v.name, 'Color');
           colors.push({
-            name,
+            name: formatTokenTitle(rawName),
             value: hex,
-            role: detectColorRole(name),
+            role: detectColorRole(rawName),
           });
         }
       }
@@ -2667,6 +2693,20 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
     const lowerName = safeStr(n.name).toLowerCase();
     const isBtn = lowerName.includes('button') || lowerName.includes('btn') || lowerName.includes('cta');
 
+    // Check boundVariables for remote Team Library variables
+    let boundVarName = null;
+    if (n.boundVariables && typeof figmaApi?.variables?.getVariableByIdAsync === 'function') {
+      const fRef = Array.isArray(n.boundVariables.fills)
+        ? n.boundVariables.fills[0]
+        : (n.boundVariables.fills && typeof n.boundVariables.fills === 'object' && n.boundVariables.fills.type === 'VARIABLE_ALIAS' ? n.boundVariables.fills : null);
+      if (fRef && fRef.id) {
+        try {
+          const bv = await figmaApi.variables.getVariableByIdAsync(fRef.id);
+          if (bv && bv.name) boundVarName = formatTokenTitle(bv.name);
+        } catch (e) {}
+      }
+    }
+
     let css = null;
     if (typeof n.getCSSAsync === 'function' && cssCalls < 65) {
       cssCalls += 1;
@@ -2679,7 +2719,7 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
       const cssColor = css && css['color'];
       const textHex = normalizeHex6(cssColor) || extractSolidColor(n.fills);
       if (textHex) {
-        recordColor(textHex, isBtn ? 'btn' : 'text', extractVarNameFromCssVal(cssColor));
+        recordColor(textHex, isBtn ? 'btn' : 'text', boundVarName || extractVarNameFromCssVal(cssColor));
       }
 
       const fn = n.fontName && typeof n.fontName === 'object' ? n.fontName : null;
@@ -2733,15 +2773,15 @@ function findNodeCandidate(nodes, predicate, depth = 0) {
       // Frame / Vector / Shape colors from Dev Mode CSS + fills/strokes
       const bgRaw = css && (css['background'] || css['background-color']);
       if (bgRaw && !String(bgRaw).includes('gradient')) {
-        recordColor(bgRaw, isBtn ? 'btn' : 'bg', extractVarNameFromCssVal(bgRaw));
+        recordColor(bgRaw, isBtn ? 'btn' : 'bg', boundVarName || extractVarNameFromCssVal(bgRaw));
       } else if (bgRaw && String(bgRaw).includes('gradient')) {
         const colorMatches = String(bgRaw).match(/#[0-9a-fA-F]{3,8}|rgba?\([^)]+\)/gi) || [];
         for (const cm of colorMatches.slice(0, 2)) {
-          recordColor(cm, isBtn ? 'btn' : 'bg', extractVarNameFromCssVal(bgRaw));
+          recordColor(cm, isBtn ? 'btn' : 'bg', boundVarName || extractVarNameFromCssVal(bgRaw));
         }
       } else {
         const solidBg = extractSolidColor(n.fills);
-        if (solidBg) recordColor(solidBg, isBtn ? 'btn' : 'bg');
+        if (solidBg) recordColor(solidBg, isBtn ? 'btn' : 'bg', boundVarName);
       }
 
       const strokeRaw = css && (css['stroke'] || css['border'] || css['border-color']);
