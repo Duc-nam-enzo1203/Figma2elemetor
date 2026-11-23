@@ -423,6 +423,12 @@ final class RestController
         return $saveResult;
     }
 
+    public function hydrateElements(array $elements, string $title = 'Figma Asset'): array
+    {
+        $errors = [];
+        return $this->hydrateCompiledElementAssets($elements, $title, [], [], $errors, []);
+    }
+
     private function extractDataUriMime(string $dataUri): string
     {
         if (preg_match('/^data:(image\/[a-z0-9.+-]+)(?:;[^,]*)?,/i', trim($dataUri), $m) === 1) {

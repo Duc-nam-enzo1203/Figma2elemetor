@@ -6,6 +6,6 @@
   "description": "Figma Desktop Plugin for converting designs to Elementor v3/v4 (Free & Pro) with zero API limits.",
   "scripts": {
     "build": "node scripts/build.mjs",
-    "test": "node --test tests/*.test.mjs"
+    "test": "node --test tests/e2e-schema.test.mjs tests/image-pipeline-fixes.test.mjs tests/plugin.test.mjs"
   }
 }

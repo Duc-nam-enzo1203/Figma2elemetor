@@ -333,8 +333,21 @@
         return;
       }
       const list = Array.isArray(elements) ? elements : [];
-      const rootContainer = elementor.getPreviewContainer();
-      if (!rootContainer) {
+      let targetContainer = null;
+      if (elementor.selection && typeof elementor.selection.getElements === 'function') {
+        const selected = elementor.selection.getElements();
+        if (selected && selected.length > 0) {
+          const first = selected[0];
+          const elType = first?.model?.get ? first.model.get('elType') : first?.model?.elType;
+          if (elType === 'container') {
+            targetContainer = first;
+          }
+        }
+      }
+      if (!targetContainer) {
+        targetContainer = elementor.getPreviewContainer();
+      }
+      if (!targetContainer) {
         console.warn('[F2E Bridge] Elementor preview container is not ready.');
         return;
       }
@@ -342,7 +355,7 @@
       for (const rawEl of list) {
         const el = await this.hydrateElementAssets(JSON.parse(JSON.stringify(rawEl)));
         await $e.run('document/elements/create', {
-          container: rootContainer,
+          container: targetContainer,
           model: el,
           options: { at: -1 },
         });
@@ -352,10 +365,53 @@
 
   window.f2eEditorBridge = f2eEditorBridge;
 
-  // Listen for paste event in capture phase to prevent Elementor double-paste when pasting F2E Clipboard JSON
-  window.addEventListener('paste', async (event) => {
-    const activeTag = document.activeElement?.tagName?.toLowerCase();
-    if (activeTag === 'input' || activeTag === 'textarea' || document.activeElement?.isContentEditable) {
+  function showToast(message, type = 'info', duration = 3000) {
+    if (typeof document === 'undefined' || typeof document.createElement !== 'function' || !document.body) {
+      return;
+    }
+    try {
+      let toast = document.getElementById('f2e-editor-toast');
+      if (!toast) {
+        toast = document.createElement('div');
+        toast.id = 'f2e-editor-toast';
+        toast.style.cssText = 'position:fixed;bottom:24px;right:24px;z-index:999999;padding:10px 18px;border-radius:8px;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;font-size:13px;font-weight:500;box-shadow:0 4px 14px rgba(0,0,0,0.25);transition:all .3s ease;display:flex;align-items:center;gap:8px;pointer-events:none;opacity:0;transform:translateY(10px);';
+        document.body.appendChild(toast);
+      }
+      if (type === 'loading') {
+        toast.style.background = '#1e293b';
+        toast.style.color = '#38bdf8';
+        toast.style.border = '1px solid #334155';
+        toast.textContent = message;
+      } else if (type === 'success') {
+        toast.style.background = '#065f46';
+        toast.style.color = '#34d399';
+        toast.style.border = '1px solid #059669';
+        toast.textContent = message;
+      } else if (type === 'error') {
+        toast.style.background = '#991b1b';
+        toast.style.color = '#fca5a5';
+        toast.style.border = '1px solid #b91c1c';
+        toast.textContent = message;
+      }
+      toast.style.opacity = '1';
+      toast.style.transform = 'translateY(0)';
+      if (duration > 0) {
+        setTimeout(() => {
+          if (toast) {
+            toast.style.opacity = '0';
+            toast.style.transform = 'translateY(10px)';
+          }
+        }, duration);
+      }
+    } catch (_) { }
+  }
+
+  let isPasting = false;
+  const handlePasteEvent = async (event) => {
+    const activeDoc = event.target?.ownerDocument || document;
+    const activeEl = activeDoc.activeElement || document.activeElement;
+    const activeTag = activeEl?.tagName?.toLowerCase();
+    if (activeTag === 'input' || activeTag === 'textarea' || activeEl?.isContentEditable || event.target?.isContentEditable) {
       return;
     }
     const text = (event.clipboardData?.getData('text/plain') || '').trim();
@@ -373,7 +429,51 @@
       event.preventDefault();
       event.stopPropagation();
       event.stopImmediatePropagation();
-      await f2eEditorBridge.insertElements(parsed.elements);
+      if (isPasting) {
+        return;
+      }
+      isPasting = true;
+      showToast('Đang chèn và nạp hình ảnh từ Figma...', 'loading', 0);
+      try {
+        await f2eEditorBridge.insertElements(parsed.elements);
+        showToast('Đã dán giao diện Figma thành công!', 'success', 3000);
+      } catch (err) {
+        console.error('[F2E Bridge] Insert error:', err);
+        showToast('Có lỗi xảy ra khi dán giao diện.', 'error', 4000);
+      } finally {
+        isPasting = false;
+      }
     }
-  }, true);
+  };
+
+  // 1. Listen on top-level window in capture phase (maintains test compatibility)
+  window.addEventListener('paste', handlePasteEvent, true);
+
+  // 2. Attach to Elementor Preview iframe window & document so pasting directly on canvas is intercepted
+  function attachIframePasteListeners() {
+    try {
+      const iframe = document.getElementById('elementor-preview-iframe');
+      if (iframe) {
+        if (iframe.contentWindow && !iframe.contentWindow._f2eBridgeAttached) {
+          iframe.contentWindow._f2eBridgeAttached = true;
+          iframe.contentWindow.addEventListener('paste', handlePasteEvent, true);
+        }
+        if (iframe.contentDocument && !iframe.contentDocument._f2eBridgeAttached) {
+          iframe.contentDocument._f2eBridgeAttached = true;
+          iframe.contentDocument.addEventListener('paste', handlePasteEvent, true);
+        }
+      }
+    } catch (_) { }
+  }
+
+  attachIframePasteListeners();
+
+  if (typeof elementor !== 'undefined') {
+    if (typeof elementor.on === 'function') {
+      elementor.on('preview:loaded', attachIframePasteListeners);
+    }
+    if (elementor.channels?.editor?.on) {
+      elementor.channels.editor.on('preview:loaded', attachIframePasteListeners);
+    }
+  }
 })(window.jQuery);

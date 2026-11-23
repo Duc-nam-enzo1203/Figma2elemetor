@@ -5,6 +5,9 @@ vendor/
 # Local references
 _references/
 
+# Archives
+*.zip
+
 # OS metadata
 .DS_Store
 Thumbs.db

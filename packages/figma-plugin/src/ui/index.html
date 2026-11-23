@@ -1739,7 +1739,7 @@
           </div>
           <button class="btn btn-primary" id="btn-sync-all-ds" style="width:100%;padding:8px 12px;font-weight:600;">
             <span class="btn-icon" data-ui-icon="upload"></span>
-            <span>⚡ Đồng bộ toàn bộ Site Settings vào WordPress</span>
+            <span>Đồng bộ toàn bộ Site Settings vào WordPress</span>
           </button>
           <div id="ds-sync-report" style="display:none;margin-top:8px;padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:10.5px;color:var(--text-secondary);">
           </div>
@@ -1983,7 +1983,7 @@
             <span class="btn-icon" data-ui-icon="arrow-left"></span>
             <span>Quay lại Bước 3</span>
           </button>
-          <span style="font-size:11px;color:var(--success);font-weight:500;">Sẵn sàng xuất ✓</span>
+          <span style="font-size:11px;color:var(--success);font-weight:500;">Sẵn sàng xuất</span>
         </div>
       </section>
     </div>
@@ -2336,11 +2336,10 @@
         modal.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);z-index:99999;display:flex;align-items:center;justify-content:center;padding:16px;';
         modal.innerHTML = `
           <div style="background:var(--bg-card,#1e293b);border:1px solid var(--border,#334155);border-radius:12px;padding:20px;max-width:380px;width:100%;box-shadow:0 10px 25px rgba(0,0,0,0.5);text-align:center;">
-            <div style="font-size:24px;margin-bottom:8px;">📋</div>
             <div style="font-weight:600;font-size:14px;color:var(--text,#f8fafc);margin-bottom:8px;">Bấm nút bên dưới để hoàn tất Sao chép</div>
             <div style="font-size:12px;color:var(--text-muted,#94a3b8);margin-bottom:16px;line-height:1.5;">Do bảo mật của Figma Desktop khi chuyển qua lại giữa các Frame, trình duyệt cần 1 click trực tiếp để ghi đè Clipboard mới nhất.</div>
             <button id="btn-manual-copy-confirm" class="btn btn-primary" style="width:100%;margin-bottom:8px;padding:10px;">
-              <span>⚡ Hoàn tất Sao chép Elementor JSON</span>
+              <span>Hoàn tất Sao chép Elementor JSON</span>
             </button>
             <button id="btn-manual-copy-close" class="btn btn-secondary" style="width:100%;padding:6px;font-size:12px;">Đóng</button>
           </div>
@@ -2655,7 +2654,7 @@
         triggerBtn.type = 'button';
         triggerBtn.className = 'widget-trigger-btn' + (item.source === 'override' ? ' is-override' : '') + (isUnwrap ? ' is-unwrap' : '');
         const prefix = item.source === 'override' ? '' : (isUnwrap ? '' : 'Auto: ');
-        const labelText = isUnwrap ? '⚡ Unwrap Container' : `${prefix}${wInfo.label}`;
+        const labelText = isUnwrap ? 'Unwrap Container' : `${prefix}${wInfo.label}`;
         triggerBtn.innerHTML =
           `<span class="w-icon">${getEiconSvg(wInfo.icon)}</span>` +
           `<span class="w-label">${labelText}</span>` +
@@ -2956,7 +2955,7 @@
         clearInterval(aiProgressInterval);
         aiProgressInterval = null;
       }
-      updateAiProgress(100, `✨ Hoàn tất! Đã tự động gán nhãn ${appliedCount} widget.`);
+      updateAiProgress(100, `Hoàn tất! Đã tự động gán nhãn ${appliedCount} widget.`);
       setAiStepState(4, 'done', `4. Đã gán nhãn thành công ${appliedCount} widget vào Figma`);
       document.getElementById('ai-modal-footer').style.display = 'flex';
       document.getElementById('btn-close-ai-modal').style.display = 'block';
@@ -3231,7 +3230,7 @@ HÃY TRẢ VỀ DUY NHẤT MỘT MẢNG JSON HỢP LỆ (KHÔNG KÈM TEXT GIẢI
           const colorRoles = ['primary', 'secondary', 'text', 'accent', 'custom'];
           colorsEl.innerHTML = colors.map((c, idx) => {
             const hex6 = /^#[0-9a-fA-F]{6}$/.test(c.value || '') ? c.value : '#16A34A';
-            const srcBadge = c.source === 'devmode' ? '<span style="font-size:9px;color:#34d399;margin-left:2px;" title="Tự sinh từ Dev Mode">⚡</span>' : '';
+            const srcBadge = c.source === 'devmode' ? '<span style="font-size:9px;color:#34d399;margin-left:2px;" title="Tự sinh từ Dev Mode">DEV</span>' : '';
             const roleOpts = colorRoles.map((r) => `<option value="${r}" ${c.role === r ? 'selected' : ''}>${r}</option>`).join('');
             return `
               <div class="ds-color-card" style="display:flex;align-items:center;gap:5px;padding:4px 6px;" data-color-idx="${idx}">

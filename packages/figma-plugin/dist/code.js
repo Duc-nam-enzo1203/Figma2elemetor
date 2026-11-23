@@ -8772,7 +8772,7 @@ async function handleApplyAiTags(tags = []) {
     appliedCount: applied,
     totalCount: tags.length,
   });
-  announce(`✨ Gemini Flash AI đã tự động gán thẻ thành công ${applied} widget!`);
+  announce(`Gemini Flash AI đã tự động gán thẻ thành công ${applied} widget!`);
 }function createMessageHandler() {
   return async (msg) => {
     if (!msg || !msg.type) return;

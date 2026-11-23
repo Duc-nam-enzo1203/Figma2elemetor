@@ -135,6 +135,9 @@ final class Plugin
 
         // Enqueue Elementor Editor integration script
         add_action('elementor/editor/after_enqueue_scripts', [$this, 'enqueueEditorBridge']);
+
+        // Server-side fallback for Elementor Cross-Site Paste AJAX (import_from_json)
+        add_action('elementor/ajax/register_actions', [$this, 'registerElementorAjaxOverrides'], 25);
     }
 
     public function registerAdminMenu(): void
@@ -278,6 +281,30 @@ final class Plugin
             'restUrl' => esc_url_raw(rest_url('f2e-bridge/v1')),
             'nonce' => wp_create_nonce('wp_rest'),
         ]);
+    }
+
+    public function registerElementorAjaxOverrides($ajax): void
+    {
+        if (!is_object($ajax) || !method_exists($ajax, 'register_ajax_action')) {
+            return;
+        }
+
+        $ajax->register_ajax_action('import_from_json', function (array $data) {
+            if (!empty($data['elements']) && is_string($data['elements'])) {
+                $decoded = json_decode($data['elements'], true);
+                if (is_array($decoded)) {
+                    $rest = new Api\RestController();
+                    $hydrated = $rest->hydrateElements($decoded, 'Figma Pasted Asset');
+                    $data['elements'] = wp_json_encode($hydrated);
+                }
+            }
+
+            if (class_exists('\\Elementor\\Plugin') && isset(\Elementor\Plugin::$instance->templates_manager)) {
+                return \Elementor\Plugin::$instance->templates_manager->import_from_json($data);
+            }
+
+            return new \WP_Error('elementor_not_available', 'Elementor Templates Manager is not loaded.');
+        });
     }
 }
 

@@ -59,9 +59,12 @@
   </nav>
 
   <div class="selection-bar">
-    <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Đang chọn: <strong id="sel-summary">Chưa chọn Frame nào</strong></span>
+    <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">Đang chọn: <strong
+        id="sel-summary">Chưa chọn Frame nào</strong></span>
     <div style="display:flex;gap:4px;flex-shrink:0;">
-      <button class="btn btn-secondary btn-sm" id="btn-jump-devcss" title="Xem trực tiếp Figma Dev Mode CSS (node.getCSSAsync)" style="color:#93c5fd;border-color:rgba(59,130,246,0.35);background:rgba(37,99,235,0.12);">
+      <button class="btn btn-secondary btn-sm" id="btn-jump-devcss"
+        title="Xem trực tiếp Figma Dev Mode CSS (node.getCSSAsync)"
+        style="color:#93c5fd;border-color:rgba(59,130,246,0.35);background:rgba(37,99,235,0.12);">
         <span style="font-family:monospace;font-weight:700;">{ }</span>
         <span id="devcss-top-badge">Dev CSS</span>
       </button>
@@ -83,7 +86,9 @@
             <span class="badge">Không sửa file gốc</span>
           </div>
           <p class="hint">
-            Tự động nhận diện và gắn thẻ <strong>BG (Gộp nhiều lớp nền thành 1 ảnh WebP)</strong>, gom nhóm <strong>Icon SVG</strong> và chạy <em>Virtual Auto-Layout</em> trong RAM — <strong>giữ nguyên 100% thiết kế Figma gốc</strong>, không làm dịch chuyển layout.
+            Tự động nhận diện và gắn thẻ <strong>BG (Gộp nhiều lớp nền thành 1 ảnh WebP)</strong>, gom nhóm <strong>Icon
+              SVG</strong> và chạy <em>Virtual Auto-Layout</em> trong RAM — <strong>giữ nguyên 100% thiết kế Figma
+              gốc</strong>, không làm dịch chuyển layout.
           </p>
           <button class="btn btn-primary" id="btn-fix-layout" style="width:100%;">
             <span class="btn-icon" data-eicon="flexbox"></span>
@@ -252,13 +257,16 @@
               <div class="devcss-title">
                 <span class="btn-icon" data-ui-icon="code" style="color:#60a5fa;"></span>
                 <span>Figma Dev Mode CSS</span>
-                <span class="badge" id="devcss-count-badge" style="background:rgba(16,185,129,0.16);color:#34d399;border-color:rgba(16,185,129,0.35);font-size:9.5px;">getCSSAsync()</span>
+                <span class="badge" id="devcss-count-badge"
+                  style="background:rgba(16,185,129,0.16);color:#34d399;border-color:rgba(16,185,129,0.35);font-size:9.5px;">getCSSAsync()</span>
               </div>
               <div style="display:flex;gap:4px;">
-                <button type="button" class="btn btn-secondary btn-sm" id="btn-devcss-subtree" title="Trích xuất CSS của cả cụm layer con (Subtree)" style="padding:3px 7px;font-size:10px;">
+                <button type="button" class="btn btn-secondary btn-sm" id="btn-devcss-subtree"
+                  title="Trích xuất CSS của cả cụm layer con (Subtree)" style="padding:3px 7px;font-size:10px;">
                   <span>Cả cụm</span>
                 </button>
-                <button type="button" class="btn btn-primary btn-sm" id="btn-copy-devcss" title="Copy đoạn mã CSS đang hiển thị" style="padding:3px 8px;font-size:10px;">
+                <button type="button" class="btn btn-primary btn-sm" id="btn-copy-devcss"
+                  title="Copy đoạn mã CSS đang hiển thị" style="padding:3px 8px;font-size:10px;">
                   <span>Copy CSS</span>
                 </button>
               </div>
@@ -267,7 +275,9 @@
             <div class="devcss-meta-bar">
               <div style="display:flex;align-items:center;gap:5px;min-width:0;">
                 <span class="tag-pill" id="devcss-node-type">FRAME</span>
-                <strong id="devcss-node-name" style="color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;">Chưa chọn layer</strong>
+                <strong id="devcss-node-name"
+                  style="color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:170px;">Chưa
+                  chọn layer</strong>
                 <span id="devcss-node-size" style="color:var(--muted);font-family:monospace;font-size:9.5px;"></span>
               </div>
               <div style="display:flex;align-items:center;gap:4px;">
@@ -283,11 +293,13 @@
             </div>
 
             <div class="devcss-code-box" id="devcss-code-view">
-              <span class="devcss-comment">/* Bấm vào bất kỳ layer nào ở cây bên trên hoặc chọn trên Figma để xem mã CSS thật từ Figma Dev Mode (await node.getCSSAsync()) */</span>
+              <span class="devcss-comment">/* Bấm vào bất kỳ layer nào ở cây bên trên hoặc chọn trên Figma để xem mã CSS
+                thật từ Figma Dev Mode (await node.getCSSAsync()) */</span>
             </div>
 
             <div class="devcss-pills-wrap" id="devcss-mapping-pills">
-              <span style="font-size:10px;color:var(--muted);">Thông số ánh xạ sang Elementor sẽ hiển thị tại đây.</span>
+              <span style="font-size:10px;color:var(--muted);">Thông số ánh xạ sang Elementor sẽ hiển thị tại
+                đây.</span>
             </div>
           </div>
         </div>
@@ -334,23 +346,30 @@
             </label>
           </div>
           <p class="hint" style="margin-bottom:6px;">
-            Tự động tổng hợp từ <strong>Figma Variables, Styles &amp; Dev Mode CSS</strong>. Bạn có thể chỉnh sửa trực tiếp màu sắc, tên, font và vai trò (role) ngay bên dưới trước khi đồng bộ!
+            Tự động tổng hợp từ <strong>Figma Variables, Styles &amp; Dev Mode CSS</strong>. Bạn có thể chỉnh sửa trực
+            tiếp màu sắc, tên, font và vai trò (role) ngay bên dưới trước khi đồng bộ!
           </p>
           <!-- Color Swatches Grid -->
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:8px;margin-bottom:4px;">
-            <span style="font-size:10.5px;color:var(--text-secondary);font-weight:600;">Bảng màu phát hiện (Chỉnh sửa trực tiếp):</span>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-ds-add-color" style="padding:2px 7px;font-size:10px;">+ Thêm màu</button>
+            <span style="font-size:10.5px;color:var(--text-secondary);font-weight:600;">Bảng màu phát hiện (Chỉnh sửa
+              trực tiếp):</span>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-ds-add-color"
+              style="padding:2px 7px;font-size:10px;">+ Thêm màu</button>
           </div>
           <div class="ds-grid-colors" id="ds-colors-preview" style="grid-template-columns:1fr;gap:5px;">
-            <div style="color:var(--muted);font-size:10.5px;padding:6px;">Bấm "Quét lại" để tự sinh bảng màu từ Frame / Dev Mode...</div>
+            <div style="color:var(--muted);font-size:10.5px;padding:6px;">Bấm "Quét lại" để tự sinh bảng màu từ Frame /
+              Dev Mode...</div>
           </div>
           <!-- Typography List -->
           <div style="display:flex;align-items:center;justify-content:space-between;margin-top:10px;margin-bottom:4px;">
-            <span style="font-size:10.5px;color:var(--text-secondary);font-weight:600;">Kiểu chữ phát hiện (Chỉnh sửa trực tiếp):</span>
-            <button type="button" class="btn btn-secondary btn-sm" id="btn-ds-add-font" style="padding:2px 7px;font-size:10px;">+ Thêm font</button>
+            <span style="font-size:10.5px;color:var(--text-secondary);font-weight:600;">Kiểu chữ phát hiện (Chỉnh sửa
+              trực tiếp):</span>
+            <button type="button" class="btn btn-secondary btn-sm" id="btn-ds-add-font"
+              style="padding:2px 7px;font-size:10px;">+ Thêm font</button>
           </div>
           <div class="ds-fonts-list" id="ds-fonts-preview" style="display:flex;flex-direction:column;gap:5px;">
-            <div style="color:var(--muted);font-size:10.5px;padding:6px;">Bấm "Quét lại" để tự sinh kiểu chữ H1–H6, Body từ Frame / Dev Mode...</div>
+            <div style="color:var(--muted);font-size:10.5px;padding:6px;">Bấm "Quét lại" để tự sinh kiểu chữ H1–H6, Body
+              từ Frame / Dev Mode...</div>
           </div>
         </div>
 
@@ -383,9 +402,12 @@
                 <span style="font-weight:500;">Primary Button</span>
               </div>
               <div style="display:flex;align-items:center;gap:4px;">
-                <input type="color" id="ds-edit-btn-bg" value="#16A34A" title="Màu nền nút" style="width:20px;height:20px;border:none;background:none;padding:0;cursor:pointer;" />
-                <input type="color" id="ds-edit-btn-color" value="#FFFFFF" title="Màu chữ nút" style="width:20px;height:20px;border:none;background:none;padding:0;cursor:pointer;" />
-                <input type="number" id="ds-edit-btn-radius" value="8" min="0" max="99" title="Bo góc (px)" style="width:44px;padding:2px 4px;font-size:10.5px;" />
+                <input type="color" id="ds-edit-btn-bg" value="#16A34A" title="Màu nền nút"
+                  style="width:20px;height:20px;border:none;background:none;padding:0;cursor:pointer;" />
+                <input type="color" id="ds-edit-btn-color" value="#FFFFFF" title="Màu chữ nút"
+                  style="width:20px;height:20px;border:none;background:none;padding:0;cursor:pointer;" />
+                <input type="number" id="ds-edit-btn-radius" value="8" min="0" max="99" title="Bo góc (px)"
+                  style="width:44px;padding:2px 4px;font-size:10.5px;" />
                 <span style="font-size:10px;color:var(--muted);">px</span>
               </div>
               <span class="ds-preview-badge" id="ds-theme-button-spec" style="display:none;"></span>
@@ -418,7 +440,8 @@
               <span style="font-weight:500;">Container Max Width</span>
             </div>
             <div style="display:flex;align-items:center;gap:4px;">
-              <input type="number" id="ds-edit-layout-width" value="1200" min="600" max="2400" step="10" style="width:68px;padding:2px 5px;font-size:10.5px;" />
+              <input type="number" id="ds-edit-layout-width" value="1200" min="600" max="2400" step="10"
+                style="width:68px;padding:2px 5px;font-size:10.5px;" />
               <span style="font-size:10px;color:var(--muted);">px</span>
               <span id="ds-layout-width-spec" style="display:none;"></span>
             </div>
@@ -429,8 +452,10 @@
               <span style="font-weight:500;">Site Background Color</span>
             </div>
             <div style="display:flex;align-items:center;gap:4px;">
-              <input type="color" id="ds-edit-layout-bg" value="#FFFFFF" style="width:20px;height:20px;border:none;background:none;padding:0;cursor:pointer;" />
-              <input type="text" id="ds-edit-layout-bg-hex" value="#FFFFFF" style="width:68px;padding:2px 5px;font-size:10.5px;font-family:monospace;" />
+              <input type="color" id="ds-edit-layout-bg" value="#FFFFFF"
+                style="width:20px;height:20px;border:none;background:none;padding:0;cursor:pointer;" />
+              <input type="text" id="ds-edit-layout-bg-hex" value="#FFFFFF"
+                style="width:68px;padding:2px 5px;font-size:10.5px;font-family:monospace;" />
               <span id="ds-layout-bg-spec" style="display:none;"></span>
             </div>
           </div>
@@ -444,16 +469,19 @@
               <span>4. CSS Engine & Hiệu ứng đặc biệt</span>
             </span>
           </div>
-          <div style="padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;">
+          <div
+            style="padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);margin-bottom:6px;">
             <label class="checkbox-row" style="margin-bottom:2px;font-weight:600;">
               <input type="checkbox" id="chk-linear-border" checked style="accent-color:#2563eb;" />
               <span>Tự động sinh Custom CSS cho Viền dải màu (Linear Border)</span>
             </label>
             <p style="font-size:10px;color:var(--muted);margin:0;line-height:1.35;">
-              Sinh CSS <code>background-clip: padding-box, border-box</code> giữ nguyên góc bo tròn bo cong viền gradient.
+              Sinh CSS <code>background-clip: padding-box, border-box</code> giữ nguyên góc bo tròn bo cong viền
+              gradient.
             </p>
           </div>
-          <div style="padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);">
+          <div
+            style="padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);">
             <label class="checkbox-row" style="margin-bottom:2px;font-weight:600;">
               <input type="checkbox" id="chk-dev-mode-css" checked style="accent-color:#2563eb;" />
               <span>Đồng bộ Full CSS từ Figma Dev Mode (node.getCSSAsync)</span>
@@ -466,15 +494,19 @@
 
         <!-- Action Sync Button -->
         <div class="ds-section-card" style="background:rgba(37,99,235,0.06);border-color:rgba(37,99,235,0.25);">
-          <div style="margin-bottom:8px;font-weight:600;font-size:11.5px;color:var(--text);display:flex;align-items:center;justify-content:space-between;">
+          <div
+            style="margin-bottom:8px;font-weight:600;font-size:11.5px;color:var(--text);display:flex;align-items:center;justify-content:space-between;">
             <span>Đồng bộ sang WordPress Active Kit</span>
-            <span class="badge" style="background:rgba(37,99,235,0.2);color:#93c5fd;border-color:rgba(37,99,235,0.4);">Site Settings</span>
+            <span class="badge"
+              style="background:rgba(37,99,235,0.2);color:#93c5fd;border-color:rgba(37,99,235,0.4);">Site
+              Settings</span>
           </div>
           <button class="btn btn-primary" id="btn-sync-all-ds" style="width:100%;padding:8px 12px;font-weight:600;">
             <span class="btn-icon" data-ui-icon="upload"></span>
-            <span>⚡ Đồng bộ toàn bộ Site Settings vào WordPress</span>
+            <span>Đồng bộ toàn bộ Site Settings vào WordPress</span>
           </button>
-          <div id="ds-sync-report" style="display:none;margin-top:8px;padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:10.5px;color:var(--text-secondary);">
+          <div id="ds-sync-report"
+            style="display:none;margin-top:8px;padding:6px 8px;background:var(--bg-subtle);border:1px solid var(--border);border-radius:var(--radius-sm);font-size:10.5px;color:var(--text-secondary);">
           </div>
         </div>
 
@@ -704,9 +736,12 @@
               <span class="btn-icon" data-ui-icon="check"></span>
               <span>Kiểm tra & Tự động chuẩn hoá khớp thiết kế</span>
             </span>
-            <span class="badge" id="fidelity-score-badge" style="background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3);">100% Match</span>
+            <span class="badge" id="fidelity-score-badge"
+              style="background:rgba(16,185,129,0.15);color:#34d399;border-color:rgba(16,185,129,0.3);">100%
+              Match</span>
           </div>
-          <div id="fidelity-report-summary" style="font-size:10.5px;color:var(--text-secondary);margin-bottom:6px;"></div>
+          <div id="fidelity-report-summary" style="font-size:10.5px;color:var(--text-secondary);margin-bottom:6px;">
+          </div>
           <div id="fidelity-report-list" class="ds-fonts-list" style="max-height:110px;"></div>
         </div>
 
@@ -716,7 +751,7 @@
             <span class="btn-icon" data-ui-icon="arrow-left"></span>
             <span>Quay lại Bước 3</span>
           </button>
-          <span style="font-size:11px;color:var(--success);font-weight:500;">Sẵn sàng xuất ✓</span>
+          <span style="font-size:11px;color:var(--success);font-weight:500;">Sẵn sàng xuất</span>
         </div>
       </section>
     </div>

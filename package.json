@@ -1,0 +1,13 @@
+{
+  "name": "f2e-bridge-workspace",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "F2E Bridge — Figma to Elementor (Free & Pro, v3 + v4, Zero Limits)",
+  "scripts": {
+    "build": "npm --prefix packages/figma-plugin run build",
+    "test:figma": "npm --prefix packages/figma-plugin test",
+    "test:bridge": "node --test packages/wordpress-plugin/tests/editor-bridge.test.mjs",
+    "test": "npm run test:figma && npm run test:bridge"
+  }
+}

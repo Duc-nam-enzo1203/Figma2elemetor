@@ -941,7 +941,7 @@ export async function handleLivePushToWordPress(payload) {
     fidelityReport,
   });
   announce(`Đã đẩy thành công lên WordPress! (${result.actionLabel || 'Saved'} — Post #${result.postId})`);
-  await handleLoadSiteTargets(site.siteUrl).catch(() => {});
+  await handleLoadSiteTargets(site.siteUrl).catch(() => { });
 }
 
 async function handleScanDesignSystemPreview() {
@@ -1082,7 +1082,7 @@ async function handleApplyAiTags(tags = []) {
     appliedCount: applied,
     totalCount: tags.length,
   });
-  announce(`✨ Gemini Flash AI đã tự động gán thẻ thành công ${applied} widget!`);
+  announce(`Gemini Flash AI đã tự động gán thẻ thành công ${applied} widget!`);
 }
 
 export function createMessageHandler() {
