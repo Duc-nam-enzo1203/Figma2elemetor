@@ -6422,7 +6422,9 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
     if (parentIsRow) {
       if (sizingH === 'FILL') {
         settings._flex_size = 'grow';
-        // Crucial: In 2-column or multi-column rows, Elementor requires width even when sizing is FILL
+        // In Elementor Row layout, when a sibling has a FIXED width (e.g. Form 336px) or when this container is FILL,
+        // we can set percentage width IF parent width is known, or let _flex_size: 'grow' take available space.
+        // If parent has explicit children and widths, compute proportional pct:
         if (nodeW > 0 && parentWidth > 0) {
           const pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
           settings.width = { unit: '%', size: pct, sizes: [] };
@@ -6435,12 +6437,41 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
           } else {
             settings.width_mobile = { unit: '%', size: 100, sizes: [] };
           }
+        } else {
+          // No parentWidth known: leave width unset so flex-grow: 1 takes up the remaining space without forcing 100%!
+          delete settings.width;
+          settings.width_mobile = { unit: '%', size: 100, sizes: [] };
+        }
+      } else if (sizingH === 'HUG') {
+        // Child container is HUG in Figma:
+        // Do NOT force 100% width! If it has space to grow in a 2-column or fluid row, allow it to grow or stay auto
+        if (nodeW > 0 && parentWidth > 0 && nodeW >= parentWidth * 0.4) {
+          // Major content column (like Text + Button hero column) in Figma Auto-Layout Hugs content width
+          // Use proportional percentage width so it doesn't wrap or collapse
+          const pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
+          settings._flex_size = 'grow';
+          settings.width = { unit: '%', size: pct, sizes: [] };
+          if (pct >= 42 && pct <= 68) {
+            settings.width_tablet = { unit: '%', size: 100, sizes: [] };
+            settings.width_mobile = { unit: '%', size: 100, sizes: [] };
+          } else {
+            settings.width_mobile = { unit: '%', size: 100, sizes: [] };
+          }
+        } else {
+          // Small hug frame (badge, tag, inline chip container)
+          settings._flex_size = 'none';
+          settings.width = { unit: 'px', size: nodeW, sizes: [] };
+          settings.width_mobile = { unit: '%', size: 100, sizes: [] };
         }
       } else if (nodeW > 0) {
-        // Calculate percentage width if it's a major column (>= 20% of parent), or exact px for small chips/badges
+        // sizingH === 'FIXED'
+        // If it's a fixed-width column (like Form 336px, Sidebar 300px, or 4-col card)
         settings._flex_size = 'none';
         if (nodeW >= 180 && parentWidth > 0 && nodeW < parentWidth) {
           const pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
+          // Check if parent's layout allows percentage, or if fixed pixel width is preferred
+          // In Elementor, a fixed sidebar or form (e.g. 336px) alongside a fluid text column
+          // is best represented as exact px or %:
           settings.width = { unit: '%', size: pct, sizes: [] };
           // Multi-column responsive wrapping matching Elementor Dev standards
           if (pct >= 18 && pct <= 28) {
