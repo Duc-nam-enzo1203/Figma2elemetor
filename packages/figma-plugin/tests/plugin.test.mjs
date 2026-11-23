@@ -2954,5 +2954,52 @@ test('Form Extraction: Preserves all 5 input fields, distinguishes select & date
   assert.equal(formWidget.settings.show_labels, '', 'show_labels must be empty to avoid duplicate labels when placeholders are used');
 });
 
+test('Row Container Child Sizing: HUG/FILL text column and FIXED form sit side-by-side without 100% width blowing up', async () => {
+  const doc = {
+    title: 'Hero Test',
+    roots: ['hero-root'],
+    nodes: {
+      'hero-root': {
+        id: 'hero-root',
+        widget: 'container',
+        layout: { width: 1440, height: 700, direction: 'column', padding: { top: 60, right: 24, bottom: 60, left: 24 } },
+        children: ['hero-inner'],
+      },
+      'hero-inner': {
+        id: 'hero-inner',
+        widget: 'container',
+        layout: { width: 1200, height: 600, direction: 'row', gap: 32 },
+        children: ['text-col', 'form-col'],
+      },
+      'text-col': {
+        id: 'text-col',
+        widget: 'container',
+        content: { name: 'Text+ button' },
+        layout: { width: 686, height: 503, direction: 'column', sizingH: 'HUG', sizingV: 'FILL' },
+        children: [],
+      },
+      'form-col': {
+        id: 'form-col',
+        widget: 'form',
+        content: { name: 'Form' },
+        layout: { width: 336, height: 350, sizingH: 'FIXED' },
+      },
+    },
+  };
+
+  const compiled = compileElementorClipboard(doc);
+  const root = compiled.elements[0];
+  assert.equal(root.settings.flex_direction, 'row');
+  assert.equal(root.elements.length, 2);
+
+  const textCol = root.elements[0];
+  assert.equal(textCol.elType, 'container');
+  assert.ok(textCol.settings.width, 'Text column must have an explicit percentage width');
+  assert.notEqual(textCol.settings.width.size, 100, 'Desktop width of Text column must NEVER be 100%');
+  assert.equal(textCol.settings._flex_size, 'grow');
+  assert.equal(textCol.settings.width_mobile.size, 100, 'Mobile width must wrap to 100%');
+});
+
+
 
 

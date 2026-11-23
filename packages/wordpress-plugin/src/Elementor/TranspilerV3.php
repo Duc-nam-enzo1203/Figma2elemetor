@@ -291,18 +291,26 @@ final class TranspilerV3
             $settings['content_width'] = 'full';
             unset($settings['boxed_width'], $settings['boxed_width_tablet'], $settings['boxed_width_mobile']);
             if ($nodeW > 0) {
-                $parentW = 1240;
-                if (($layout['sizingH'] ?? '') === 'FILL') {
-                    $settings['_flex_size'] = 'grow';
-                    $pct = round(($nodeW / $parentW) * 100, 1);
-                    $settings['width'] = ['unit' => '%', 'size' => min(100, $pct), 'sizes' => []];
-                    if ($pct >= 42 && $pct <= 68) {
-                        $settings['width_tablet'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
-                        $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
-                    } else {
+                $parentLayout = (is_array($parentNode) && isset($parentNode['layout'])) ? $parentNode['layout'] : [];
+                $parentIsRow = (($parentLayout['direction'] ?? 'column') === 'row');
+                $parentW = (int) ($parentLayout['width'] ?? 1240);
+                if ($parentIsRow) {
+                    $sizingH = (string) ($layout['sizingH'] ?? 'HUG');
+                    if ($sizingH === 'FILL' || ($sizingH === 'HUG' && $nodeW >= 240 && $nodeW < $parentW)) {
+                        $settings['_flex_size'] = 'grow';
+                        $pct = round(($nodeW / $parentW) * 100, 1);
+                        $settings['width'] = ['unit' => '%', 'size' => min(100, $pct), 'sizes' => []];
+                        if ($pct >= 42 && $pct <= 68) {
+                            $settings['width_tablet'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
+                            $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
+                        } else {
+                            $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
+                        }
+                    } elseif ($nodeW < $parentW * 0.92) {
+                        $settings['width'] = ['unit' => 'px', 'size' => $nodeW, 'sizes' => []];
                         $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
                     }
-                } elseif ($nodeW < $parentW * 0.92) {
+                } elseif ((($layout['sizingH'] ?? '') === 'FIXED') && $nodeW < $parentW * 0.92) {
                     $settings['width'] = ['unit' => 'px', 'size' => $nodeW, 'sizes' => []];
                     $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
                 }

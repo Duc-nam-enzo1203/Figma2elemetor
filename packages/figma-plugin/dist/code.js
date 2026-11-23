@@ -6422,9 +6422,6 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
     if (parentIsRow) {
       if (sizingH === 'FILL') {
         settings._flex_size = 'grow';
-        // In Elementor Row layout, when a sibling has a FIXED width (e.g. Form 336px) or when this container is FILL,
-        // we can set percentage width IF parent width is known, or let _flex_size: 'grow' take available space.
-        // If parent has explicit children and widths, compute proportional pct:
         if (nodeW > 0 && parentWidth > 0) {
           const pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
           settings.width = { unit: '%', size: pct, sizes: [] };
@@ -6438,21 +6435,22 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
             settings.width_mobile = { unit: '%', size: 100, sizes: [] };
           }
         } else {
-          // No parentWidth known: leave width unset so flex-grow: 1 takes up the remaining space without forcing 100%!
           delete settings.width;
           settings.width_mobile = { unit: '%', size: 100, sizes: [] };
         }
       } else if (sizingH === 'HUG') {
         // Child container is HUG in Figma:
-        // Do NOT force 100% width! If it has space to grow in a 2-column or fluid row, allow it to grow or stay auto
-        if (nodeW > 0 && parentWidth > 0 && nodeW >= parentWidth * 0.4) {
-          // Major content column (like Text + Button hero column) in Figma Auto-Layout Hugs content width
-          // Use proportional percentage width so it doesn't wrap or collapse
+        // In any Row layout, a container can either be a major column (text column, content block) or an inline chip.
+        // If its width is >= 240px, or it occupies >= 25% of parent row, calculate exact percentage so it sits side-by-side!
+        if (nodeW >= 240 && parentWidth > 0 && nodeW < parentWidth) {
           const pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
           settings._flex_size = 'grow';
           settings.width = { unit: '%', size: pct, sizes: [] };
           if (pct >= 42 && pct <= 68) {
             settings.width_tablet = { unit: '%', size: 100, sizes: [] };
+            settings.width_mobile = { unit: '%', size: 100, sizes: [] };
+          } else if (pct >= 29 && pct <= 41) {
+            settings.width_tablet = { unit: '%', size: 48, sizes: [] };
             settings.width_mobile = { unit: '%', size: 100, sizes: [] };
           } else {
             settings.width_mobile = { unit: '%', size: 100, sizes: [] };
@@ -6469,9 +6467,6 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
         settings._flex_size = 'none';
         if (nodeW >= 180 && parentWidth > 0 && nodeW < parentWidth) {
           const pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
-          // Check if parent's layout allows percentage, or if fixed pixel width is preferred
-          // In Elementor, a fixed sidebar or form (e.g. 336px) alongside a fluid text column
-          // is best represented as exact px or %:
           settings.width = { unit: '%', size: pct, sizes: [] };
           // Multi-column responsive wrapping matching Elementor Dev standards
           if (pct >= 18 && pct <= 28) {
@@ -7037,9 +7032,20 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
   // 3. Final expansion pass
   activeChildIds = expandUnwrappedChildren(activeChildIds);
 
+  // When unwrapping has happened or parent direction changed, construct an effective parent layout
+  // for child flex sizing so children know they are in a ROW container!
+  const effectiveParentNode = {
+    ...node,
+    layout: {
+      ...(node.layout || {}),
+      direction: settings.flex_direction || node.layout?.direction || 'column',
+      width: settings.boxed_width?.size || node.layout?.width || 1240,
+    },
+  };
+
   const elements = [];
   for (const cid of activeChildIds) {
-    const childEl = buildElement(cid, false, node);
+    const childEl = buildElement(cid, false, effectiveParentNode);
     if (childEl) {
       if (childEl.elType === 'container') childEl.isInner = true;
       elements.push(childEl);
