@@ -408,10 +408,10 @@ final class TranspilerV3
                 break;
             }
 
-            // Inherit boxed width from child
+            // Inherit boxed width from child ONLY if this is the root container!
             $childLayout = is_array($singleChild['layout'] ?? null) ? $singleChild['layout'] : [];
             $childW = (int) ($childLayout['width'] ?? 0);
-            if ($childW > 0 && $childW <= 1360) {
+            if ($isRoot && $childW >= 960 && $childW <= 1360) {
                 $settings['content_width'] = 'boxed';
                 $settings['boxed_width'] = ['unit' => 'px', 'size' => min(1320, max(960, $childW)), 'sizes' => []];
                 $settings['boxed_width_tablet'] = ['unit' => 'px', 'size' => 768, 'sizes' => []];
@@ -482,6 +482,12 @@ final class TranspilerV3
                 }
                 $children[] = $childEl;
             }
+        }
+
+        // Absolute invariant: child containers are NEVER boxed, always strictly full-width
+        if (!$isRoot) {
+            $settings['content_width'] = 'full';
+            unset($settings['boxed_width'], $settings['boxed_width_tablet'], $settings['boxed_width_mobile']);
         }
 
         return $this->wrapElement('container', null, $settings, $globals, $children, !$isRoot);

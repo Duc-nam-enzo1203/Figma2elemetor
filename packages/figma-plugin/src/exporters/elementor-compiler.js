@@ -759,10 +759,10 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
       }
     }
 
-    // Inherit boxed width from the inner container
+    // Inherit boxed width from the inner container ONLY if this is the root container!
     const childLayout = singleChildNode.layout || {};
     const childWidth = Number(childLayout.width) || 0;
-    if (childWidth > 0 && childWidth <= 1360) {
+    if (isRoot && childWidth >= 960 && childWidth <= 1360) {
       settings.content_width = 'boxed';
       settings.boxed_width = { unit: 'px', size: Math.round(childWidth), sizes: [] };
       settings.boxed_width_tablet = { unit: 'px', size: 768, sizes: [] };
@@ -885,6 +885,14 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
       if (childEl.elType === 'container') childEl.isInner = true;
       elements.push(childEl);
     }
+  }
+
+  // Absolute invariant: child containers are NEVER boxed, always strictly full-width
+  if (!isRoot) {
+    settings.content_width = 'full';
+    delete settings.boxed_width;
+    delete settings.boxed_width_tablet;
+    delete settings.boxed_width_mobile;
   }
 
   return {
