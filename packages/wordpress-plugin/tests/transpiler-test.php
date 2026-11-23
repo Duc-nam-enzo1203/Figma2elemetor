@@ -1087,6 +1087,72 @@ assertTrue(count($kitAfter['custom_colors'] ?? []) === 1, 'GlobalStyles::sync re
 assertTrue(!isset($kitAfter['custom_typography'][0]['typography_font_size']), 'GlobalStyles::sync omits typography_font_size when fontSize <= 0');
 
 // Cleanup temp files created during test run
+// TranspilerV3: Boxed vs Full Width Layout Heuristic
+$layoutIr = [
+    'roots' => ['root-pad', 'root-freeform', 'root-edge'],
+    'nodes' => [
+        'root-pad' => [
+            'id' => 'root-pad',
+            'widget' => 'container',
+            'layout' => ['width' => 1440, 'padding' => ['left' => 60, 'right' => 60]],
+            'children' => ['child-inner'],
+        ],
+        'child-inner' => [
+            'id' => 'child-inner',
+            'widget' => 'container',
+            'layout' => ['width' => 600, 'padding' => ['left' => 40, 'right' => 40]],
+            'children' => [],
+        ],
+        'root-freeform' => [
+            'id' => 'root-freeform',
+            'widget' => 'container',
+            'layout' => ['width' => 1440, 'padding' => ['left' => 0, 'right' => 0]],
+            'children' => ['card-1', 'card-2'],
+        ],
+        'card-1' => [
+            'id' => 'card-1',
+            'widget' => 'container',
+            'layout' => ['x' => 120, 'width' => 580],
+            'children' => [],
+        ],
+        'card-2' => [
+            'id' => 'card-2',
+            'widget' => 'container',
+            'layout' => ['x' => 740, 'width' => 580],
+            'children' => [],
+        ],
+        'root-edge' => [
+            'id' => 'root-edge',
+            'widget' => 'container',
+            'layout' => ['width' => 1440, 'padding' => ['left' => 0, 'right' => 0]],
+            'children' => ['edge-hero'],
+        ],
+        'edge-hero' => [
+            'id' => 'edge-hero',
+            'widget' => 'container',
+            'layout' => ['x' => 0, 'width' => 1440],
+            'children' => [],
+        ],
+    ],
+];
+$layoutV3 = $v3->transpile($layoutIr, []);
+assertTrue(
+    ($layoutV3[0]['settings']['content_width'] ?? '') === 'boxed'
+    && ($layoutV3[0]['settings']['boxed_width']['size'] ?? 0) === 1320
+    && ($layoutV3[0]['elements'][0]['settings']['content_width'] ?? '') === 'full'
+    && !isset($layoutV3[0]['elements'][0]['settings']['boxed_width']),
+    'TranspilerV3: Root container with padding is boxed (1320px) and child container strictly full-width'
+);
+assertTrue(
+    ($layoutV3[1]['settings']['content_width'] ?? '') === 'boxed'
+    && ($layoutV3[1]['settings']['boxed_width']['size'] ?? 0) === 1200,
+    'TranspilerV3: Root container freeform child bounding box is boxed (1200px)'
+);
+assertTrue(
+    ($layoutV3[2]['settings']['content_width'] ?? '') === 'full',
+    'TranspilerV3: Root container with edge-to-edge content is full-width'
+);
+
 foreach ($GLOBALS['f2e_test_state']['files_created'] as $tmpFile) {
     if (is_file($tmpFile)) {
         @unlink($tmpFile);

@@ -2633,5 +2633,85 @@ test('Zero-Loss Dev Mode CSS -> Elementor Compiler: preserves min-height, dashed
   assert.ok(heading.settings.custom_css.includes('-webkit-text-stroke: 1px #16A34A;'));
 });
 
+test('Boxed vs Full Width layout detection: Child containers strictly full-width, Root detects boxed or full', async () => {
+  const rootBoxedFrame = {
+    id: '100:1',
+    name: 'Section Root Boxed',
+    type: 'FRAME',
+    layoutMode: 'VERTICAL',
+    width: 1440,
+    height: 800,
+    visible: true,
+    paddingLeft: 60,
+    paddingRight: 60,
+    paddingTop: 80,
+    paddingBottom: 80,
+    children: [
+      {
+        id: '100:2',
+        name: 'Child Container Column',
+        type: 'FRAME',
+        layoutMode: 'VERTICAL',
+        width: 600,
+        height: 400,
+        visible: true,
+        fills: [{ type: 'SOLID', visible: true, color: { r: 0.9, g: 0.9, b: 0.9 } }],
+        paddingLeft: 40,
+        paddingRight: 40,
+        children: [
+          {
+            id: '100:3',
+            name: 'Heading Text',
+            type: 'TEXT',
+            characters: 'Hello World',
+            visible: true,
+          },
+        ],
+      },
+    ],
+  };
+
+  const { document } = await extractDesignSelection([rootBoxedFrame], { fileKey: 'boxed-test' });
+  const v3 = compileElementorV3(document);
+  const root = v3.content[0];
+  assert.equal(root.settings.content_width, 'boxed');
+  assert.equal(root.settings.boxed_width.size, 1320);
+
+  const child = root.elements[0];
+  assert.equal(child.settings.content_width, 'full');
+  assert.equal(child.settings.boxed_width, undefined);
+
+  // Non-Auto-Layout Root Frame with centered child span
+  const nonAutoLayoutRoot = {
+    id: '101:1',
+    name: 'Non Auto-Layout Frame',
+    type: 'FRAME',
+    width: 1440,
+    height: 900,
+    visible: true,
+    paddingLeft: 0,
+    paddingRight: 0,
+    children: [
+      {
+        id: '101:2',
+        name: 'Centered Content',
+        type: 'FRAME',
+        x: 120,
+        y: 50,
+        width: 1200,
+        height: 600,
+        visible: true,
+        children: [],
+      },
+    ],
+  };
+
+  const { document: doc2 } = await extractDesignSelection([nonAutoLayoutRoot], { fileKey: 'boxed-freeform-test' });
+  const v3Freeform = compileElementorV3(doc2);
+  const rootFreeform = v3Freeform.content[0];
+  assert.equal(rootFreeform.settings.content_width, 'boxed');
+  assert.equal(rootFreeform.settings.boxed_width.size, 1200);
+});
+
 
 

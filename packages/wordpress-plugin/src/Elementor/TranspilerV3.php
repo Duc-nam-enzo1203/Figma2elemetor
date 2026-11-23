@@ -224,25 +224,88 @@ final class TranspilerV3
 
         $settings['margin'] = $this->boxObject(is_array($layout['margin'] ?? null) ? $layout['margin'] : ['top' => 0, 'right' => 0, 'bottom' => 0, 'left' => 0]);
 
-        $settings['content_width'] = $isRoot ? 'boxed' : 'full';
         $nodeW = (int) ($layout['width'] ?? 0);
-        if ($isRoot && !empty($layout['width'])) {
-            $settings['boxed_width'] = ['unit' => 'px', 'size' => min(1440, $nodeW), 'sizes' => []];
-        } elseif (!$isRoot && $nodeW > 0) {
-            $parentW = 1240;
-            if (($layout['sizingH'] ?? '') === 'FILL') {
-                $settings['_flex_size'] = 'grow';
-                $pct = round(($nodeW / $parentW) * 100, 1);
-                $settings['width'] = ['unit' => '%', 'size' => min(100, $pct), 'sizes' => []];
-                if ($pct >= 42 && $pct <= 68) {
-                    $settings['width_tablet'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
-                    $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
-                } else {
+        $padL = (int) ($layout['padding']['left'] ?? 0);
+        $padR = (int) ($layout['padding']['right'] ?? 0);
+
+        if ($isRoot) {
+            $isBoxed = false;
+            $boxedWidth = 1200;
+
+            if ($padL >= 40 && $padR >= 40 && $nodeW >= 1100) {
+                $isBoxed = true;
+                $boxedWidth = max(960, min(1320, $nodeW - $padL - $padR));
+            } elseif (!empty($layout['maxWidth']) && (int) $layout['maxWidth'] <= 1360) {
+                $isBoxed = true;
+                $boxedWidth = max(960, min(1320, (int) $layout['maxWidth']));
+            } elseif ($nodeW >= 1100 && !empty($node['children']) && is_array($node['children'])) {
+                $minChildX = PHP_INT_MAX;
+                $maxChildX = -PHP_INT_MAX;
+                $visualChildCount = 0;
+
+                foreach ($node['children'] as $cid) {
+                    $cNode = $nodes[$cid] ?? null;
+                    if (!is_array($cNode) || ($cNode['visible'] ?? true) === false) {
+                        continue;
+                    }
+                    $cL = is_array($cNode['layout'] ?? null) ? $cNode['layout'] : [];
+                    $cX = (int) ($cL['x'] ?? 0);
+                    $cW = (int) ($cL['width'] ?? 0);
+                    if ($cW > 0) {
+                        $minChildX = min($minChildX, $cX);
+                        $maxChildX = max($maxChildX, $cX + $cW);
+                        $visualChildCount++;
+                    }
+                }
+
+                if ($visualChildCount > 0 && $minChildX < PHP_INT_MAX && $maxChildX > -PHP_INT_MAX) {
+                    $spanW = $maxChildX - $minChildX;
+                    $gutterLeft = $minChildX;
+                    $gutterRight = $nodeW - $maxChildX;
+
+                    if ($spanW >= 900 && $spanW <= 1360 && $gutterLeft >= 48 && $gutterRight >= 48) {
+                        $isBoxed = true;
+                        $boxedWidth = max(960, min(1320, $spanW));
+                    } elseif ($visualChildCount === 1) {
+                        $singleChild = $nodes[$node['children'][0]] ?? null;
+                        $scW = (int) ($singleChild['layout']['width'] ?? 0);
+                        if ($scW >= 960 && $scW <= 1360 && ($nodeW - $scW) >= 80) {
+                            $isBoxed = true;
+                            $boxedWidth = max(960, min(1320, $scW));
+                        }
+                    }
+                }
+            }
+
+            if ($isBoxed) {
+                $settings['content_width'] = 'boxed';
+                $settings['boxed_width'] = ['unit' => 'px', 'size' => $boxedWidth, 'sizes' => []];
+                $settings['boxed_width_tablet'] = ['unit' => 'px', 'size' => 768, 'sizes' => []];
+                $settings['boxed_width_mobile'] = ['unit' => 'px', 'size' => 360, 'sizes' => []];
+            } else {
+                $settings['content_width'] = 'full';
+                unset($settings['boxed_width'], $settings['boxed_width_tablet'], $settings['boxed_width_mobile']);
+            }
+        } else {
+            // All child containers are strictly full width, never boxed
+            $settings['content_width'] = 'full';
+            unset($settings['boxed_width'], $settings['boxed_width_tablet'], $settings['boxed_width_mobile']);
+            if ($nodeW > 0) {
+                $parentW = 1240;
+                if (($layout['sizingH'] ?? '') === 'FILL') {
+                    $settings['_flex_size'] = 'grow';
+                    $pct = round(($nodeW / $parentW) * 100, 1);
+                    $settings['width'] = ['unit' => '%', 'size' => min(100, $pct), 'sizes' => []];
+                    if ($pct >= 42 && $pct <= 68) {
+                        $settings['width_tablet'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
+                        $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
+                    } else {
+                        $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
+                    }
+                } elseif ($nodeW < $parentW * 0.92) {
+                    $settings['width'] = ['unit' => 'px', 'size' => $nodeW, 'sizes' => []];
                     $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
                 }
-            } elseif ($nodeW < $parentW * 0.92) {
-                $settings['width'] = ['unit' => 'px', 'size' => $nodeW, 'sizes' => []];
-                $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
             }
         }
 

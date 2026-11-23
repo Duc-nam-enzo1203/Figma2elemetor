@@ -6542,21 +6542,68 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     }
   }
 
-  if (Number(layout.maxWidth) > 0 && !settings.boxed_width) {
-    settings.content_width = 'boxed';
-    settings.boxed_width = { unit: 'px', size: Math.round(Number(layout.maxWidth)), sizes: [] };
-  }
-
   // Important: Top-level root sections get boxed widths and responsive padding matching Dev standards
   if (isRoot) {
+    const rootW = Number(layout.width) || 1440;
     const padL = Number(layout.padding && layout.padding.left) || 0;
     const padR = Number(layout.padding && layout.padding.right) || 0;
-    if (padL >= 40 && padR >= 40 && (Number(layout.width) || 0) >= 1100) {
-      const innerContentW = Math.max(960, Math.min(1320, (Number(layout.width) || 1440) - padL - padR));
+
+    let isBoxed = false;
+    let boxedWidth = 1200;
+
+    // 1. Check if Root Frame has explicit Auto-Layout padding on both left & right
+    if (padL >= 40 && padR >= 40 && rootW >= 1100) {
+      isBoxed = true;
+      boxedWidth = Math.max(960, Math.min(1320, rootW - padL - padR));
+    } else if (Number(layout.maxWidth) > 0 && Number(layout.maxWidth) <= 1360) {
+      isBoxed = true;
+      boxedWidth = Math.max(960, Math.min(1320, Math.round(Number(layout.maxWidth))));
+    } else if (rootW >= 1100 && Array.isArray(node.children) && node.children.length > 0) {
+      // 2. Enhanced Heuristic: If padding on root was omitted (e.g. 0 padding or non-Auto-Layout freeform design),
+      // analyze the bounding box of direct visible children!
+      let minChildX = Infinity;
+      let maxChildX = -Infinity;
+      let visualChildCount = 0;
+
+      for (const cid of node.children) {
+        const cNode = nodes[cid];
+        if (!cNode || cNode.visible === false) continue;
+        const cL = cNode.layout || {};
+        const cX = Number(cL.x) || 0;
+        const cW = Number(cL.width) || 0;
+        if (cW > 0) {
+          minChildX = Math.min(minChildX, cX);
+          maxChildX = Math.max(maxChildX, cX + cW);
+          visualChildCount += 1;
+        }
+      }
+
+      if (visualChildCount > 0 && minChildX < Infinity && maxChildX > -Infinity) {
+        const spanW = maxChildX - minChildX;
+        const gutterLeft = minChildX;
+        const gutterRight = rootW - maxChildX;
+
+        // If children are centered within 900px - 1360px and have balanced gutters >= 48px
+        if (spanW >= 900 && spanW <= 1360 && gutterLeft >= 48 && gutterRight >= 48) {
+          isBoxed = true;
+          boxedWidth = Math.max(960, Math.min(1320, Math.round(spanW)));
+        } else if (visualChildCount === 1) {
+          // If there's a single centered inner frame wrapper
+          const singleChild = nodes[node.children[0]];
+          const scW = Number(singleChild?.layout?.width) || 0;
+          if (scW >= 960 && scW <= 1360 && (rootW - scW) >= 80) {
+            isBoxed = true;
+            boxedWidth = Math.max(960, Math.min(1320, Math.round(scW)));
+          }
+        }
+      }
+    }
+
+    if (isBoxed) {
       const padT = (layout.padding && typeof layout.padding.top === 'number') ? layout.padding.top : 64;
       const padB = (layout.padding && typeof layout.padding.bottom === 'number') ? layout.padding.bottom : 64;
       settings.content_width = 'boxed';
-      settings.boxed_width = { unit: 'px', size: innerContentW, sizes: [] };
+      settings.boxed_width = { unit: 'px', size: boxedWidth, sizes: [] };
       settings.boxed_width_tablet = { unit: 'px', size: 768, sizes: [] };
       settings.boxed_width_mobile = { unit: 'px', size: 360, sizes: [] };
       settings.padding = boxValue({ top: padT, right: 24, bottom: padB, left: 24 });
@@ -6566,13 +6613,20 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     } else {
       const basePad = layout.padding || { top: 60, right: 24, bottom: 60, left: 24 };
       settings.content_width = 'full';
+      delete settings.boxed_width;
+      delete settings.boxed_width_tablet;
+      delete settings.boxed_width_mobile;
       settings.padding = boxValue(basePad);
       settings.padding_tablet = boxValue((node.responsive && node.responsive.tablet && node.responsive.tablet.padding) || scaleBox(basePad, 0.85, 40));
       settings.padding_mobile = boxValue((node.responsive && node.responsive.mobile && node.responsive.mobile.padding) || scaleBox(basePad, 0.65, 24));
       settings.margin = boxValue({ top: 0, right: 0, bottom: 0, left: 0 });
     }
   } else {
+    // Crucial: ALL child containers are ALWAYS strictly full width, never boxed!
     settings.content_width = 'full';
+    delete settings.boxed_width;
+    delete settings.boxed_width_tablet;
+    delete settings.boxed_width_mobile;
     // For inner containers (Hero left, Hero right, CTA, Segments, cards):
     // Explicit padding and margin are mandatory in Elementor to prevent Elementor's theme engine
     // from injecting default 10px/20px container padding!
@@ -8631,7 +8685,7 @@ async function handleLoadSiteTargets(siteUrl) {
     fidelityReport,
   });
   announce(`Đã đẩy thành công lên WordPress! (${result.actionLabel || 'Saved'} — Post #${result.postId})`);
-  await handleLoadSiteTargets(site.siteUrl).catch(() => {});
+  await handleLoadSiteTargets(site.siteUrl).catch(() => { });
 }
 
 async function handleScanDesignSystemPreview() {
