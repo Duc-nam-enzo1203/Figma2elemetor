@@ -421,10 +421,10 @@ export function resolveWidget(node) {
   }
 
   // 2D. Token-based naming convention
-  const tokens = lowerName.split(/[\/:\-_\s]+/).filter(Boolean);
+  const tokens = lowerName.split(/[\/:\-_\s.]+/).filter(Boolean);
   for (const token of tokens) {
-    // Do not let generic container names like "cta", "text", "title", "card", "stat" turn a multi-element wrapper into a leaf widget!
-    if (node.type !== 'TEXT' && ['text', 'title', 'desc', 'description', 'cta', 'link', 'stat', 'stats', 'card', 'box', 'item', 'row', 'col', 'column', 'wrapper', 'container', 'group', 'section', 'header', 'footer'].includes(token)) {
+    // Do not let generic container names like "cta", "text", "title", "card", "stat", "nav", "utility" turn a multi-element wrapper into a leaf widget!
+    if (node.type !== 'TEXT' && ['text', 'title', 'desc', 'description', 'cta', 'link', 'stat', 'stats', 'card', 'box', 'item', 'row', 'col', 'column', 'wrapper', 'container', 'group', 'section', 'header', 'footer', 'nav', 'utility', 'menu', 'bar'].includes(token)) {
       continue;
     }
     if (node.type === 'TEXT' && token === 'text') continue;
@@ -561,8 +561,23 @@ export function isDividerNode(node, kids = []) {
 }
 
 function isButtonNode(node, kids) {
-  if (kids.length === 0 || kids.length > 2) return false;
-  const texts = collectTextDescendants(node);
+  if (kids.length === 0 || kids.length > 3) return false;
+
+  const lower = String(node.name || '').toLowerCase();
+  // Guard: Container / Nav / Utility / Wrapper / Header / Card names should NEVER be classified as a button!
+  if (/^(div\.|nav|utility|menu|header|footer|wrapper|container|col|row|section|sidebar|bar)/i.test(lower) ||
+      /[-_ .](nav|menu|utility|wrapper|container|header|footer|section|sidebar|bar)([-_ .]|$)/i.test(lower) ||
+      lower.includes('chip') || lower.includes('badge') || lower.includes('tag') || lower.includes('check')) {
+    return false;
+  }
+
+  // Guard: If any child is an INSTANCE or COMPONENT, this parent frame is a WRAPPER, NOT the button itself!
+  if (kids.some((c) => c.type === 'INSTANCE' || c.type === 'COMPONENT')) {
+    return false;
+  }
+
+  const directText = kids.find((c) => c.type === 'TEXT');
+  const texts = directText ? [directText] : collectTextDescendants(node);
   if (texts.length !== 1) return false;
   const label = String(texts[0].characters || '').trim();
   if (label.length < 2 || label.length > 36 || label.includes('\n')) return false;
@@ -571,11 +586,6 @@ function isButtonNode(node, kids) {
   const h = Number(node.height) || 0;
   if (h < 28 || h > 72 || w < 64 || w > 360) return false;
 
-  const lower = String(node.name || '').toLowerCase();
-  // Do not turn small chips/tags/badges into full Elementor buttons unless named like a button/cta/link
-  if (lower.includes('chip') || lower.includes('badge') || lower.includes('tag') || lower.includes('check')) {
-    return false;
-  }
   const hasStroke = Array.isArray(node.strokes) && node.strokes.some((s) => s && s.visible !== false);
   const hasRadius = typeof node.cornerRadius === 'number' && node.cornerRadius >= 4;
   return (hasSolidOrGradientFill(node) || hasStroke || hasRadius) && w >= h * 1.4;

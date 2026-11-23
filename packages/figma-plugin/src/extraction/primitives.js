@@ -1,7 +1,7 @@
 /**
  * Low-level Figma node primitive extractors (layout, style, typography, responsive).
  */
-import { visibleChildren } from '../tagging/widget-resolver.js';
+import { visibleChildren, isVectorGraphic } from '../tagging/widget-resolver.js';
 import { inferVirtualLayout } from '../optimizer/auto-layout-fixer.js';
 
 const WEIGHT_MAP = {
@@ -423,15 +423,24 @@ export function extractButtonIcon(node) {
   if (!node || !Array.isArray(node.children)) return null;
   const kids = node.children.filter((c) => c && c.visible !== false);
   const textChild = kids.find((c) => c.type === 'TEXT');
-  const iconChild = kids.find((c) => c.type !== 'TEXT' && (c.type === 'VECTOR' || c.type === 'INSTANCE' || c.type === 'FRAME' || c.type === 'GROUP' || c.type === 'BOOLEAN_OPERATION' || c.type === 'LINE' || isVectorGraphic(c)));
+  if (!textChild) return null;
+
+  // Icon child in a button MUST be a small vector graphic (width <= 36px, height <= 36px)
+  const iconChild = kids.find((c) => {
+    if (c.type === 'TEXT') return false;
+    const w = Number(c.width) || 0;
+    const h = Number(c.height) || 0;
+    if (w > 36 || h > 36 || w === 0 || h === 0) return false;
+    return c.type === 'VECTOR' || c.type === 'BOOLEAN_OPERATION' || c.type === 'LINE' || isVectorGraphic(c);
+  });
 
   if (!iconChild) return null;
 
   const iconName = safeStr(iconChild.name).toLowerCase();
   let align = 'right';
-  if (textChild && typeof iconChild.x === 'number' && typeof textChild.x === 'number') {
+  if (typeof iconChild.x === 'number' && typeof textChild.x === 'number') {
     align = iconChild.x < textChild.x ? 'left' : 'right';
-  } else if (textChild && kids.indexOf(iconChild) < kids.indexOf(textChild)) {
+  } else if (kids.indexOf(iconChild) < kids.indexOf(textChild)) {
     align = 'left';
   }
 
@@ -460,9 +469,10 @@ export function extractButtonIcon(node) {
     faIcon = 'fas fa-external-link-alt';
   } else if (iconName.includes('cart') || iconName.includes('shop')) {
     faIcon = 'fas fa-shopping-cart';
-  } else {
-    // Default for CTA button vector graphics
+  } else if (iconName.includes('arrow') || iconName.includes('ic') || isVectorGraphic(iconChild)) {
     faIcon = 'fas fa-arrow-right';
+  } else {
+    return null;
   }
 
   return {

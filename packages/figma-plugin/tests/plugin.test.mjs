@@ -2765,5 +2765,68 @@ test('Design System: VARIABLE_ALIAS chain resolves cleanly to RGBA hex values', 
   assert.equal(primary.value, '#1A66E6');
 });
 
+test('Button Wrapper Guard: div.utility-nav wrapping a button instance remains container and inner button preserves full styles', async () => {
+  const { resolveWidget } = await import('../src/tagging/widget-resolver.js');
+
+  const wrapperFrame = {
+    id: '12:2801',
+    name: 'div.utility-nav',
+    type: 'FRAME',
+    width: 250,
+    height: 48,
+    visible: true,
+    children: [
+      {
+        id: '12:2802',
+        name: 'Component 1',
+        type: 'INSTANCE',
+        layoutMode: 'HORIZONTAL',
+        width: 240,
+        height: 48,
+        visible: true,
+        fills: [{ type: 'SOLID', color: { r: 220 / 255, g: 51 / 255, b: 10 / 255 }, visible: true }],
+        cornerRadius: 4,
+        paddingTop: 13,
+        paddingRight: 28,
+        paddingBottom: 12,
+        paddingLeft: 28,
+        strokes: [{ type: 'SOLID', color: { r: 220 / 255, g: 51 / 255, b: 10 / 255 }, visible: true }],
+        strokeWeight: 1,
+        children: [
+          {
+            id: 'I12:2802;1:80',
+            name: 'Text',
+            type: 'TEXT',
+            characters: 'Request a Consultation',
+            visible: true,
+            fills: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, visible: true }],
+          },
+        ],
+      },
+    ],
+  };
+
+  // 1. Wrapper MUST be container, NOT button!
+  const wrapperChoice = resolveWidget(wrapperFrame);
+  assert.equal(wrapperChoice.widget, 'container');
+
+  // 2. Child Component 1 MUST be button!
+  const btnChoice = resolveWidget(wrapperFrame.children[0]);
+  assert.equal(btnChoice.widget, 'button');
+
+  // 3. E2E compilation: button preserves #DC330A and padding
+  const { document } = await extractDesignSelection([wrapperFrame], { fileKey: 'btn-wrapper-test' });
+  const v3 = compileElementorV3(document);
+
+  const btnWidget = v3.content[0].widgetType === 'button' ? v3.content[0] : v3.content[0].elements[0];
+  assert.equal(btnWidget.widgetType, 'button');
+  assert.equal(btnWidget.settings.text, 'Request a Consultation');
+  assert.equal(btnWidget.settings.background_color, '#DC330A');
+  assert.equal(btnWidget.settings.border_radius.top, '4');
+  assert.equal(btnWidget.settings.text_padding.top, '13');
+  assert.equal(btnWidget.settings.text_padding.right, '28');
+  assert.equal(btnWidget.settings.selected_icon, undefined, 'No fake arrow icon should be injected');
+});
+
 
 
