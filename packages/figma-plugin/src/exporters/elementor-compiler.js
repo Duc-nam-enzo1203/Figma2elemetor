@@ -25,7 +25,7 @@ import { verifyAndHealElementorJson } from './fidelity-verifier.js';
 import { boxValue, scaleBox, flexGapValue, applyGlobalColor, appendCustomCss, applyDevModeResidualCss, applyTextShadowAndEffects, applyCommonBoxStyle, applyTypographySettings, inferHeadingTag, getTextGradientCss, buildTextClipRule, collectSubtreeTexts, collectSubtreeImages, escapeHtml, scopeSvgIds, svgMarkupToDataUri } from './compiler-helpers.js';
 import { compileElementorV4 } from './elementor-v4.js';
 import { buildNestedAccordion, buildNestedTabs } from './nested-widgets.js';
-import { buildProForm, buildProNavMenu, buildProCta, buildProPriceTable, buildProFlipBox, buildProSlides, buildProLoopGrid, buildGenericProWidget } from './pro-widgets.js';
+import { buildProForm, buildProNavMenu, buildProCta, buildProPriceTable, buildProPriceList, buildProFlipBox, buildProSlides, buildProLoopGrid, buildGenericProWidget, buildProPaymentButton, buildProProgressTracker, buildProVideoPlaylist, buildProOffCanvas, buildProCountdown, buildProShareButtons } from './pro-widgets.js';
 
 export { compileElementorV4 };
 
@@ -72,7 +72,7 @@ export function compileElementorV3(doc, options = {}) {
         el = buildTextEditor(node, allocId);
         break;
       case 'button':
-        el = buildButton(node, allocId, { linearBorder });
+        el = buildButton(node, allocId, { linearBorder, resolveMedia });
         break;
       case 'image':
         el = buildImage(node, allocId, resolveMedia);
@@ -133,12 +133,34 @@ export function compileElementorV3(doc, options = {}) {
         el = buildStarRating(node, allocId);
         break;
       case 'social-icons':
-      case 'share-buttons':
         el = buildSocialIcons(node, nodes, allocId);
         break;
+      case 'share-buttons':
+        el = buildProShareButtons(node, nodes, allocId);
+        break;
       case 'counter':
-      case 'countdown':
         el = buildCounter(node, nodes, allocId);
+        break;
+      case 'countdown':
+        el = buildProCountdown(node, nodes, allocId);
+        break;
+      case 'audio':
+        el = buildAudio(node, allocId);
+        break;
+      case 'shortcode':
+        el = buildShortcode(node, nodes, allocId);
+        break;
+      case 'menu-anchor':
+        el = buildMenuAnchor(node, allocId);
+        break;
+      case 'sidebar':
+        el = buildSidebar(node, allocId);
+        break;
+      case 'read-more':
+        el = buildReadMore(node, nodes, allocId);
+        break;
+      case 'text-path':
+        el = buildTextPath(node, nodes, allocId);
         break;
       // Elementor Pro Widgets
       case 'form':
@@ -154,14 +176,29 @@ export function compileElementorV3(doc, options = {}) {
         el = buildProCta(node, nodes, allocId, resolveMedia);
         break;
       case 'price-table':
-      case 'price-list':
         el = buildProPriceTable(node, nodes, allocId);
+        break;
+      case 'price-list':
+        el = buildProPriceList(node, nodes, allocId);
         break;
       case 'flip-box':
         el = buildProFlipBox(node, nodes, allocId, resolveMedia);
         break;
       case 'slides':
         el = buildProSlides(node, nodes, allocId, resolveMedia);
+        break;
+      case 'paypal-button':
+      case 'stripe-button':
+        el = buildProPaymentButton(node, wType, allocId);
+        break;
+      case 'progress-tracker':
+        el = buildProProgressTracker(node, allocId);
+        break;
+      case 'video-playlist':
+        el = buildProVideoPlaylist(node, nodes, allocId);
+        break;
+      case 'off-canvas':
+        el = buildProOffCanvas(node, nodes, allocId, buildElement);
         break;
       case 'loop-grid':
       case 'loop-carousel':
@@ -179,6 +216,7 @@ export function compileElementorV3(doc, options = {}) {
       case 'table-of-contents':
       case 'lottie':
       case 'hotspot':
+      case 'taxonomy-filter':
       case 'theme-site-title':
       case 'theme-post-title':
       case 'theme-post-excerpt':
@@ -211,8 +249,22 @@ export function compileElementorV3(doc, options = {}) {
     return el;
   };
 
+  const expandRootIds = (ids) => {
+    const out = [];
+    for (const rid of ids || []) {
+      const rNode = nodes[rid];
+      if (!rNode) continue;
+      if ((rNode.widget || rNode.widgetType) === 'unwrap') {
+        out.push(...expandRootIds(rNode.children || []));
+      } else {
+        out.push(rid);
+      }
+    }
+    return out;
+  };
+
   const rawContent = [];
-  for (const rootId of doc.roots || []) {
+  for (const rootId of expandRootIds(doc.roots || [])) {
     // Container 1 (Root selection) is strictly preserved!
     // Never strip Container 1 when it contains multiple children (container 2 + container 3)
     const built = buildElement(rootId, true, null);
@@ -392,6 +444,9 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
     } else if (sizingH === 'FILL') {
       settings._element_width = 'inherit';
     }
+    if ((el.widgetType === 'heading' || el.widgetType === 'text-editor') && sizingH === 'FIXED' && nodeW > 0 && nodeW < parentWidth * 0.92 && (!node.layout || !node.layout.maxWidth)) {
+      appendCustomCss(settings, `selector { max-width: ${Math.round(nodeW)}px; }`);
+    }
   }
 }
 
@@ -399,9 +454,7 @@ const SELF_STYLED_WIDGETS = new Set([
   'button',
   'divider',
   'spacer',
-  'icon',
   'image',
-  'html',
   'theme-site-logo',
   'site-logo',
   'nested-accordion',
@@ -431,7 +484,19 @@ function applyWidgetWrapperBoxStyles(el, node, resolveMedia) {
   if (node.type === 'text' || node.type === 'vector') return;
   if (SELF_STYLED_WIDGETS.has(el.widgetType)) return;
 
+  // When Figma exported the entire Frame (including its background rect & padding) into an inline <svg width="W" height="H">,
+  // skip adding _padding / _background_* again so we never double-pad the SVG!
+  const svgAlreadyBakedFrame = Boolean(
+    el.widgetType === 'html' &&
+    node.svg &&
+    node.svg.markup &&
+    Number(layout.width) > 0 &&
+    new RegExp(`width=["']?${Math.round(Number(layout.width))}\\b`).test(node.svg.markup) &&
+    /<rect\b/i.test(node.svg.markup)
+  );
+
   if (
+    !svgAlreadyBakedFrame &&
     layout.padding &&
     !settings._padding &&
     (layout.padding.top || layout.padding.right || layout.padding.bottom || layout.padding.left)
@@ -439,7 +504,7 @@ function applyWidgetWrapperBoxStyles(el, node, resolveMedia) {
     settings._padding = boxValue(layout.padding);
   }
 
-  if (!settings._background_background && !settings.background_color) {
+  if (!svgAlreadyBakedFrame && !settings._background_background && !settings.background_color) {
     if (style.gradient) {
       settings._background_background = 'gradient';
       settings._background_gradient_type = style.gradient.type || 'linear';
@@ -521,13 +586,15 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     settings.flex_direction = dir;
     settings.flex_gap = flexGapValue(layout);
 
-    // If designer used an oversized gap (>160px) in a horizontal row, convert to space-between
-    const rawGap = Number(layout.gap) || 0;
-    const justifyKey = (dir === 'row' && rawGap > 160) ? 'SPACE_BETWEEN' : (layout.justify || 'MIN');
+    const rawGap = Math.max(0, Number(layout.gap) || 0);
+    const justifyKey = layout.justify || 'MIN';
     settings.flex_justify_content = FLEX_ALIGN_MAP[justifyKey] || 'flex-start';
     settings.flex_align_items = FLEX_ALIGN_MAP[layout.align || 'MIN'] || 'flex-start';
-    if (layout.wrap || (dir === 'row' && (node.children || []).length >= 3)) {
+    if (layout.wrap) {
       settings.flex_wrap = 'wrap';
+      settings.flex_wrap_tablet = 'wrap';
+    } else if (dir === 'row' && (node.children || []).length >= 3) {
+      settings.flex_wrap = 'nowrap';
       settings.flex_wrap_tablet = 'wrap';
     }
 
@@ -535,14 +602,14 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
       settings.flex_direction_tablet = node.responsive.tablet.direction;
     } else if (dir === 'row') {
       settings.flex_direction_tablet = 'row';
-      const gapTablet = Math.max(12, Math.round(rawGap * 0.75));
+      const gapTablet = rawGap > 0 ? Math.max(8, Math.round(rawGap * 0.75)) : 0;
       settings.flex_gap_tablet = { unit: 'px', size: gapTablet, column: String(gapTablet), row: String(gapTablet), isLinked: true };
     }
     if (node.responsive && node.responsive.mobile && node.responsive.mobile.direction) {
       settings.flex_direction_mobile = node.responsive.mobile.direction;
     } else if (dir === 'row' && (node.children || []).length >= 2 && (Number(layout.width) || 0) > 420) {
       settings.flex_direction_mobile = 'column';
-      const gapMobile = Math.max(12, Math.round(rawGap * 0.5));
+      const gapMobile = rawGap > 0 ? Math.max(8, Math.round(rawGap * 0.5)) : 0;
       settings.flex_gap_mobile = { unit: 'px', size: gapMobile, column: String(gapMobile), row: String(gapMobile), isLinked: true };
     }
   }
@@ -553,18 +620,21 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     settings.overflow = 'hidden';
   }
 
-  // Preserve Dev Mode `min-height` OR Hero/Banner/Composite-BG height so full-bleed background sections never collapse vertically!
+  // Preserve Dev Mode `min-height`, FIXED height, OR Hero/Banner/Composite-BG height so sections never collapse vertically!
   const explicitMinH = Number(layout.minHeight) || 0;
   const nodeH = Math.round(Number(layout.height) || 0);
   const effectiveMinH = explicitMinH > 0
     ? explicitMinH
-    : (style.backgroundImage && nodeH >= 120 ? nodeH : 0);
+    : ((style.backgroundImage || layout.sizingV === 'FIXED') && nodeH > 0 ? nodeH : 0);
   if (effectiveMinH > 0) {
     settings.min_height = { unit: 'px', size: effectiveMinH, sizes: [] };
     if (effectiveMinH >= 480) {
       settings.min_height_tablet = { unit: 'px', size: Math.round(effectiveMinH * 0.78), sizes: [] };
       settings.min_height_mobile = { unit: 'px', size: Math.max(360, Math.round(effectiveMinH * 0.62)), sizes: [] };
     }
+  }
+  if (Number(layout.minWidth) > 0) {
+    appendCustomCss(settings, `selector { min-width: ${Math.round(Number(layout.minWidth))}px; }`);
   }
 
   // Important: Top-level root sections get boxed widths and responsive padding matching Dev standards
@@ -577,12 +647,13 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     let boxedWidth = 1200;
 
     // 1. Check if Root Frame has explicit Auto-Layout padding on both left & right
+    const maxBoxedCap = rootW >= 1600 ? 1600 : 1320;
     if (padL >= 40 && padR >= 40 && rootW >= 1100) {
       isBoxed = true;
-      boxedWidth = Math.max(960, Math.min(1320, rootW - padL - padR));
-    } else if (Number(layout.maxWidth) > 0 && Number(layout.maxWidth) <= 1360) {
+      boxedWidth = Math.max(960, Math.min(maxBoxedCap, rootW - padL - padR));
+    } else if (Number(layout.maxWidth) > 0 && Number(layout.maxWidth) <= 1600) {
       isBoxed = true;
-      boxedWidth = Math.max(960, Math.min(1320, Math.round(Number(layout.maxWidth))));
+      boxedWidth = Math.max(960, Math.min(maxBoxedCap, Math.round(Number(layout.maxWidth))));
     } else if (rootW >= 1100 && Array.isArray(node.children) && node.children.length > 0) {
       // 2. Enhanced Heuristic: If padding on root was omitted (e.g. 0 padding or non-Auto-Layout freeform design),
       // analyze the bounding box of direct visible children!
@@ -641,6 +712,12 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
       delete settings.boxed_width;
       delete settings.boxed_width_tablet;
       delete settings.boxed_width_mobile;
+      if (layout.sizingH === 'FIXED' && rootW > 0 && rootW < 960) {
+        settings.width = { unit: 'px', size: Math.round(rootW), sizes: [] };
+        if (rootW > 360) {
+          settings.width_mobile = { unit: '%', size: 100, sizes: [] };
+        }
+      }
       settings.padding = boxValue(basePad);
       settings.padding_tablet = boxValue((node.responsive && node.responsive.tablet && node.responsive.tablet.padding) || scaleBox(basePad, 0.85, 40));
       settings.padding_mobile = boxValue((node.responsive && node.responsive.mobile && node.responsive.mobile.padding) || scaleBox(basePad, 0.65, 24));
@@ -788,25 +865,45 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     // Inherit boxed width from the inner container ONLY if this is the root container!
     const childLayout = singleChildNode.layout || {};
     const childWidth = Number(childLayout.width) || 0;
-    if (isRoot && childWidth >= 960 && childWidth <= 1360) {
+    const maxUnwrapCap = (Number(layout.width) || 0) >= 1600 ? 1600 : 1360;
+    if (isRoot && childWidth >= 960 && childWidth <= maxUnwrapCap) {
       settings.content_width = 'boxed';
       settings.boxed_width = { unit: 'px', size: Math.round(childWidth), sizes: [] };
       settings.boxed_width_tablet = { unit: 'px', size: 768, sizes: [] };
       settings.boxed_width_mobile = { unit: 'px', size: 360, sizes: [] };
     }
 
+    // Inherit padding, min-height, boxShadow & residual Dev Mode CSS if parent didn't have them
+    if (!parentHasPadding && childHasPadding) {
+      settings.padding = boxValue(childLayout.padding);
+      settings.padding_tablet = boxValue(scaleBox(childLayout.padding, 0.65, 36));
+      settings.padding_mobile = boxValue(scaleBox(childLayout.padding, 0.4, 20));
+    }
+    const childMinH = Number(childLayout.minHeight) || ((childLayout.sizingV === 'FIXED' && Number(childLayout.height) >= 120) ? Math.round(Number(childLayout.height)) : 0);
+    if (!settings.min_height && childMinH > 0) {
+      settings.min_height = { unit: 'px', size: childMinH, sizes: [] };
+    }
+    if (!settings.box_shadow_box_shadow_type && cs.boxShadow) {
+      settings.box_shadow_box_shadow_type = 'yes';
+      settings.box_shadow_box_shadow = cs.boxShadow;
+    }
+    applyDevModeResidualCss(settings, cs, 'selector');
+
     // Inherit flex direction and alignment from the inner container
     const childDir = childLayout.direction === 'row' ? 'row' : 'column';
     settings.flex_direction = childDir;
-    const rawGap = Number(childLayout.gap) || 0;
+    const rawGap = Math.max(0, Number(childLayout.gap) || 0);
     settings.flex_gap = flexGapValue(childLayout);
 
-    const justifyKey = (childDir === 'row' && rawGap > 160) ? 'SPACE_BETWEEN' : (childLayout.justify || 'MIN');
+    const justifyKey = childLayout.justify || 'MIN';
     settings.flex_justify_content = FLEX_ALIGN_MAP[justifyKey] || 'flex-start';
     settings.flex_align_items = FLEX_ALIGN_MAP[childLayout.align || 'MIN'] || 'flex-start';
 
-    if (childLayout.wrap || (childDir === 'row' && (singleChildNode.children || []).length >= 3)) {
+    if (childLayout.wrap) {
       settings.flex_wrap = 'wrap';
+      settings.flex_wrap_tablet = 'wrap';
+    } else if (childDir === 'row' && (singleChildNode.children || []).length >= 3) {
+      settings.flex_wrap = 'nowrap';
       settings.flex_wrap_tablet = 'wrap';
     }
 
@@ -912,6 +1009,7 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
       ...(node.layout || {}),
       direction: settings.flex_direction || node.layout?.direction || 'column',
       width: settings.boxed_width?.size || node.layout?.width || 1240,
+      ...(settings.boxed_width?.size ? { padding: { top: 0, right: 0, bottom: 0, left: 0 } } : {}),
     },
   };
 
@@ -957,10 +1055,16 @@ function buildHeading(node, allocId) {
       applyGlobalColor(settings, 'title_color', fallbackColor);
     }
   }
+  if (node.link) {
+    settings.link = { url: node.link, is_external: '', nofollow: '' };
+  }
   applyTypographySettings(settings, 'typography', text, node.responsive);
   applyTextShadowAndEffects(settings, text, 'selector .elementor-heading-title');
   if (gradCss) {
     appendCustomCss(settings, buildTextClipRule('selector .elementor-heading-title', gradCss));
+  }
+  if (node.layout && Number(node.layout.maxWidth) > 0) {
+    appendCustomCss(settings, `selector { max-width: ${Math.round(Number(node.layout.maxWidth))}px; }`);
   }
   return {
     id: allocId(node.id),
@@ -979,10 +1083,42 @@ function buildTextEditor(node, allocId) {
   const inlineGradStyle = gradCss
     ? `background:${gradCss};-webkit-background-clip:text;background-clip:text;-webkit-text-fill-color:transparent;`
     : '';
-  const paragraphs = raw
-    .split(/\n+/)
-    .map((line) => `<p style="margin:0;${inlineGradStyle}">${escapeHtml(line)}</p>`)
-    .join('');
+  const pSpace = Number(text.paragraphSpacing) > 0 ? Math.round(Number(text.paragraphSpacing)) : 0;
+
+  let paragraphs = '';
+  if (Array.isArray(text.richSegments) && text.richSegments.length > 1) {
+    // Preserve per-segment bold, italic, underline, and color inside rich text
+    const lines = [[]];
+    for (const seg of text.richSegments) {
+      const parts = String(seg.characters || '').split(/\n/);
+      parts.forEach((part, pIdx) => {
+        if (pIdx > 0) lines.push([]);
+        if (!part) return;
+        const styles = [];
+        if (seg.color && seg.color !== text.color) styles.push(`color:${seg.color}`);
+        if (seg.fontWeight && seg.fontWeight !== text.fontWeight) styles.push(`font-weight:${seg.fontWeight}`);
+        if (seg.fontStyle === 'italic' && text.fontStyle !== 'italic') styles.push('font-style:italic');
+        if (seg.decoration) styles.push(`text-decoration:${seg.decoration}`);
+        const escaped = escapeHtml(part);
+        lines[lines.length - 1].push(styles.length > 0 ? `<span style="${styles.join(';')};">${escaped}</span>` : escaped);
+      });
+    }
+    const nonEmptyLines = lines.map((l) => l.join('')).filter((l) => l.length > 0);
+    paragraphs = nonEmptyLines
+      .map((lineHtml, idx) => {
+        const mb = (pSpace > 0 && idx < nonEmptyLines.length - 1) ? pSpace : 0;
+        return `<p style="margin:0${mb > 0 ? ` 0 ${mb}px 0` : ''};${inlineGradStyle}">${lineHtml}</p>`;
+      })
+      .join('');
+  } else {
+    const rawLines = raw.split(/\n+/).filter(Boolean);
+    paragraphs = rawLines
+      .map((line, idx) => {
+        const mb = (pSpace > 0 && idx < rawLines.length - 1) ? pSpace : 0;
+        return `<p style="margin:0${mb > 0 ? ` 0 ${mb}px 0` : ''};${inlineGradStyle}">${escapeHtml(line)}</p>`;
+      })
+      .join('');
+  }
   const settings = {
     editor: paragraphs || '<p style="margin:0;"></p>',
     align: text.align === 'justified' ? 'justify' : (text.align || 'left'),
@@ -999,6 +1135,9 @@ function buildTextEditor(node, allocId) {
   if (gradCss) {
     appendCustomCss(settings, buildTextClipRule('selector', gradCss));
   }
+  if (node.layout && Number(node.layout.maxWidth) > 0) {
+    appendCustomCss(settings, `selector { max-width: ${Math.round(Number(node.layout.maxWidth))}px; }`);
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
@@ -1010,13 +1149,13 @@ function buildTextEditor(node, allocId) {
 }
 
 function buildButton(node, allocId, options = {}) {
-  const { linearBorder = true } = options;
+  const { linearBorder = true, resolveMedia = null } = options;
   const text = node.text || {};
   const style = node.style || {};
   const layout = node.layout || {};
   const settings = {
     text: (node.content && node.content.characters) || text.characters || (node.content && node.content.name) || 'Button',
-    align: text.align || 'center',
+    align: layout.sizingH === 'FILL' ? 'justify' : (text.align || 'center'),
   };
 
   // Background (Classic or Gradient)
@@ -1033,6 +1172,7 @@ function buildButton(node, allocId, options = {}) {
     settings.background_color = style.background;
     applyGlobalColor(settings, 'background_color', style.background);
   } else {
+    settings.background_background = 'classic';
     settings.background_color = 'rgba(0,0,0,0)';
   }
 
@@ -1043,7 +1183,8 @@ function buildButton(node, allocId, options = {}) {
       library: node.buttonIcon.library || 'fa-solid',
     };
     settings.icon_align = node.buttonIcon.align || 'right';
-    settings.icon_indent = { unit: 'px', size: 8, sizes: [] };
+    const iconGap = (typeof layout.gap === 'number' && layout.gap > 0) ? Math.round(layout.gap) : 8;
+    settings.icon_indent = { unit: 'px', size: iconGap, sizes: [] };
   }
 
   if (node.link) {
@@ -1055,9 +1196,10 @@ function buildButton(node, allocId, options = {}) {
     applyGlobalColor(settings, 'button_text_color', btnTextColor);
   }
   applyTypographySettings(settings, 'typography', text, node.responsive);
+  applyTextShadowAndEffects(settings, text, 'selector .elementor-button-text');
   if (style.radius) settings.border_radius = boxValue(style.radius);
   if (style.borderWidth && style.borderColor) {
-    settings.border_border = 'solid';
+    settings.border_border = style.borderStyle || 'solid';
     settings.border_width = boxValue(style.borderWidth);
     settings.border_color = style.borderColor;
     applyGlobalColor(settings, 'border_color', style.borderColor);
@@ -1071,6 +1213,19 @@ function buildButton(node, allocId, options = {}) {
   }
   if (layout.padding && (layout.padding.top || layout.padding.right || layout.padding.bottom || layout.padding.left)) {
     settings.text_padding = boxValue(layout.padding);
+  }
+  if (style.backgroundImage && resolveMedia) {
+    const btnBgMedia = resolveMedia(style.backgroundImage, style.backgroundImageDataUri);
+    if (btnBgMedia && btnBgMedia.url) {
+      const safeUrl = String(btnBgMedia.url).replace(/"/g, '%22');
+      appendCustomCss(settings, `selector .elementor-button {\n  background-image: url("${safeUrl}");\n  background-size: ${style.backgroundSize || 'cover'};\n  background-position: ${style.backgroundPosition || 'center center'};\n  background-repeat: ${style.backgroundRepeat || 'no-repeat'};\n}`);
+    }
+  }
+  if (Number(layout.minHeight) > 0) {
+    appendCustomCss(settings, `selector .elementor-button { min-height: ${Math.round(Number(layout.minHeight))}px; }`);
+  }
+  if (layout.sizingH === 'FIXED' && Number(layout.width) > 0) {
+    appendCustomCss(settings, `selector .elementor-button { min-width: ${Math.round(Number(layout.width))}px; }`);
   }
   if (linearBorder !== false && style.borderGradient && style.borderWidth) {
     const bw = style.borderWidth;
@@ -1107,6 +1262,27 @@ function buildSiteLogo(node, allocId, resolveMedia) {
   const media = resolveMedia ? resolveMedia(sha, fallback) : { id: '', url: fallback };
   const w = Math.max(20, Math.round(Number(node.layout && node.layout.width) || 120));
 
+  const applyLogoBoxStyles = (logoSettings) => {
+    const st = node.style || {};
+    if (st.radius) {
+      logoSettings.image_border_radius = boxValue(st.radius);
+    }
+    if (st.borderWidth && st.borderColor) {
+      logoSettings.image_border_border = st.borderStyle || 'solid';
+      logoSettings.image_border_width = boxValue(st.borderWidth);
+      logoSettings.image_border_color = st.borderColor;
+    }
+    if (st.boxShadow) {
+      logoSettings.image_box_shadow_box_shadow_type = 'yes';
+      logoSettings.image_box_shadow_box_shadow = st.boxShadow;
+    }
+    if (node.link) {
+      logoSettings.link_to = 'custom';
+      logoSettings.link = { url: node.link, is_external: '', nofollow: '' };
+    }
+    return logoSettings;
+  };
+
   // If live push uploaded to WordPress media library
   if (media && Number(media.id) > 0 && media.url) {
     const imgRef = { id: Number(media.id), url: media.url };
@@ -1115,13 +1291,13 @@ function buildSiteLogo(node, allocId, resolveMedia) {
       elType: 'widget',
       widgetType: 'theme-site-logo',
       isInner: false,
-      settings: {
+      settings: applyLogoBoxStyles({
         image: imgRef,
         image_size: 'full',
         custom_image: imgRef,
         use_custom_image: 'yes',
         width: { unit: 'px', size: w, sizes: [] },
-      },
+      }),
       elements: [],
     };
   }
@@ -1137,13 +1313,13 @@ function buildSiteLogo(node, allocId, resolveMedia) {
       elType: 'widget',
       widgetType: 'theme-site-logo',
       isInner: false,
-      settings: {
+      settings: applyLogoBoxStyles({
         image: svgImg,
         image_size: 'full',
         custom_image: svgImg,
         use_custom_image: 'yes',
         width: { unit: 'px', size: w, sizes: [] },
-      },
+      }),
       elements: [],
     };
   }
@@ -1153,13 +1329,13 @@ function buildSiteLogo(node, allocId, resolveMedia) {
     elType: 'widget',
     widgetType: 'theme-site-logo',
     isInner: false,
-    settings: {
+    settings: applyLogoBoxStyles({
       image: media,
       image_size: 'full',
       custom_image: media,
       use_custom_image: 'yes',
       width: { unit: 'px', size: w, sizes: [] },
-    },
+    }),
     elements: [],
   };
 }
@@ -1181,7 +1357,7 @@ function buildImage(node, allocId, resolveMedia) {
       widgetType: 'html',
       isInner: false,
       settings: {
-        html: `<div class="f2e-image-svg" style="display:inline-flex;align-items:center;${w ? `width:${w}px;` : ''}${h ? `height:${h}px;` : ''}line-height:0;">${scopedSvg}</div>`,
+        html: `<div class="f2e-image-svg" style="display:inline-flex;align-items:center;max-width:100%;${w ? `width:${w}px;` : ''}${h && !(w && w > 320) ? `height:${h}px;` : 'height:auto;'}line-height:0;">${scopedSvg}</div>`,
       },
       elements: [],
     };
@@ -1191,11 +1367,43 @@ function buildImage(node, allocId, resolveMedia) {
     image: media,
     image_size: 'full',
   };
+  if (node.link) {
+    settings.link_to = 'custom';
+    settings.link = { url: node.link, is_external: '', nofollow: '' };
+  }
   if (w) {
     settings.width = { unit: 'px', size: w, sizes: [] };
+    if (w > 320) {
+      settings.width_mobile = { unit: '%', size: 100, sizes: [] };
+    }
   }
-  if (node.style && node.style.radius) {
-    settings.image_border_radius = boxValue(node.style.radius);
+  if (h) {
+    settings.height = { unit: 'px', size: h, sizes: [] };
+    if (w && w > 320) {
+      settings.height_mobile = { unit: 'px', size: Math.max(180, Math.round(h * (360 / w))), sizes: [] };
+    }
+    settings.object_fit = 'cover';
+  }
+  const st = node.style || {};
+  if (st.radius) {
+    settings.image_border_radius = boxValue(st.radius);
+  }
+  if (st.borderWidth && st.borderColor) {
+    settings.image_border_border = st.borderStyle || 'solid';
+    settings.image_border_width = boxValue(st.borderWidth);
+    settings.image_border_color = st.borderColor;
+  }
+  if (st.boxShadow) {
+    settings.image_box_shadow_box_shadow_type = 'yes';
+    settings.image_box_shadow_box_shadow = st.boxShadow;
+  }
+  const pad = node.layout && node.layout.padding;
+  if (pad && (pad.top || pad.right || pad.bottom || pad.left)) {
+    settings._padding = boxValue(pad);
+  }
+  if (st.background) {
+    settings._background_background = 'classic';
+    settings._background_color = st.background;
   }
   return {
     id: elId,
@@ -1257,6 +1465,18 @@ function buildIconOrInlineSvg(node, allocId, resolveMedia) {
   }
 
   const color = (node.svg && node.svg.color) || (node.style && node.style.background) || '#1E293B';
+  const iName = String((node.content && node.content.name) || '').toLowerCase();
+  let faFallback = 'fas fa-circle';
+  if (iName.includes('arrow') && iName.includes('left')) faFallback = 'fas fa-arrow-left';
+  else if (iName.includes('arrow')) faFallback = 'fas fa-arrow-right';
+  else if (iName.includes('chevron')) faFallback = 'fas fa-chevron-right';
+  else if (iName.includes('check')) faFallback = 'fas fa-check';
+  else if (iName.includes('phone') || iName.includes('tel')) faFallback = 'fas fa-phone-alt';
+  else if (iName.includes('mail') || iName.includes('envelope')) faFallback = 'fas fa-envelope';
+  else if (iName.includes('star')) faFallback = 'fas fa-star';
+  else if (iName.includes('plus')) faFallback = 'fas fa-plus';
+  else if (iName.includes('search')) faFallback = 'fas fa-search';
+  else if (iName.includes('close') || iName.includes('times')) faFallback = 'fas fa-times';
   return {
     id: elId,
     elType: 'widget',
@@ -1264,7 +1484,7 @@ function buildIconOrInlineSvg(node, allocId, resolveMedia) {
     isInner: false,
     settings: {
       selected_icon: {
-        value: 'fas fa-circle',
+        value: faFallback,
         library: 'fa-solid',
       },
       primary_color: color,
@@ -1345,8 +1565,11 @@ function buildDivider(node, allocId, parentNode = null) {
   }
 
   const weight = Math.max(1, Math.min(20, h || 1));
+  const divStyle = (node.style && /^(solid|dashed|dotted|double)$/i.test(node.style.borderStyle || ''))
+    ? node.style.borderStyle.toLowerCase()
+    : 'solid';
   const settings = {
-    style: 'solid',
+    style: divStyle,
     weight: { unit: 'px', size: weight, sizes: [] },
     color,
     align: 'left',
@@ -1402,6 +1625,15 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
     position: pos,
   };
 
+  if (node.link) {
+    settings.link = { url: node.link, is_external: '', nofollow: '' };
+  }
+  if (desc) {
+    const titleGap = (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0)
+      ? Math.min(24, Math.round(node.layout.gap))
+      : 8;
+    settings.title_bottom_space = { unit: 'px', size: titleGap, sizes: [] };
+  }
   if (titleTypo && titleTypo.align) {
     settings.text_align = titleTypo.align === 'justified' ? 'justify' : titleTypo.align;
   }
@@ -1416,18 +1648,24 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
   }
   if (titleTypo) {
     applyTypographySettings(settings, 'title_typography', titleTypo, node.responsive);
+    applyTextShadowAndEffects(settings, titleTypo, 'selector .elementor-icon-box-title, selector .elementor-image-box-title');
   }
   if (titleGrad) {
     appendCustomCss(settings, buildTextClipRule('selector .elementor-icon-box-title, selector .elementor-image-box-title', titleGrad));
   }
 
+  const descGrad = getTextGradientCss(descTypo);
   const descColor = (descTypo && (descTypo.color || (descTypo.gradient && descTypo.gradient.color2))) || null;
   if (descColor) {
     settings.description_color = descColor;
-    applyGlobalColor(settings, 'description_color', descColor);
+    if (!descGrad) applyGlobalColor(settings, 'description_color', descColor);
   }
   if (descTypo) {
     applyTypographySettings(settings, 'description_typography', descTypo, node.responsive);
+    applyTextShadowAndEffects(settings, descTypo, 'selector .elementor-icon-box-description, selector .elementor-image-box-description');
+  }
+  if (descGrad) {
+    appendCustomCss(settings, buildTextClipRule('selector .elementor-icon-box-description, selector .elementor-image-box-description', descGrad));
   }
 
   const sha = (node.raster && node.raster.sha256) || (node.image && node.image.sha256) || (node.svg && node.svg.sha256) || '';
@@ -1498,7 +1736,7 @@ function inferIconListFaIcon(textStr, iconSize) {
 function buildIconList(node, nodes, allocId) {
   const items = (node.content && node.content.iconList) || [];
   const texts = collectSubtreeTexts(node, nodes);
-  const iconSize = (node.content && node.content.iconSize && node.content.iconSize <= 32) ? node.content.iconSize : 6;
+  const iconSize = (node.content && node.content.iconSize && Number(node.content.iconSize) > 0) ? Math.round(Number(node.content.iconSize)) : 6;
   let listData = [];
   if (items.length > 0) {
     listData = items.map((it, idx) => ({
@@ -1521,7 +1759,7 @@ function buildIconList(node, nodes, allocId) {
 
   const firstTypo = node.text || (texts[0] && texts[0].text) || null;
   const isRow = (node.layout && node.layout.direction === 'row') || (Number(node.layout && node.layout.width) || 0) > 600;
-  const gap = Math.max(12, Number(node.layout && node.layout.gap) || 24);
+  const gap = (node.layout && typeof node.layout.gap === 'number' && node.layout.gap >= 0) ? Math.round(node.layout.gap) : 16;
   const textColor = (firstTypo && (firstTypo.color || (firstTypo.gradient && firstTypo.gradient.color2))) || '#FFFFFF';
   const iconColor = (node.content && node.content.iconColor) || textColor;
 
@@ -1530,6 +1768,7 @@ function buildIconList(node, nodes, allocId) {
     view: isRow ? 'inline' : 'traditional',
     space_between: { unit: 'px', size: gap, sizes: [] },
     icon_size: { unit: 'px', size: iconSize, sizes: [] },
+    text_indent: { unit: 'px', size: Math.max(6, Math.min(16, Math.round(iconSize * 0.5 + 4))), sizes: [] },
     icon_color: iconColor,
     text_color: textColor,
   };
@@ -1543,12 +1782,13 @@ function buildIconList(node, nodes, allocId) {
 
   if (firstTypo) {
     applyTypographySettings(settings, 'icon_typography', firstTypo, node.responsive);
+    applyTextShadowAndEffects(settings, firstTypo, 'selector .elementor-icon-list-text');
     if (firstTypo.fontSize) {
       settings.typography_font_size = { unit: 'px', size: firstTypo.fontSize, sizes: [] };
     }
     const listGrad = getTextGradientCss(firstTypo);
     if (listGrad) {
-      settings.custom_css = buildTextClipRule('selector .elementor-icon-list-text', listGrad);
+      appendCustomCss(settings, buildTextClipRule('selector .elementor-icon-list-text', listGrad));
     }
   }
 
@@ -1575,8 +1815,18 @@ function buildProgress(node, nodes, allocId) {
     if (titleTypo.color) settings.title_color = titleTypo.color;
     applyTypographySettings(settings, 'typography', titleTypo, node.responsive);
   }
+  if (pctNode && pctNode.text) {
+    if (pctNode.text.color) settings.bar_inline_color = pctNode.text.color;
+    applyTypographySettings(settings, 'bar_inner_typography', pctNode.text, node.responsive);
+  }
   if (node.style && node.style.background) {
     settings.bar_color = node.style.background;
+  }
+  if (node.style && node.style.radius) {
+    settings.border_radius = boxValue(node.style.radius);
+  }
+  if (node.layout && node.layout.height && Number(node.layout.height) <= 48) {
+    settings.bar_height = { unit: 'px', size: Math.max(4, Math.round(Number(node.layout.height))), sizes: [] };
   }
   return {
     id: allocId(node.id),
@@ -1610,6 +1860,9 @@ function buildAlert(node, nodes, allocId) {
   if (node.style && node.style.borderColor) {
     settings.border_color = node.style.borderColor;
   }
+  if (node.style && node.style.borderWidth && Number(node.style.borderWidth.left) > 0) {
+    settings.border_left_width = { unit: 'px', size: Math.round(Number(node.style.borderWidth.left)), sizes: [] };
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
@@ -1626,9 +1879,17 @@ function buildGalleryOrCarousel(node, nodes, wType, allocId, resolveMedia) {
     .map((img) => resolveMedia(img.sha256, img.dataUri))
     .filter((m) => m && (m.url || m.id));
   const isCarousel = wType.includes('carousel');
+  const cols = String(Math.max(1, Math.min(6, Number(node.layout && node.layout.columns) || Math.min(3, imgs.length || 3))));
   const settings = isCarousel
-    ? { carousel: imgs, slides_to_show: '3', navigation: 'both' }
-    : { wp_gallery: imgs, gallery_columns: '3', open_lightbox: 'yes' };
+    ? { carousel: imgs, slides_to_show: cols, navigation: 'both' }
+    : { wp_gallery: imgs, gallery_columns: cols, open_lightbox: 'yes' };
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.image_spacing = 'custom';
+    settings.image_spacing_custom = { unit: 'px', size: Math.round(node.layout.gap), sizes: [] };
+  }
+  if (node.style && node.style.radius) {
+    settings.image_border_radius = boxValue(node.style.radius);
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
@@ -1663,16 +1924,25 @@ function buildTestimonial(node, nodes, allocId, resolveMedia) {
   };
 
   if (contentNode && contentNode.text) {
+    if (contentNode.text.align) settings.testimonial_alignment = contentNode.text.align === 'justified' ? 'left' : contentNode.text.align;
     if (contentNode.text.color) settings.content_content_color = contentNode.text.color;
     applyTypographySettings(settings, 'content_typography', contentNode.text, node.responsive);
+    applyTextShadowAndEffects(settings, contentNode.text, 'selector .elementor-testimonial-content');
   }
   if (nameNode && nameNode.text) {
     if (nameNode.text.color) settings.name_text_color = nameNode.text.color;
     applyTypographySettings(settings, 'name_typography', nameNode.text, node.responsive);
+    applyTextShadowAndEffects(settings, nameNode.text, 'selector .elementor-testimonial-name');
   }
   if (jobNode && jobNode.text) {
     if (jobNode.text.color) settings.job_text_color = jobNode.text.color;
     applyTypographySettings(settings, 'job_typography', jobNode.text, node.responsive);
+  }
+  if (imgs[0] && imgs[0].width) {
+    settings.image_size = { unit: 'px', size: Math.round(Number(imgs[0].width)), sizes: [] };
+  }
+  if (node.style && node.style.radius) {
+    settings.image_border_radius = boxValue(node.style.radius);
   }
 
   return {
@@ -1686,16 +1956,28 @@ function buildTestimonial(node, nodes, allocId, resolveMedia) {
 }
 
 function buildStarRating(node, allocId) {
+  const starColor = (node.svg && node.svg.color) || (node.text && node.text.color) || (node.style && node.style.background) || '#F59E0B';
+  const settings = {
+    rating_scale: '5',
+    rating: 5,
+    star_style: 'star_fontawesome',
+    stars_color: starColor,
+  };
+  if (node.layout && node.layout.height && Number(node.layout.height) > 0 && Number(node.layout.height) <= 64) {
+    settings.star_size = { unit: 'px', size: Math.round(Number(node.layout.height)), sizes: [] };
+  }
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.star_space = { unit: 'px', size: Math.round(node.layout.gap), sizes: [] };
+  }
+  if (node.text && node.text.align) {
+    settings.align = node.text.align;
+  }
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'star-rating',
     isInner: false,
-    settings: {
-      rating_scale: '5',
-      rating: 5,
-      star_style: 'star_fontawesome',
-    },
+    settings,
     elements: [],
   };
 }
@@ -1738,6 +2020,25 @@ function buildSocialIcons(node, nodes, allocId) {
   const settings = { social_icon_list: list };
   if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
     settings.icon_spacing = { unit: 'px', size: node.layout.gap, sizes: [] };
+  }
+  const firstStyled = extractedSocials.find((s) => s.background || s.borderColor || s.radius || s.width) || null;
+  if (firstStyled) {
+    if (firstStyled.background) {
+      settings.icon_color = 'custom';
+      settings.icon_primary_color = firstStyled.background;
+      settings.icon_secondary_color = '#FFFFFF';
+    }
+    if (firstStyled.width && Number(firstStyled.width) > 0) {
+      settings.icon_size = { unit: 'px', size: Math.max(12, Math.round(Number(firstStyled.width) * 0.45)), sizes: [] };
+    }
+    if (firstStyled.radius) {
+      settings.border_radius = boxValue(firstStyled.radius);
+    }
+    if (firstStyled.borderColor) {
+      settings.image_border_border = 'solid';
+      settings.image_border_width = boxValue({ top: 1, right: 1, bottom: 1, left: 1 }, true);
+      settings.image_border_color = firstStyled.borderColor;
+    }
   }
   return {
     id: allocId(node.id),
@@ -1790,6 +2091,12 @@ function buildCounter(node, nodes, allocId) {
   if (numTypo.fontFamily || numTypo.fontSize || numTypo.fontWeight) {
     applyTypographySettings(settings, 'typography_number', numTypo, (numNode && numNode.responsive) || node.responsive);
   }
+  if (numTypo.align && /^(left|center|right)$/i.test(numTypo.align)) {
+    const cAlign = numTypo.align.toLowerCase();
+    settings.number_position = cAlign;
+    settings.title_horizontal_align = cAlign;
+  }
+  applyTextShadowAndEffects(settings, numTypo, 'selector .elementor-counter-number-wrapper, selector .elementor-counter-number');
 
   if (labelNode && labelNode.text) {
     const lblTypo = labelNode.text;
@@ -1815,6 +2122,93 @@ function buildCounter(node, nodes, allocId) {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'counter',
+    isInner: false,
+    settings,
+    elements: [],
+  };
+}
+
+function buildAudio(node, allocId) {
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'audio',
+    isInner: false,
+    settings: {
+      link: { url: node.link || 'https://soundcloud.com/shayne-m-1/sets/ambient' },
+      visual: 'yes',
+    },
+    elements: [],
+  };
+}
+
+function buildShortcode(node, nodes, allocId) {
+  const texts = collectSubtreeTexts(node, nodes);
+  const raw = (node.text && node.text.characters) || (texts[0] && texts[0].text && texts[0].text.characters) || '';
+  const sc = raw.trim().startsWith('[') ? raw.trim() : `[${(node.content && node.content.name) || 'shortcode'}]`;
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'shortcode',
+    isInner: false,
+    settings: { shortcode: sc },
+    elements: [],
+  };
+}
+
+function buildMenuAnchor(node, allocId) {
+  const raw = String((node.content && node.content.name) || 'section')
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'section';
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'menu-anchor',
+    isInner: false,
+    settings: { anchor: raw },
+    elements: [],
+  };
+}
+
+function buildSidebar(node, allocId) {
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'sidebar',
+    isInner: false,
+    settings: { sidebar: 'sidebar-1' },
+    elements: [],
+  };
+}
+
+function buildReadMore(node, nodes, allocId) {
+  const texts = collectSubtreeTexts(node, nodes);
+  const label = (node.text && node.text.characters) || (texts[0] && texts[0].text && texts[0].text.characters) || (node.content && node.content.name) || 'Read More';
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'read-more',
+    isInner: false,
+    settings: { link_text: label },
+    elements: [],
+  };
+}
+
+function buildTextPath(node, nodes, allocId) {
+  const texts = collectSubtreeTexts(node, nodes);
+  const t = node.text || (texts[0] && texts[0].text) || {};
+  const settings = {
+    text: t.characters || (node.content && node.content.name) || 'Curved Text',
+    path: 'wave',
+    align: t.align || 'center',
+  };
+  if (t.color) settings.text_color_normal = t.color;
+  applyTypographySettings(settings, 'text_typography', t, node.responsive);
+  return {
+    id: allocId(node.id),
+    elType: 'widget',
+    widgetType: 'text-path',
     isInner: false,
     settings,
     elements: [],

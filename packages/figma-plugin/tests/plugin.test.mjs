@@ -3000,6 +3000,297 @@ test('Row Container Child Sizing: HUG/FILL text column and FIXED form sit side-b
   assert.equal(textCol.settings.width_mobile.size, 100, 'Mobile width must wrap to 100%');
 });
 
+test('All Widget Groups (Core, Composite/Nested, Pro & v4) preserve Dev Mode styles', () => {
+  const doc = {
+    title: 'Widget Audit Doc',
+    roots: ['sec-1'],
+    nodes: {
+      'sec-1': {
+        id: 'sec-1',
+        widget: 'container',
+        layout: { width: 1200, height: 800, direction: 'column', minWidth: 320, gap: 16 },
+        style: {},
+        children: ['btn-1', 'img-1', 'div-1', 'svg-1', 'tabs-1', 'stars-1', 'social-1', 'slides-1'],
+      },
+      'btn-1': {
+        id: 'btn-1',
+        widget: 'button',
+        content: { characters: 'Đặt lịch' },
+        layout: { width: 180, height: 48, minHeight: 48, padding: { top: 12, right: 24, bottom: 12, left: 24 } },
+        style: { borderStyle: 'dashed', borderWidth: { top: 2, right: 2, bottom: 2, left: 2 }, borderColor: '#16A34A', radius: { top: 10, right: 10, bottom: 10, left: 10 } },
+        text: { characters: 'Đặt lịch', color: '#16A34A', fontSize: 16, textShadow: { horizontal: 0, vertical: 2, blur: 4, color: 'rgba(0,0,0,0.2)' } },
+      },
+      'img-1': {
+        id: 'img-1',
+        widget: 'image',
+        layout: { width: 400, height: 260, padding: { top: 4, right: 4, bottom: 4, left: 4 } },
+        style: {
+          background: '#F8FAFC',
+          radius: { top: 12, right: 12, bottom: 12, left: 12 },
+          borderStyle: 'solid',
+          borderWidth: { top: 2, right: 2, bottom: 2, left: 2 },
+          borderColor: '#E2E8F0',
+          boxShadow: { horizontal: 0, vertical: 8, blur: 20, spread: 0, color: 'rgba(0,0,0,0.1)' },
+        },
+        image: { sha256: 'imgsha', dataUri: 'data:image/png;base64,iVBORw0KGgo=' },
+      },
+      'div-1': {
+        id: 'div-1',
+        widget: 'divider',
+        layout: { width: 200, height: 2 },
+        style: { borderStyle: 'dotted', borderColor: '#94A3B8' },
+      },
+      'svg-1': {
+        id: 'svg-1',
+        widget: 'icon',
+        layout: { width: 44, height: 44, padding: { top: 10, right: 10, bottom: 10, left: 10 } },
+        style: { background: '#ECFDF5', radius: { top: 22, right: 22, bottom: 22, left: 22 }, borderWidth: { top: 1, right: 1, bottom: 1, left: 1 }, borderColor: '#10B981' },
+        svg: { markup: '<svg viewBox="0 0 24 24"><path d="M5 12h14"/></svg>' },
+      },
+      'tabs-1': {
+        id: 'tabs-1',
+        widget: 'nested-tabs',
+        layout: { gap: 12, padding: { top: 8, right: 8, bottom: 8, left: 8 } },
+        style: { background: '#F1F5F9', radius: { top: 8, right: 8, bottom: 8, left: 8 }, borderWidth: { top: 1, right: 1, bottom: 1, left: 1 }, borderColor: '#CBD5E1' },
+        content: {
+          accordionItems: [
+            { title: 'Tab 1', titleTypography: { fontFamily: 'Inter', fontSize: 16, fontWeight: '600', color: '#16A34A' } },
+            { title: 'Tab 2', titleTypography: { fontFamily: 'Inter', fontSize: 16, fontWeight: '500', color: '#475569' } },
+          ],
+        },
+        children: [],
+      },
+      'stars-1': {
+        id: 'stars-1',
+        widget: 'star-rating',
+        layout: { height: 20, gap: 6 },
+        svg: { color: '#F59E0B' },
+        text: { align: 'center' },
+      },
+      'social-1': {
+        id: 'social-1',
+        widget: 'social-icons',
+        layout: { gap: 12 },
+        content: {
+          socialItems: [
+            { id: 's1', name: 'facebook', link: 'https://fb.com', background: '#1877F2', borderColor: '#1877F2', radius: { top: 20, right: 20, bottom: 20, left: 20 }, width: 40 },
+          ],
+        },
+      },
+      'slides-1': {
+        id: 'slides-1',
+        widget: 'slides',
+        layout: { height: 520 },
+        content: {
+          slides: [
+            {
+              id: 'sl1',
+              background: '#0F172A',
+              texts: [
+                { characters: 'Slide Title', fontFamily: 'Inter', fontSize: 40, fontWeight: '700', color: '#FFFFFF' },
+                { characters: 'Slide Desc', fontFamily: 'Inter', fontSize: 16, fontWeight: '400', color: '#CBD5E1' },
+              ],
+            },
+          ],
+        },
+      },
+    },
+  };
+
+  const v3 = compileElementorV3(doc);
+  const root = v3.content[0];
+  assert.ok(root.settings.custom_css.includes('min-width: 320px;'));
+
+  const [btn, img, div, svgIcon, tabs, stars, social, slides] = root.elements;
+  // Group 1
+  assert.equal(btn.settings.border_border, 'dashed');
+  assert.equal(btn.settings.text_shadow_text_shadow_type, 'yes');
+  assert.ok(btn.settings.custom_css.includes('min-height: 48px;'));
+  assert.equal(img.settings.image_border_border, 'solid');
+  assert.equal(img.settings.image_box_shadow_box_shadow_type, 'yes');
+  assert.equal(img.settings.object_fit, 'cover');
+  assert.equal(img.settings._background_color, '#F8FAFC');
+  assert.equal(div.settings.style, 'dotted');
+  assert.equal(svgIcon.settings._background_color, '#ECFDF5');
+  assert.equal(svgIcon.settings._border_color, '#10B981');
+
+  // Group 2
+  assert.equal(tabs.settings.title_text_color_active, '#16A34A');
+  assert.equal(tabs.settings.title_text_color, '#475569');
+  assert.equal(tabs.settings.tabs_title_background_color_color, '#F1F5F9');
+  assert.equal(tabs.settings.tabs_title_space_between.size, 12);
+  assert.equal(stars.settings.stars_color, '#F59E0B');
+  assert.equal(stars.settings.star_size.size, 20);
+  assert.equal(stars.settings.star_space.size, 6);
+  assert.equal(social.settings.icon_color, 'custom');
+  assert.equal(social.settings.icon_primary_color, '#1877F2');
+
+  // Group 3
+  assert.equal(slides.settings.heading_color, '#FFFFFF');
+  assert.equal(slides.settings.description_color, '#CBD5E1');
+  assert.equal(slides.settings.heading_typography_font_size.size, 40);
+
+  // v4 Atomic
+  const v4 = compileElementorV4(doc);
+  const btnV4 = v4.content[0].elements[0];
+  const btnProps = Object.values(btnV4.styles)[0].variants[0].props;
+  assert.equal(btnProps['border-style'].value, 'dashed');
+  assert.equal(btnProps['min-height'].value.size, 48);
+  assert.ok(btnProps['border-radius']);
+});
+
+test('All 12 previously-missing catalog widgets + countdown/share-buttons/price-list compile to exact widgetType', () => {
+  const widgetTypes = [
+    'audio', 'shortcode', 'menu-anchor', 'sidebar', 'read-more', 'text-path',
+    'paypal-button', 'stripe-button', 'progress-tracker', 'video-playlist',
+    'off-canvas', 'taxonomy-filter', 'countdown', 'share-buttons', 'price-list',
+  ];
+  const nodes = {
+    root: { id: 'root', widget: 'container', layout: { width: 1200, direction: 'column' }, children: widgetTypes },
+  };
+  for (const wt of widgetTypes) {
+    nodes[wt] = {
+      id: wt,
+      widget: wt,
+      content: { name: wt },
+      layout: { width: 300, height: 44, padding: { top: 8, right: 12, bottom: 8, left: 12 } },
+      style: { background: '#16A34A', borderColor: '#15803D', radius: { top: 8, right: 8, bottom: 8, left: 8 } },
+      text: { characters: wt, fontFamily: 'Inter', fontSize: 16, fontWeight: '600', color: '#FFFFFF' },
+      children: [],
+    };
+  }
+  const v3 = compileElementorV3({ title: '82/82 Coverage', roots: ['root'], nodes });
+  const compiled = v3.content[0].elements;
+  assert.equal(compiled.length, widgetTypes.length);
+  for (let i = 0; i < widgetTypes.length; i += 1) {
+    assert.equal(compiled[i].elType, 'widget', `${widgetTypes[i]} must compile as widget, not container`);
+    assert.equal(compiled[i].widgetType, widgetTypes[i]);
+  }
+});
+
+test('Root frame tagged as unwrap promotes each child Frame to an independent top-level Elementor Section (isInner: false)', () => {
+  const doc = {
+    title: 'Homepage',
+    roots: ['homepage'],
+    nodes: {
+      homepage: {
+        id: 'homepage',
+        widget: 'unwrap',
+        layout: { width: 1920, direction: 'column' },
+        children: ['sec-hero', 'sec-about', 'sec-footer'],
+      },
+      'sec-hero': {
+        id: 'sec-hero',
+        widget: 'container',
+        content: { name: 'HP/Hero' },
+        layout: { width: 1920, height: 800, direction: 'column', padding: { top: 80, right: 180, bottom: 80, left: 180 } },
+        style: { background: '#111827' },
+        children: [],
+      },
+      'sec-about': {
+        id: 'sec-about',
+        widget: 'container',
+        content: { name: 'HP/About Us' },
+        layout: { width: 1920, height: 758, direction: 'row', padding: { top: 200, right: 180, bottom: 0, left: 180 } },
+        style: { background: '#F9E0E2' },
+        children: [],
+      },
+      'sec-footer': {
+        id: 'sec-footer',
+        widget: 'container',
+        content: { name: 'Footer' },
+        layout: { width: 1920, height: 320, direction: 'column', padding: { top: 60, right: 180, bottom: 60, left: 180 } },
+        style: { background: '#0F172A' },
+        children: [],
+      },
+    },
+  };
+
+  const v3 = compileElementorV3(doc);
+  assert.equal(v3.content.length, 3, 'Unwrapped Homepage must emit 3 independent root sections');
+  assert.equal(v3.content[0].isInner, false);
+  assert.equal(v3.content[1].isInner, false);
+  assert.equal(v3.content[2].isInner, false);
+  assert.equal(v3.content[1].settings.boxed_width.size, 1560);
+  assert.equal(v3.content[1].settings._title, 'HP/About Us');
+});
+
+test('Auto-detect Slides widget from pagination dots and prev/next arrows without including controls as fake slides', async () => {
+  const heroSliderFrame = {
+    id: 'sl:hero',
+    name: 'Hero Banner',
+    type: 'FRAME',
+    visible: true,
+    width: 1440,
+    height: 520,
+    layoutMode: 'NONE',
+    children: [
+      {
+        id: 'sl:1',
+        name: 'Slide 1',
+        type: 'FRAME',
+        visible: true,
+        width: 1440,
+        height: 520,
+        fills: [{ type: 'SOLID', color: { r: 0.1, g: 0.12, b: 0.2 }, visible: true, opacity: 1 }],
+        children: [
+          {
+            id: 'sl:1:h',
+            name: 'Heading',
+            type: 'TEXT',
+            visible: true,
+            characters: 'Creative Studio',
+            fontSize: 48,
+            fontName: { family: 'Lora', style: 'Bold' },
+            fills: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, visible: true, opacity: 1 }],
+          },
+        ],
+      },
+      {
+        id: 'sl:dots',
+        name: 'Dots',
+        type: 'FRAME',
+        visible: true,
+        width: 56,
+        height: 10,
+        children: [
+          { id: 'd1', name: 'Dot 1', type: 'ELLIPSE', visible: true, width: 10, height: 10, fills: [{ type: 'SOLID', color: { r: 0.88, g: 0.19, b: 0.14 }, visible: true, opacity: 1 }] },
+          { id: 'd2', name: 'Dot 2', type: 'ELLIPSE', visible: true, width: 10, height: 10, fills: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, visible: true, opacity: 1 }] },
+        ],
+      },
+      {
+        id: 'sl:prev',
+        name: 'Prev Arrow',
+        type: 'FRAME',
+        visible: true,
+        width: 40,
+        height: 40,
+        fills: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, visible: true, opacity: 1 }],
+        children: [{ id: 'p1', name: 'Vector', type: 'VECTOR', visible: true, width: 16, height: 16 }],
+      },
+      {
+        id: 'sl:next',
+        name: 'Next Arrow',
+        type: 'FRAME',
+        visible: true,
+        width: 40,
+        height: 40,
+        fills: [{ type: 'SOLID', color: { r: 1, g: 1, b: 1 }, visible: true, opacity: 1 }],
+        children: [{ id: 'n1', name: 'Vector', type: 'VECTOR', visible: true, width: 16, height: 16 }],
+      },
+    ],
+  };
+
+  const { document } = await extractDesignSelection([heroSliderFrame], { fileKey: 'slides-detect' });
+  const v3 = compileElementorV3(document);
+  const slidesWidget = v3.content[0];
+  assert.equal(slidesWidget.widgetType, 'slides');
+  assert.equal(slidesWidget.settings.slides.length, 1, 'Dots and arrows must NOT become fake slides');
+  assert.equal(slidesWidget.settings.navigation, 'both');
+  assert.equal(slidesWidget.settings.dots_color, '#E03024');
+  assert.equal(slidesWidget.settings.arrows_color, '#FFFFFF');
+});
+
 
 
 

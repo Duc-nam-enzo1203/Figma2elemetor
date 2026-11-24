@@ -214,6 +214,51 @@ function buildV4Variant(breakpoint, layout = {}, style = {}, text = {}, resolveM
   if (text && text.fontFamily) {
     props['font-family'] = { $$type: 'string', value: text.fontFamily };
   }
+  if (text && text.fontWeight) {
+    props['font-weight'] = { $$type: 'string', value: String(text.fontWeight) };
+  }
+  if (text && text.lineHeight) {
+    props['line-height'] = { $$type: 'size', value: { size: Number(text.lineHeight), unit: text.lineHeightUnit || 'px' } };
+  }
+  if (text && typeof text.letterSpacing === 'number' && text.letterSpacing !== 0) {
+    props['letter-spacing'] = { $$type: 'size', value: { size: Number(text.letterSpacing), unit: text.letterSpacingUnit || 'px' } };
+  }
+  if (text && text.align) {
+    props['text-align'] = { $$type: 'string', value: text.align === 'justified' ? 'justify' : text.align };
+  }
+  if (style && style.radius) {
+    props['border-radius'] = {
+      $$type: 'border-radius',
+      value: {
+        'start-start': { $$type: 'size', value: { size: Number(style.radius.top) || 0, unit: 'px' } },
+        'start-end': { $$type: 'size', value: { size: Number(style.radius.right) || 0, unit: 'px' } },
+        'end-end': { $$type: 'size', value: { size: Number(style.radius.bottom) || 0, unit: 'px' } },
+        'end-start': { $$type: 'size', value: { size: Number(style.radius.left) || 0, unit: 'px' } },
+      },
+    };
+  }
+  if (style && style.borderColor && style.borderWidth) {
+    const bwMax = Math.max(
+      Number(style.borderWidth.top) || 0,
+      Number(style.borderWidth.right) || 0,
+      Number(style.borderWidth.bottom) || 0,
+      Number(style.borderWidth.left) || 0
+    );
+    if (bwMax > 0) {
+      props['border-width'] = { $$type: 'size', value: { size: bwMax, unit: 'px' } };
+      props['border-color'] = { $$type: 'color', value: style.borderColor };
+      props['border-style'] = { $$type: 'string', value: style.borderStyle || 'solid' };
+    }
+  }
+  if (typeof style.opacity === 'number' && style.opacity >= 0 && style.opacity < 1) {
+    props.opacity = { $$type: 'size', value: { size: Math.round(style.opacity * 100), unit: '%' } };
+  }
+  if (layout && Number(layout.minHeight) > 0) {
+    props['min-height'] = { $$type: 'size', value: { size: Math.round(Number(layout.minHeight)), unit: 'px' } };
+  }
+  if (layout && Number(layout.maxWidth) > 0) {
+    props['max-width'] = { $$type: 'size', value: { size: Math.round(Number(layout.maxWidth)), unit: 'px' } };
+  }
   return {
     meta: { breakpoint, state: null },
     props,

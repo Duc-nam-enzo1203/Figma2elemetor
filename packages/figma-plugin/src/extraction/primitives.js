@@ -405,6 +405,25 @@ export function extractTypography(node) {
   }
   if (color) text.color = color;
 
+  if (typeof node.paragraphSpacing === 'number' && node.paragraphSpacing > 0) {
+    text.paragraphSpacing = Math.round(node.paragraphSpacing);
+  }
+
+  if (characters.length > 0 && typeof node.getStyledTextSegments === 'function') {
+    try {
+      const segs = node.getStyledTextSegments(['fontName', 'fills', 'textDecoration']);
+      if (Array.isArray(segs) && segs.length > 1) {
+        text.richSegments = segs.map((seg) => ({
+          characters: safeStr(seg.characters, ''),
+          fontWeight: seg.fontName && seg.fontName.style ? fontWeightOf(seg.fontName.style) : text.fontWeight,
+          fontStyle: seg.fontName && safeStr(seg.fontName.style).toLowerCase().includes('italic') ? 'italic' : 'normal',
+          decoration: seg.textDecoration === 'UNDERLINE' ? 'underline' : (seg.textDecoration === 'STRIKETHROUGH' ? 'line-through' : ''),
+          color: extractSolidColor(Array.isArray(seg.fills) ? seg.fills : null) || text.color || null,
+        }));
+      }
+    } catch (e) { }
+  }
+
   return text;
 }
 
@@ -459,6 +478,20 @@ export function extractButtonIcon(node) {
     faIcon = 'fas fa-plus';
   } else if (iconName.includes('search')) {
     faIcon = 'fas fa-search';
+  } else if (iconName.includes('play')) {
+    faIcon = 'fas fa-play';
+  } else if (iconName.includes('download')) {
+    faIcon = 'fas fa-download';
+  } else if (iconName.includes('phone') || iconName.includes('tel') || iconName.includes('call')) {
+    faIcon = 'fas fa-phone-alt';
+  } else if (iconName.includes('mail') || iconName.includes('envelope')) {
+    faIcon = 'fas fa-envelope';
+  } else if (iconName.includes('cart') || iconName.includes('bag')) {
+    faIcon = 'fas fa-shopping-cart';
+  } else if (iconName.includes('external') || iconName.includes('link')) {
+    faIcon = 'fas fa-external-link-alt';
+  } else if (iconName.includes('close') || iconName.includes('times')) {
+    faIcon = 'fas fa-times';
   } else if (iconName.includes('phone') || iconName.includes('call')) {
     faIcon = 'fas fa-phone';
   } else if (iconName.includes('mail') || iconName.includes('envelope')) {

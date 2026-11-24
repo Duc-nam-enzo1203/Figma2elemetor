@@ -270,10 +270,11 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
       const hasOnlyTextChildren = kids.length > 0 && kids.every(
         (k) => k && k.elType === 'widget' && (k.widgetType === 'text-editor' || k.widgetType === 'heading')
       );
+      const isExplicitFixedInIr = Boolean(irNode && irNode.layout && irNode.layout.sizingH === 'FIXED');
       const isHugInIr = irNode && irNode.layout && (!irNode.layout.sizingH || irNode.layout.sizingH === 'HUG');
       const hasNoVisualBox = !settings.background_background && !settings.border_border;
 
-      if ((hasOnlyTextChildren && hasNoVisualBox && wSize > 0 && wSize < 420) || (isHugInIr && hasOnlyTextChildren)) {
+      if (!isExplicitFixedInIr && ((hasOnlyTextChildren && hasNoVisualBox && wSize > 0 && wSize < 420) || (isHugInIr && hasOnlyTextChildren))) {
         delete settings.width;
         delete settings.width_tablet;
         delete settings.width_mobile;
@@ -392,8 +393,20 @@ export function verifyAndHealElementorJson(elements, doc = null, options = {}) {
 
       if (growChildren.length >= 2) {
         const colCount = growChildren.length;
-        // Exact proportional percentage (e.g. 22.56% for 4 columns) leaving room for flex gaps
-        const safeColPct = Math.round((90.24 / colCount) * 100) / 100;
+        // Compute exact percentage leaving room for actual flex gaps when IR layout is available;
+        // otherwise fall back to 90.24 / colCount (e.g. 22.56% for 4 columns).
+        let availablePct = 90.24;
+        if (irNode && irNode.layout && Number(irNode.layout.width) > 0) {
+          const irPadL = Number(irNode.layout.padding && irNode.layout.padding.left) || 0;
+          const irPadR = Number(irNode.layout.padding && irNode.layout.padding.right) || 0;
+          const innerW = Number(irNode.layout.width) - irPadL - irPadR;
+          const irGap = Math.max(0, Number(settings.flex_gap && settings.flex_gap.size) || Number(irNode.layout.gap) || 0);
+          const totalGap = irGap * Math.max(0, kids.length - 1);
+          if (innerW > 0 && innerW > totalGap) {
+            availablePct = Math.max(20, Math.min(100, ((innerW - totalGap) / innerW) * 100));
+          }
+        }
+        const safeColPct = Math.round((availablePct / colCount) * 100) / 100;
         const tabletColPct = colCount >= 3 ? 47 : 100;
 
         // If Figma row didn't explicitly wrap, do not wrap on Desktop so all columns stay on 1 row

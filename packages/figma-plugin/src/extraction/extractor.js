@@ -19,6 +19,7 @@ import {
   collectTextDescendants,
   isAtomicLeafWidget,
   isVectorGraphic,
+  isSliderControlChild,
   detectCompositeBackgroundChildren,
 } from '../tagging/widget-resolver.js';
 import { inferVirtualLayout } from '../optimizer/auto-layout-fixer.js';
@@ -438,8 +439,24 @@ export async function extractDesignSelection(selection, options = {}) {
     if (['slides', 'testimonial-carousel', 'reviews'].includes(choice.widget)) {
       const slides = [];
       entry.extractedImages = [];
+      const sliderNav = { hasDots: false, hasArrows: false, dotsColor: null, arrowsColor: null };
       for (const slideChild of rawKids) {
         if (!slideChild || slideChild.visible === false) continue;
+        if (isSliderControlChild(slideChild)) {
+          const sn = safeStr(slideChild.name).toLowerCase();
+          const sStyle = extractStyle(slideChild);
+          const firstGrand = visibleChildren(slideChild)[0];
+          const gColor = firstGrand ? (extractSolidColor(firstGrand.fills) || extractSolidColor(firstGrand.strokes)) : null;
+          const ctrlColor = sStyle.background || sStyle.borderColor || gColor || null;
+          if (/\b(arrow|prev|next|chevron|arrows|slider-nav|carousel-nav|slider-btn|nav-btn|controls)\b/i.test(sn)) {
+            sliderNav.hasArrows = true;
+            if (!sliderNav.arrowsColor && ctrlColor) sliderNav.arrowsColor = ctrlColor;
+          } else {
+            sliderNav.hasDots = true;
+            if (!sliderNav.dotsColor && ctrlColor) sliderNav.dotsColor = ctrlColor;
+          }
+          continue;
+        }
         const slideTextNodes = collectTextDescendants(slideChild);
         const slideTexts = [];
         for (const tn of slideTextNodes) {
@@ -495,6 +512,9 @@ export async function extractDesignSelection(selection, options = {}) {
         }
       }
       entry.content.slides = slides;
+      if (sliderNav.hasDots || sliderNav.hasArrows) {
+        entry.content.sliderNav = sliderNav;
+      }
     }
 
     if (['accordion', 'nested-accordion', 'toggle', 'tabs', 'nested-tabs'].includes(choice.widget)) {
@@ -675,8 +695,15 @@ export async function extractDesignSelection(selection, options = {}) {
         return resolved && resolved.widget === 'button';
       };
 
+      const isThinLineNode = (n) => {
+        if (!n || n.type === 'TEXT') return false;
+        const nh = Number(n.height) || 0;
+        const nw = Number(n.width) || 0;
+        return n.type === 'LINE' || (nh > 0 && nh <= 4 && nw >= 40);
+      };
+
       const isInputBoxLike = (k) => {
-        if (!k || k.type === 'TEXT') return false;
+        if (!k || k.type === 'TEXT' || isThinLineNode(k)) return false;
         const kName = safeStr(k.name).toLowerCase();
         if (kName.includes('label')) return false;
         const st = extractStyle(k);
@@ -826,6 +853,20 @@ export async function extractDesignSelection(selection, options = {}) {
         }
         if (!entry.content.fieldStyle && (inputBoxEntry.style.background || inputBoxEntry.style.borderColor || inputBoxEntry.style.radius)) {
           entry.content.fieldStyle = inputBoxEntry.style;
+        }
+        // Detect underline-style input (thin bottom line child) when no full box border is set
+        const underlineChild = fieldKids.find((k) => isThinLineNode(k));
+        if (underlineChild) {
+          const uStyle = extractStyle(underlineChild);
+          const uColor = uStyle.borderColor || uStyle.background;
+          const uThick = Math.max(1, Math.round(safeNum(underlineChild.height, 1)));
+          if (uColor) {
+            if (!entry.content.fieldStyle) entry.content.fieldStyle = {};
+            if (!entry.content.fieldStyle.borderColor) {
+              entry.content.fieldStyle.borderColor = uColor;
+              entry.content.fieldStyle.borderWidth = { top: 0, right: 0, bottom: uThick, left: 0, isLinked: false };
+            }
+          }
         }
 
         formFields.push({

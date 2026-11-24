@@ -40,14 +40,11 @@ export function scaleBox(box, factor, cap) {
 }
 
 export function flexGapValue(layout) {
-  const main = Math.round(Number(layout && layout.gap) || 0);
-  // If Figma gap is massive (>160px) because designer used fixed itemSpacing instead of SPACE_BETWEEN,
-  // clamp gap to 24px and let justify: space-between handle distribution!
-  const effectiveMain = main > 160 ? 24 : main;
-  const cross = layout && layout.wrap && typeof layout.rowGap === 'number' ? Math.round(layout.rowGap) : effectiveMain;
+  const main = Math.max(0, Math.round(Number(layout && layout.gap) || 0));
+  const cross = layout && layout.wrap && typeof layout.rowGap === 'number' ? Math.max(0, Math.round(layout.rowGap)) : main;
   const isRow = ((layout && layout.direction) || 'column') === 'row';
-  const col = isRow ? effectiveMain : cross;
-  const row = isRow ? cross : effectiveMain;
+  const col = isRow ? main : cross;
+  const row = isRow ? cross : main;
   return {
     unit: 'px',
     size: row,
@@ -116,7 +113,33 @@ export function applyTextShadowAndEffects(settings, text = {}, selectorTarget = 
 }
 
 export function applyCommonBoxStyle(settings, style = {}, resolveMedia, options = {}) {
-  if (style.gradient) {
+  const hasImageBg = Boolean(style.backgroundImage && resolveMedia);
+  let resolvedBgMedia = null;
+  if (hasImageBg) {
+    const media = resolveMedia(style.backgroundImage, style.backgroundImageDataUri);
+    if (media && media.url) resolvedBgMedia = media;
+  }
+
+  if (resolvedBgMedia) {
+    settings.background_background = 'classic';
+    settings.background_image = resolvedBgMedia;
+    settings.background_size = style.backgroundSize || 'cover';
+    settings.background_position = style.backgroundPosition || 'center center';
+    settings.background_repeat = style.backgroundRepeat || 'no-repeat';
+    if (style.background) {
+      settings.background_color = style.background;
+    }
+    if (style.gradient) {
+      settings.background_overlay_background = 'gradient';
+      settings.background_overlay_gradient_type = style.gradient.type;
+      settings.background_overlay_color = style.gradient.color1;
+      settings.background_overlay_color_stop = { unit: '%', size: style.gradient.stop1, sizes: [] };
+      settings.background_overlay_color_b = style.gradient.color2;
+      settings.background_overlay_color_b_stop = { unit: '%', size: style.gradient.stop2, sizes: [] };
+      settings.background_overlay_gradient_angle = { unit: 'deg', size: style.gradient.angle, sizes: [] };
+      settings.background_overlay_opacity = { unit: 'px', size: 1, sizes: [] };
+    }
+  } else if (style.gradient) {
     settings.background_background = 'gradient';
     settings.background_gradient_type = style.gradient.type;
     settings.background_color = style.gradient.color1;
@@ -127,17 +150,6 @@ export function applyCommonBoxStyle(settings, style = {}, resolveMedia, options 
   } else if (style.background) {
     settings.background_background = 'classic';
     settings.background_color = style.background;
-  }
-
-  if (style.backgroundImage && resolveMedia) {
-    const media = resolveMedia(style.backgroundImage, style.backgroundImageDataUri);
-    if (media.url) {
-      settings.background_background = 'classic';
-      settings.background_image = media;
-      settings.background_size = style.backgroundSize || 'cover';
-      settings.background_position = style.backgroundPosition || 'center center';
-      settings.background_repeat = style.backgroundRepeat || 'no-repeat';
-    }
   }
 
   if (style.radius) {

@@ -2,7 +2,7 @@
  * Elementor Nested Container Widgets (`nested-accordion`, `nested-tabs`).
  */
 import { shortId } from '../utils/crypto.js';
-import { boxValue, applyTypographySettings, collectSubtreeTexts, escapeHtml } from './compiler-helpers.js';
+import { boxValue, appendCustomCss, applyTypographySettings, applyTextShadowAndEffects, getTextGradientCss, buildTextClipRule, collectSubtreeTexts, escapeHtml } from './compiler-helpers.js';
 
 export function buildNestedAccordion(node, nodes, allocId, buildElement) {
   const items = [];
@@ -18,8 +18,11 @@ export function buildNestedAccordion(node, nodes, allocId, buildElement) {
   let rowPadding = null;
   let rowBorderWidth = null;
   let rowBorderColor = null;
+  let rowBorderStyle = null;
   let rowBackground = null;
+  let rowGradient = null;
   let rowRadius = null;
+  let rowBoxShadow = null;
   let expandIconStyle = null;
   const leadingIcons = [];
 
@@ -114,14 +117,23 @@ export function buildNestedAccordion(node, nodes, allocId, buildElement) {
     if (bw && bc && !rowBorderWidth) {
       rowBorderWidth = bw;
       rowBorderColor = bc;
+      rowBorderStyle = (ext && ext.borderStyle) || (child && child.style && child.style.borderStyle) || 'solid';
     }
     const bg = (ext && ext.background) || (child && child.style && child.style.background);
     if (bg && !rowBackground) {
       rowBackground = bg;
     }
+    const grad = (ext && ext.gradient) || (child && child.style && child.style.gradient);
+    if (grad && !rowGradient) {
+      rowGradient = grad;
+    }
     const rad = (ext && ext.radius) || (child && child.style && child.style.radius);
     if (rad && !rowRadius) {
       rowRadius = rad;
+    }
+    const bshad = (ext && ext.boxShadow) || (child && child.style && child.style.boxShadow);
+    if (bshad && !rowBoxShadow) {
+      rowBoxShadow = bshad;
     }
     if (ext && ext.expandIconStyle && !expandIconStyle) {
       expandIconStyle = ext.expandIconStyle;
@@ -215,12 +227,19 @@ export function buildNestedAccordion(node, nodes, allocId, buildElement) {
   if (!rowBorderWidth && node.style && node.style.borderWidth && node.style.borderColor) {
     rowBorderWidth = node.style.borderWidth;
     rowBorderColor = node.style.borderColor;
+    rowBorderStyle = node.style.borderStyle || 'solid';
   }
   if (!rowBackground && node.style && node.style.background) {
     rowBackground = node.style.background;
   }
+  if (!rowGradient && node.style && node.style.gradient) {
+    rowGradient = node.style.gradient;
+  }
   if (!rowRadius && node.style && node.style.radius) {
     rowRadius = node.style.radius;
+  }
+  if (!rowBoxShadow && node.style && node.style.boxShadow) {
+    rowBoxShadow = node.style.boxShadow;
   }
 
   const settings = {
@@ -244,7 +263,22 @@ export function buildNestedAccordion(node, nodes, allocId, buildElement) {
     settings.accordion_padding = { unit: 'px', top: '20', right: '0', bottom: '20', left: '0', isLinked: false };
   }
 
-  if (rowBackground) {
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.accordion_item_title_space_between = { unit: 'px', size: Math.round(node.layout.gap), sizes: [] };
+  }
+
+  if (rowGradient) {
+    const gType = rowGradient.type || 'linear';
+    for (const stName of ['normal', 'hover', 'active']) {
+      settings[`accordion_background_${stName}_background`] = 'gradient';
+      settings[`accordion_background_${stName}_gradient_type`] = gType;
+      settings[`accordion_background_${stName}_color`] = rowGradient.color1;
+      settings[`accordion_background_${stName}_color_stop`] = { unit: '%', size: rowGradient.stop1 ?? 0, sizes: [] };
+      settings[`accordion_background_${stName}_color_b`] = rowGradient.color2;
+      settings[`accordion_background_${stName}_color_b_stop`] = { unit: '%', size: rowGradient.stop2 ?? 100, sizes: [] };
+      settings[`accordion_background_${stName}_gradient_angle`] = { unit: 'deg', size: rowGradient.angle ?? 180, sizes: [] };
+    }
+  } else if (rowBackground) {
     settings.accordion_background_normal_background = 'classic';
     settings.accordion_background_normal_color = rowBackground;
     settings.accordion_background_hover_background = 'classic';
@@ -255,19 +289,24 @@ export function buildNestedAccordion(node, nodes, allocId, buildElement) {
 
   if (rowBorderWidth && rowBorderColor) {
     const bwObj = boxValue(rowBorderWidth);
-    settings.accordion_border_normal_border = 'solid';
+    const bStyle = rowBorderStyle || 'solid';
+    settings.accordion_border_normal_border = bStyle;
     settings.accordion_border_normal_width = bwObj;
     settings.accordion_border_normal_color = rowBorderColor;
-    settings.accordion_border_hover_border = 'solid';
+    settings.accordion_border_hover_border = bStyle;
     settings.accordion_border_hover_width = bwObj;
     settings.accordion_border_hover_color = rowBorderColor;
-    settings.accordion_border_active_border = 'solid';
+    settings.accordion_border_active_border = bStyle;
     settings.accordion_border_active_width = bwObj;
     settings.accordion_border_active_color = rowBorderColor;
   }
 
   if (rowRadius) {
     settings.accordion_border_radius = boxValue(rowRadius);
+  }
+  if (rowBoxShadow) {
+    settings._box_shadow_box_shadow_type = 'yes';
+    settings._box_shadow_box_shadow = rowBoxShadow;
   }
 
   if (firstTitleTypo) {
@@ -318,7 +357,14 @@ export function buildNestedAccordion(node, nodes, allocId, buildElement) {
   }
 
   if (cssRules.length > 0) {
-    settings.custom_css = cssRules.join('\n');
+    appendCustomCss(settings, cssRules.join('\n'));
+  }
+  if (firstTitleTypo) {
+    applyTextShadowAndEffects(settings, firstTitleTypo, 'selector .e-n-accordion-item-title-text');
+    const titleGrad = getTextGradientCss(firstTitleTypo);
+    if (titleGrad) {
+      appendCustomCss(settings, buildTextClipRule('selector .e-n-accordion-item-title-text', titleGrad));
+    }
   }
 
   return {
@@ -338,11 +384,40 @@ export function buildNestedTabs(node, nodes, allocId, buildElement) {
   const childIds = Array.isArray(node.children) ? node.children : [];
   const count = Math.max(childIds.length, extractedItems.length);
 
+  let firstTabTypo = null;
+  let activeTabColor = null;
+  let normalTabColor = null;
+  let activeTabBg = null;
+  let tabBg = null;
+  let tabBorderW = null;
+  let tabBorderC = null;
+  let tabBorderS = null;
+  let tabRadius = null;
+  let tabPadding = null;
+
   for (let i = 0; i < count; i += 1) {
     const cid = childIds[i];
     const child = cid ? nodes[cid] : null;
     const ext = extractedItems[i] || null;
     const childTexts = child ? collectSubtreeTexts(child, nodes) : [];
+    const titleTypo = (ext && ext.titleTypography) || (childTexts[0] && childTexts[0].text) || null;
+    if (titleTypo) {
+      if (!firstTabTypo) firstTabTypo = titleTypo;
+      if (i === 0 && titleTypo.color && !activeTabColor) activeTabColor = titleTypo.color;
+      else if (i > 0 && titleTypo.color && !normalTabColor) normalTabColor = titleTypo.color;
+    }
+    if (child && child.style && child.style.background) {
+      if (i === 0 && !activeTabBg) activeTabBg = child.style.background;
+      else if (i > 0 && !tabBg) tabBg = child.style.background;
+    }
+    if (!tabBorderW && child && child.style && child.style.borderWidth && child.style.borderColor) {
+      tabBorderW = child.style.borderWidth;
+      tabBorderC = child.style.borderColor;
+      tabBorderS = child.style.borderStyle || 'solid';
+    }
+    if (!tabRadius && child && child.style && child.style.radius) tabRadius = child.style.radius;
+    if (!tabPadding && child && child.layout && child.layout.padding) tabPadding = child.layout.padding;
+
     const title = (ext && ext.title)
       || (childTexts[0] && childTexts[0].text && childTexts[0].text.characters)
       || (child && child.content && child.content.name)
@@ -357,12 +432,56 @@ export function buildNestedTabs(node, nodes, allocId, buildElement) {
       }
     }
   }
+
+  const settings = { tabs };
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.tabs_title_space_between = { unit: 'px', size: Math.round(node.layout.gap), sizes: [] };
+  }
+  if (firstTabTypo) {
+    applyTypographySettings(settings, 'title_typography', firstTabTypo, node.responsive);
+  }
+  if (normalTabColor || activeTabColor) {
+    settings.title_text_color = normalTabColor || activeTabColor;
+    settings.title_text_color_active = activeTabColor || normalTabColor;
+  }
+  const st = node.style || {};
+  const finalBg = tabBg || activeTabBg || st.background;
+  if (finalBg) {
+    settings.tabs_title_background_color_background = 'classic';
+    settings.tabs_title_background_color_color = finalBg;
+  }
+  if (activeTabBg) {
+    settings.tabs_title_background_color_active_background = 'classic';
+    settings.tabs_title_background_color_active_color = activeTabBg;
+  }
+  const finalBw = tabBorderW || st.borderWidth;
+  const finalBc = tabBorderC || st.borderColor;
+  if (finalBw && finalBc) {
+    settings.tabs_title_border_border = tabBorderS || st.borderStyle || 'solid';
+    settings.tabs_title_border_width = boxValue(finalBw);
+    settings.tabs_title_border_color = finalBc;
+  }
+  const finalRad = tabRadius || st.radius;
+  if (finalRad) {
+    settings.tabs_title_border_radius = boxValue(finalRad);
+  }
+  if (tabPadding && (tabPadding.top || tabPadding.right || tabPadding.bottom || tabPadding.left)) {
+    settings.tabs_title_padding = boxValue(tabPadding);
+  }
+  if (node.layout && node.layout.padding && (node.layout.padding.top || node.layout.padding.right || node.layout.padding.bottom || node.layout.padding.left)) {
+    settings._padding = boxValue(node.layout.padding);
+  }
+  if (st.boxShadow) {
+    settings._box_shadow_box_shadow_type = 'yes';
+    settings._box_shadow_box_shadow = st.boxShadow;
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: 'nested-tabs',
     isInner: false,
-    settings: { tabs },
+    settings,
     elements: panels,
   };
 }

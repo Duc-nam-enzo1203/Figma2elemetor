@@ -541,12 +541,88 @@ function classifyByHeuristics(node) {
     return { widget: 'icon-list', source: 'heuristic' };
   }
 
+  // Slides / Carousel heuristic (frame containing pagination dots and/or prev-next arrows)
+  const sliderWidget = detectSlidesOrCarouselByControls(node, kids);
+  if (sliderWidget) {
+    return { widget: sliderWidget, source: 'heuristic' };
+  }
+
   // Spacer heuristic (empty transparent box)
   if (kids.length === 0 && !hasSolidOrGradientFill(node) && !hasImageFill(node) && node.type !== 'TEXT') {
     return { widget: 'spacer', source: 'heuristic' };
   }
 
   return { widget: 'container', source: 'heuristic' };
+}
+
+export function isSliderControlChild(child) {
+  if (!child || child.type === 'TEXT') return false;
+  const cName = String(child.name || '').toLowerCase();
+  const cTexts = collectTextDescendants(child);
+  if (cTexts.length > 0) return false;
+  const cw = Number(child.width) || 0;
+  const ch = Number(child.height) || 0;
+
+  // 1. Named dots / pagination / indicators OR horizontal row of 2..10 small dots/pills
+  if (/\b(dots?|pagination|indicators?|bullets?|swiper-pagination|slick-dots)\b/i.test(cName)) {
+    return true;
+  }
+  const grandKids = visibleChildren(child);
+  if (
+    grandKids.length >= 2 &&
+    grandKids.length <= 10 &&
+    ch > 0 &&
+    ch <= 28 &&
+    cw <= 240 &&
+    grandKids.every((gk) => {
+      const gw = Number(gk.width) || 0;
+      const gh = Number(gk.height) || 0;
+      return gw > 0 && gw <= 40 && gh > 0 && gh <= 16 && (gk.type === 'ELLIPSE' || gk.type === 'RECTANGLE' || gk.type === 'VECTOR' || gk.type === 'FRAME');
+    })
+  ) {
+    return true;
+  }
+
+  // 2. Named prev / next / arrow / chevron controls (single button <= 64px or an arrows wrapper)
+  if (cw <= 68 && ch <= 68 && /\b(arrow|prev|next|chevron|slider-btn|nav-btn)\b/i.test(cName)) {
+    return true;
+  }
+  if (/\b(arrows|slider-nav|carousel-nav|controls)\b/i.test(cName) && grandKids.length >= 2 && grandKids.every((gk) => (Number(gk.width) || 0) <= 68 && (Number(gk.height) || 0) <= 68)) {
+    return true;
+  }
+  return false;
+}
+
+function detectSlidesOrCarouselByControls(node, kids) {
+  if (!node || !Array.isArray(kids) || kids.length < 2) return null;
+  const nw = Number(node.width) || 0;
+  const nh = Number(node.height) || 0;
+  if (nw < 280 || nh < 150) return null;
+  const lower = String(node.name || '').toLowerCase();
+  if (/^(header|footer|nav|navbar|menu)\b/i.test(lower)) return null;
+
+  let hasDots = false;
+  let arrowCount = 0;
+  const contentKids = [];
+
+  for (const k of kids) {
+    if (isSliderControlChild(k)) {
+      const kn = String(k.name || '').toLowerCase();
+      if (/\b(arrow|prev|next|chevron|slider-btn|nav-btn)\b/i.test(kn)) arrowCount += 1;
+      else if (/\b(arrows|slider-nav|carousel-nav|controls)\b/i.test(kn)) arrowCount += 2;
+      else hasDots = true;
+    } else {
+      contentKids.push(k);
+    }
+  }
+
+  if (!hasDots && arrowCount < 2) return null;
+  if (contentKids.length === 0) return null;
+
+  const hasTextOrBtn = contentKids.some((k) => collectTextDescendants(k).length > 0);
+  if (hasTextOrBtn) return 'slides';
+  const hasImages = contentKids.some((k) => hasImageFill(k) || isSingleMaskedRasterWrapper(k));
+  return hasImages ? 'image-carousel' : 'slides';
 }
 
 export function isDividerNode(node, kids = []) {
