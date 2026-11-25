@@ -1,14 +1,4 @@
-/**
- * Core Extraction Pipeline for Figma Plugin API
- * - Safely guards against Figma `Symbol(figma.mixed)` values on every property
- * - Extracts native Auto-Layout OR falls back to Virtual Auto-Layout Inference
- * - Extracts child positioning (`layoutPositioning === 'ABSOLUTE'`, `x`, `y`, `layoutSizingHorizontal`, `layoutSizingVertical`, `layoutGrow`, `layoutAlign`)
- * - Extracts solid & linear/radial gradient backgrounds, strokes (linked & per-side),
- *   corner radii (uniform & 4-corner), drop/inner shadows, opacity, clipContent
- * - Extracts full typography (font family, weight, size, line-height, letter-spacing, transform, color)
- * - Exports Vector/Icon/Logo groups as clean inline SVG strings + SHA-256 hash
- * - Exports Image nodes as PNG/JPG (1x/2x) + Base64 & SHA-256 hash
- */
+/** Core Extraction Pipeline: converts Figma nodes into `f2e.document` IR (layout, styles, vectors, images). */
 
 import { sha256, utf8Decode, bytesToBase64, uuid } from '../utils/crypto.js';
 import {
@@ -408,7 +398,131 @@ export async function extractDesignSelection(selection, options = {}) {
       }
     }
 
-    if (['call-to-action', 'testimonial', 'flip-box', 'price-table'].includes(choice.widget)) {
+    if (choice.widget === 'flip-box') {
+      const allDirectKids = Array.isArray(node.children) ? node.children.filter(Boolean) : [];
+      const isBackName = (nm) => /\b(back|hover|rear|flip|overlay)\b/i.test(safeStr(nm).replace(/[-_]/g, ' '));
+      const isFrontName = (nm) => /\b(front|normal|default)\b/i.test(safeStr(nm).replace(/[-_]/g, ' '));
+
+      let backNode = allDirectKids.find((c) => isBackName(c.name)) || null;
+      let frontNode = allDirectKids.find((c) => c !== backNode && isFrontName(c.name)) || null;
+
+      if (!backNode) {
+        const frameKids = allDirectKids.filter(
+          (c) => c.visible !== false && c.type !== 'TEXT' && (c.type === 'FRAME' || c.type === 'GROUP' || c.type === 'INSTANCE' || c.type === 'COMPONENT')
+        );
+        if (frameKids.length >= 2 && !frameKids[0].isMask) {
+          frontNode = frontNode || frameKids[0];
+          backNode = frameKids[1];
+        }
+      }
+
+      const collectTextsExcluding = async (rootN, excludeNode) => {
+        const found = [];
+        const walkT = (cur) => {
+          if (!cur || cur === excludeNode) return;
+          if (cur.type === 'TEXT') found.push(cur);
+          else if (Array.isArray(cur.children)) {
+            for (const ch of cur.children) walkT(ch);
+          }
+        };
+        if (rootN) walkT(rootN);
+        const out = [];
+        for (const tn of found) {
+          const tObj = await extractTextWithDevMode(tn);
+          if (tObj && safeStr(tObj.characters).trim().length > 0) {
+            tObj.nodeName = safeStr(tn.name, '');
+            out.push(tObj);
+          }
+        }
+        return out;
+      };
+
+      const collectImgsExcluding = (rootN, excludeNode) => {
+        if (!rootN) return [];
+        const imgs = [];
+        const walkI = (cur) => {
+          if (!cur || cur === excludeNode) return;
+          if (hasImageFill(cur)) {
+            imgs.push(cur);
+            return;
+          }
+          if (Array.isArray(cur.children)) {
+            for (const ch of cur.children) walkI(ch);
+          }
+        };
+        walkI(rootN);
+        return imgs;
+      };
+
+      const frontScope = frontNode || node;
+      const frontTexts = await collectTextsExcluding(frontScope, backNode);
+      const frontStyle = frontNode ? extractStyle(frontNode) : style;
+      const frontLayout = frontNode ? extractLayout(frontNode, node) : layout;
+      if (frontNode && useDevModeCss && typeof frontNode.getCSSAsync === 'function') {
+        try {
+          const fCss = await frontNode.getCSSAsync();
+          if (fCss) applyDevModeCSSToNode({ style: frontStyle, layout: frontLayout }, fCss);
+        } catch (e) { }
+      }
+
+      const flipFront = {
+        texts: frontTexts,
+        background: frontStyle.background || null,
+        gradient: frontStyle.gradient || null,
+        padding: frontLayout.padding || null,
+        image: null,
+      };
+
+      const frontImgCandidates = collectImgsExcluding(frontScope, backNode);
+      const frontExportTarget = (frontNode && Array.isArray(frontNode.children) && frontNode.children.some((c) => c && c.isMask))
+        ? frontNode
+        : (frontImgCandidates[0] || null);
+      if (frontExportTarget && typeof frontExportTarget.exportAsync === 'function') {
+        pendingExports.push({
+          kind: 'raster',
+          node: frontExportTarget,
+          id,
+          onResult: (ref) => {
+            flipFront.image = ref;
+          },
+        });
+      }
+
+      let flipBack = null;
+      if (backNode) {
+        const backTexts = await collectTextsExcluding(backNode, null);
+        const backStyle = extractStyle(backNode);
+        const backLayout = extractLayout(backNode, node);
+        if (useDevModeCss && typeof backNode.getCSSAsync === 'function') {
+          try {
+            const bCss = await backNode.getCSSAsync();
+            if (bCss) applyDevModeCSSToNode({ style: backStyle, layout: backLayout }, bCss);
+          } catch (e) { }
+        }
+        flipBack = {
+          texts: backTexts,
+          background: backStyle.background || null,
+          gradient: backStyle.gradient || null,
+          padding: backLayout.padding || null,
+          image: null,
+        };
+        const backImgs = collectImgsExcluding(backNode, null);
+        if (backImgs[0] && typeof backImgs[0].exportAsync === 'function') {
+          pendingExports.push({
+            kind: 'raster',
+            node: backImgs[0],
+            id,
+            onResult: (ref) => {
+              flipBack.image = ref;
+            },
+          });
+        }
+      }
+
+      entry.content.flipBox = { front: flipFront, back: flipBack };
+    }
+
+    if (['call-to-action', 'testimonial', 'price-table'].includes(choice.widget)) {
       const imgNodes = collectVisualImageDescendants(node, { includeVectors: false });
       if (imgNodes.length > 0) {
         entry.extractedImages = new Array(imgNodes.length).fill(null);

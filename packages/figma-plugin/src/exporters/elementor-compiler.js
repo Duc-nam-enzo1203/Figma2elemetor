@@ -1,23 +1,4 @@
-/**
- * High-Fidelity Elementor Compiler (Runs directly inside Figma Plugin & Node tests)
- *
- * Verified against `_references/elementor/includes/elements/container.php`,
- * `_references/elementor/includes/controls/groups/flex-container.php`,
- * `_references/elementor/includes/controls/groups/flex-item.php`, and
- * `_references/elementor/includes/widgets/common-base.php`.
- *
- * Key Layout Fidelity Rules for Elementor v3 Containers:
- * 1. In a `flex_direction: 'row'` container, Elementor's CSS sets `--container-widget-flex-grow: 1`
- *    and `--container-widget-align-self: stretch` by default! That causes every child widget/container
- *    to stretch to 100% width and height unless explicitly constrained.
- * 2. When a child in Figma is NOT `FILL` (i.e. `HUG` or `FIXED`), we MUST set:
- *    - For child Containers: `content_width: 'full'`, `width: { unit: 'px', size: W }`, `_flex_size: 'none'`
- *    - For child Widgets (Button, Heading, Text, Icon, HTML): `_element_width: 'auto'` (or `'initial'` with `_element_custom_width`) and `_flex_size: 'none'`
- * 3. When a child in Figma IS `FILL`, we set `_flex_size: 'grow'` (for main axis) or `_flex_align_self: 'stretch'` (for cross axis).
- * 4. Composite SVG graphics (such as multi-color logos and vector icons) use the `html` widget (`widgetType: 'html'`)
- *    when pasted via Clipboard (`Ctrl+V`) or when no WP attachment ID exists yet, so multi-color SVG paths render
- *    with 100% visual accuracy instead of falling back to a generic FontAwesome star!
- */
+/** High-Fidelity Elementor v3 Compiler (Figma Plugin & Node tests). */
 
 import { shortId } from '../utils/crypto.js';
 import { verifyAndHealElementorJson } from './fidelity-verifier.js';
@@ -162,7 +143,6 @@ export function compileElementorV3(doc, options = {}) {
       case 'text-path':
         el = buildTextPath(node, nodes, allocId);
         break;
-      // Elementor Pro Widgets
       case 'form':
       case 'login':
       case 'search-form':
@@ -241,7 +221,7 @@ export function compileElementorV3(doc, options = {}) {
     }
 
     if (el && el.settings) {
-      applyChildFlexAndPositionSettings(el, node, parentNode, isRoot);
+      applyChildFlexAndPositionSettings(el, node, parentNode, isRoot, nodes);
       applyWidgetWrapperBoxStyles(el, node, resolveMedia);
       el.settings._f2e_node_id = node.sourceNodeId || node.id;
       el.settings._title = node.content && node.content.name ? node.content.name : wType;
@@ -288,7 +268,7 @@ export function compileElementorV3(doc, options = {}) {
  * Prevents Elementor's `--container-widget-flex-grow: 1` in Row Containers from blowing up
  * children that were HUG or FIXED in Figma!
  */
-function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
+function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot, nodes = {}) {
   if (isRoot || !parentNode) return;
   const settings = el.settings;
   const layout = node.layout || {};
@@ -345,7 +325,10 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
       if (sizingH === 'FILL') {
         settings._flex_size = 'grow';
         if (nodeW > 0 && parentWidth > 0) {
-          const pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
+          let pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
+          if (parentLayout.wrap && Number(parentLayout.gap) > 0 && pct >= 48 && pct <= 52) {
+            pct = 48.5;
+          }
           settings.width = { unit: '%', size: pct, sizes: [] };
           if (pct >= 42 && pct <= 68) {
             settings.width_tablet = { unit: '%', size: 100, sizes: [] };
@@ -361,9 +344,6 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
           settings.width_mobile = { unit: '%', size: 100, sizes: [] };
         }
       } else if (sizingH === 'HUG') {
-        // Child container is HUG in Figma:
-        // In any Row layout, a container can either be a major column (text column, content block) or an inline chip.
-        // If its width is >= 240px, or it occupies >= 25% of parent row, calculate exact percentage so it sits side-by-side!
         if (nodeW >= 240 && parentWidth > 0 && nodeW < parentWidth) {
           const pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
           settings._flex_size = 'grow';
@@ -378,29 +358,33 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
             settings.width_mobile = { unit: '%', size: 100, sizes: [] };
           }
         } else {
-          // Small hug frame (badge, tag, inline chip container)
           settings._flex_size = 'none';
           settings.width = { unit: 'px', size: nodeW, sizes: [] };
           settings.width_mobile = { unit: '%', size: 100, sizes: [] };
         }
       } else if (nodeW > 0) {
-        // sizingH === 'FIXED'
-        // If it's a fixed-width column (like Form 336px, Sidebar 300px, or 4-col card)
         settings._flex_size = 'none';
-        if (nodeW >= 180 && parentWidth > 0 && nodeW < parentWidth) {
-          const pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
+        const parentHasFillSibling = Array.isArray(parentNode.children) && parentNode.children.some((sid) => {
+          const sib = nodes[sid];
+          return sib && sib !== node && sib.layout && (sib.layout.sizingH === 'FILL' || sib.layout.flexGrow === 1);
+        });
+        if (parentHasFillSibling && nodeW < parentWidth * 0.5) {
+          settings.width = { unit: 'px', size: Math.round(nodeW), sizes: [] };
+          settings.width_tablet = { unit: '%', size: 100, sizes: [] };
+          settings.width_mobile = { unit: '%', size: 100, sizes: [] };
+        } else if (nodeW >= 180 && parentWidth > 0 && nodeW < parentWidth) {
+          let pct = Math.min(100, Math.round((nodeW / parentWidth) * 1000) / 10);
+          if (parentLayout.wrap && Number(parentLayout.gap) > 0 && pct >= 48 && pct <= 52) {
+            pct = 48.5;
+          }
           settings.width = { unit: '%', size: pct, sizes: [] };
-          // Multi-column responsive wrapping matching Elementor Dev standards
           if (pct >= 18 && pct <= 28) {
-            // 4-column row -> 2 columns on tablet (48%), 1 column on mobile (100%)
             settings.width_tablet = { unit: '%', size: 48, sizes: [] };
             settings.width_mobile = { unit: '%', size: 100, sizes: [] };
           } else if (pct >= 29 && pct <= 38) {
-            // 3-column row -> 48% on tablet, 100% on mobile
             settings.width_tablet = { unit: '%', size: 48, sizes: [] };
             settings.width_mobile = { unit: '%', size: 100, sizes: [] };
           } else if (pct >= 42 && pct <= 58) {
-            // 2-column row -> 100% on tablet, 100% on mobile
             settings.width_tablet = { unit: '%', size: 100, sizes: [] };
             settings.width_mobile = { unit: '%', size: 100, sizes: [] };
           } else {
@@ -415,11 +399,10 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
         settings._flex_align_self = 'stretch';
       }
     } else {
-      // Parent is Column
       if (sizingH === 'FILL' || (parentWidth > 0 && nodeW >= parentWidth * 0.92)) {
         settings._flex_align_self = 'stretch';
       } else if (sizingH === 'FIXED' && nodeW > 0 && nodeW < parentWidth * 0.92) {
-        // Only lock explicit FIXED width containers; never lock HUG containers (like Eyebrow text wrappers) to fixed pixel widths!
+        // Never lock HUG containers to fixed pixel widths
         settings.width = { unit: 'px', size: nodeW, sizes: [] };
         settings.width_mobile = { unit: '%', size: 100, sizes: [] };
       }
@@ -428,7 +411,11 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
       settings._flex_align_self = layout.alignSelf;
     }
   } else {
-    // Widget inside a Row or Column Container
+    const CARD_SIZED_WIDGETS = new Set([
+      'flip-box', 'call-to-action', 'price-table', 'testimonial',
+      'icon-box', 'image-box', 'slides', 'image-gallery', 'image-carousel',
+      'nested-accordion', 'nested-tabs', 'progress', 'alert', 'counter',
+    ]);
     if (parentIsRow) {
       if (sizingH === 'FILL' || layout.flexGrow === 1) {
         settings._element_width = 'initial';
@@ -436,6 +423,12 @@ function applyChildFlexAndPositionSettings(el, node, parentNode, isRoot) {
       } else if (el.widgetType === 'form' && nodeW > 200) {
         settings._element_width = 'initial';
         settings._flex_size = 'grow';
+      } else if (CARD_SIZED_WIDGETS.has(el.widgetType) && nodeW >= 120) {
+        settings._element_width = 'initial';
+        settings._element_custom_width = { unit: 'px', size: Math.round(nodeW), sizes: [] };
+        settings._element_custom_width_tablet = { unit: '%', size: nodeW <= 500 ? 48 : 100, sizes: [] };
+        settings._element_custom_width_mobile = { unit: '%', size: 100, sizes: [] };
+        settings._flex_size = 'none';
       } else {
         // Prevent buttons, text links, and icons in a horizontal row from stretching to 100% width!
         settings._element_width = 'auto';
@@ -479,9 +472,11 @@ function applyWidgetWrapperBoxStyles(el, node, resolveMedia) {
   if (layout.alignSelf && !settings._flex_align_self) {
     settings._flex_align_self = layout.alignSelf;
   }
-  applyDevModeResidualCss(settings, style, 'selector');
+  const residualSelector = el.widgetType === 'button' ? 'selector .elementor-button' : 'selector';
+  applyDevModeResidualCss(settings, style, residualSelector);
 
-  if (node.type === 'text' || node.type === 'vector') return;
+  if (node.type === 'vector') return;
+  if (node.type === 'text' && !style.background && !style.gradient && !style.borderWidth && !style.radius) return;
   if (SELF_STYLED_WIDGETS.has(el.widgetType)) return;
 
   // When Figma exported the entire Frame (including its background rect & padding) into an inline <svg width="W" height="H">,
@@ -593,7 +588,7 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     if (layout.wrap) {
       settings.flex_wrap = 'wrap';
       settings.flex_wrap_tablet = 'wrap';
-    } else if (dir === 'row' && (node.children || []).length >= 3) {
+    } else if (dir === 'row' && (node.children || []).length >= 2) {
       settings.flex_wrap = 'nowrap';
       settings.flex_wrap_tablet = 'wrap';
     }
@@ -646,7 +641,6 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
     let isBoxed = false;
     let boxedWidth = 1200;
 
-    // 1. Check if Root Frame has explicit Auto-Layout padding on both left & right
     const maxBoxedCap = rootW >= 1600 ? 1600 : 1320;
     if (padL >= 40 && padR >= 40 && rootW >= 1100) {
       isBoxed = true;
@@ -655,8 +649,7 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
       isBoxed = true;
       boxedWidth = Math.max(960, Math.min(maxBoxedCap, Math.round(Number(layout.maxWidth))));
     } else if (rootW >= 1100 && Array.isArray(node.children) && node.children.length > 0) {
-      // 2. Enhanced Heuristic: If padding on root was omitted (e.g. 0 padding or non-Auto-Layout freeform design),
-      // analyze the bounding box of direct visible children!
+      // Fallback for non-Auto-Layout root frames: infer boxed width from direct children bounds
       let minChildX = Infinity;
       let maxChildX = -Infinity;
       let visualChildCount = 0;
@@ -679,12 +672,10 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
         const gutterLeft = minChildX;
         const gutterRight = rootW - maxChildX;
 
-        // If children are centered within 900px - 1360px and have balanced gutters >= 48px
         if (spanW >= 900 && spanW <= 1360 && gutterLeft >= 48 && gutterRight >= 48) {
           isBoxed = true;
           boxedWidth = Math.max(960, Math.min(1320, Math.round(spanW)));
         } else if (visualChildCount === 1) {
-          // If there's a single centered inner frame wrapper
           const singleChild = nodes[node.children[0]];
           const scW = Number(singleChild?.layout?.width) || 0;
           if (scW >= 960 && scW <= 1360 && (rootW - scW) >= 80) {
@@ -712,7 +703,7 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
       delete settings.boxed_width;
       delete settings.boxed_width_tablet;
       delete settings.boxed_width_mobile;
-      if (layout.sizingH === 'FIXED' && rootW > 0 && rootW < 960) {
+      if ((layout.sizingH === 'FIXED' || layout.sizingH === 'HUG') && rootW > 0 && rootW < 960) {
         settings.width = { unit: 'px', size: Math.round(rootW), sizes: [] };
         if (rootW > 360) {
           settings.width_mobile = { unit: '%', size: 100, sizes: [] };
@@ -788,8 +779,6 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
 
   applyCommonBoxStyle(settings, mergedStyle, resolveMedia, { linearBorder });
 
-  // ── Auto-Unwrap Redundant Inner Container & Explicit Unwrap Widgets ──
-  // 1. First expand any explicitly unwrapped child containers (user selected "unwrap")
   const expandUnwrappedChildren = (ids) => {
     const result = [];
     for (const cid of ids) {
@@ -811,11 +800,7 @@ function buildContainer(node, nodes, isRoot, parentNode, allocId, buildElement, 
 
   let activeChildIds = expandUnwrappedChildren(remainingChildIds);
 
-  // 2. In Figma, a Section/Header frame (e.g. 1440px full-width) frequently contains a single inner
-  // Auto-Layout Frame (e.g. 1200px / 1240px boxed content wrapper: Header -> Container -> [Logo, Nav, Button]).
-  // In Elementor, a single container handles both the full-width background and the boxed_width constraint!
-  // Unwrapping this redundant inner container avoids doubling the container count (DOM bloat)
-  // and matches exactly how senior Elementor developers build sections.
+  // Unwrap redundant single transparent wrapper into parent container to avoid DOM bloat
   while (autoUnwrap !== false && activeChildIds.length === 1) {
     const singleChildId = activeChildIds[0];
     const singleChildNode = nodes[singleChildId];
@@ -1048,6 +1033,8 @@ function buildHeading(node, allocId) {
     header_size: inferHeadingTag(node),
     align: text.align === 'justified' ? 'justify' : (text.align || 'left'),
   };
+  if (node.responsive?.tablet?.align) settings.align_tablet = node.responsive.tablet.align;
+  if (node.responsive?.mobile?.align) settings.align_mobile = node.responsive.mobile.align;
   const fallbackColor = text.color || (text.gradient && (text.gradient.color2 || text.gradient.color1)) || null;
   if (fallbackColor) {
     settings.title_color = fallbackColor;
@@ -1123,6 +1110,8 @@ function buildTextEditor(node, allocId) {
     editor: paragraphs || '<p style="margin:0;"></p>',
     align: text.align === 'justified' ? 'justify' : (text.align || 'left'),
   };
+  if (node.responsive?.tablet?.align) settings.align_tablet = node.responsive.tablet.align;
+  if (node.responsive?.mobile?.align) settings.align_mobile = node.responsive.mobile.align;
   const fallbackColor = text.color || (text.gradient && (text.gradient.color2 || text.gradient.color1)) || null;
   if (fallbackColor) {
     settings.text_color = fallbackColor;
@@ -1396,12 +1385,23 @@ function buildImage(node, allocId, resolveMedia) {
   if (st.boxShadow) {
     settings.image_box_shadow_box_shadow_type = 'yes';
     settings.image_box_shadow_box_shadow = st.boxShadow;
+    if (st.boxShadow.position === 'inset') {
+      settings.image_box_shadow_box_shadow_position = 'inset';
+    }
   }
   const pad = node.layout && node.layout.padding;
   if (pad && (pad.top || pad.right || pad.bottom || pad.left)) {
     settings._padding = boxValue(pad);
   }
-  if (st.background) {
+  if (st.gradient) {
+    settings._background_background = 'gradient';
+    settings._background_gradient_type = st.gradient.type || 'linear';
+    settings._background_color = st.gradient.color1;
+    settings._background_color_stop = { unit: '%', size: st.gradient.stop1 ?? 0, sizes: [] };
+    settings._background_color_b = st.gradient.color2;
+    settings._background_color_b_stop = { unit: '%', size: st.gradient.stop2 ?? 100, sizes: [] };
+    settings._background_gradient_angle = { unit: 'deg', size: st.gradient.angle ?? 180, sizes: [] };
+  } else if (st.background) {
     settings._background_background = 'classic';
     settings._background_color = st.background;
   }
@@ -1430,18 +1430,22 @@ function buildIconOrInlineSvg(node, allocId, resolveMedia) {
 
   if (node.svg && node.svg.markup) {
     if (media && Number(media.id) > 0 && media.url && w <= 64 && h <= 64) {
+      const iconSettings = {
+        selected_icon: {
+          value: { id: Number(media.id), url: media.url },
+          library: 'svg',
+        },
+        size: { unit: 'px', size: w, sizes: [] },
+      };
+      if (node.text?.align && /^(left|center|right)$/i.test(node.text.align)) {
+        iconSettings.align = node.text.align.toLowerCase();
+      }
       return {
         id: elId,
         elType: 'widget',
         widgetType: 'icon',
         isInner: false,
-        settings: {
-          selected_icon: {
-            value: { id: Number(media.id), url: media.url },
-            library: 'svg',
-          },
-          size: { unit: 'px', size: w, sizes: [] },
-        },
+        settings: iconSettings,
         elements: [],
       };
     }
@@ -1547,13 +1551,17 @@ function buildDivider(node, allocId, parentNode = null) {
   if (isVertical) {
     const thickness = Math.max(1, Math.min(8, w || 1));
     const minH = Math.max(24, Math.round(h || 80));
+    const vOpacity = (node.style && typeof node.style.opacity === 'number') ? node.style.opacity : 1;
+    const vBg = (node.style && node.style.gradient)
+      ? `linear-gradient(${node.style.gradient.angle ?? 180}deg, ${node.style.gradient.color1} ${node.style.gradient.stop1 ?? 0}%, ${node.style.gradient.color2} ${node.style.gradient.stop2 ?? 100}%)`
+      : color;
     return {
       id: allocId(node.id),
       elType: 'widget',
       widgetType: 'html',
       isInner: false,
       settings: {
-        html: `<div class="f2e-vertical-divider" style="width:${thickness}px;min-height:${minH}px;height:100%;background-color:${color};opacity:0.5;"></div>`,
+        html: `<div class="f2e-vertical-divider" style="width:${thickness}px;min-height:${minH}px;height:100%;background:${vBg};opacity:${vOpacity};"></div>`,
         _element_width: 'auto',
         _flex_size: 'none',
         _flex_align_self: 'stretch',
@@ -1576,6 +1584,11 @@ function buildDivider(node, allocId, parentNode = null) {
   };
   if (w > 0 && w < 400) {
     settings.width = { unit: 'px', size: w, sizes: [] };
+  }
+  if (node.style && node.style.gradient) {
+    const g = node.style.gradient;
+    const gradCss = `linear-gradient(${g.angle ?? 90}deg, ${g.color1} ${g.stop1 ?? 0}%, ${g.color2} ${g.stop2 ?? 100}%)`;
+    appendCustomCss(settings, `selector .elementor-divider-separator {\n  border-image: ${gradCss} 1 !important;\n}`);
   }
   return {
     id: allocId(node.id),
@@ -1690,15 +1703,19 @@ function buildBoxWidget(node, nodes, wType, allocId, resolveMedia) {
   }
 
   if (finalWidgetType === 'image-box') {
+    const imgs = collectSubtreeImages(node, nodes);
     if (media && media.url) {
       settings.image = { id: media.id || '', url: media.url };
     } else if (node.svg && node.svg.markup) {
       settings.image = { id: '', url: svgMarkupToDataUri(node.svg.markup) };
     } else {
-      const imgs = collectSubtreeImages(node, nodes);
       settings.image = imgs[0] ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' };
     }
     settings.thumbnail_size = 'full';
+    const imgRadius = (imgs[0] && imgs[0].radius) || (node.image && node.image.radius) || (node.raster && node.raster.radius);
+    if (imgRadius) {
+      settings.image_border_radius = boxValue(imgRadius);
+    }
   } else {
     if (isSvgAsset && media && Number(media.id) > 0 && media.url) {
       settings.selected_icon = { value: { id: Number(media.id), url: media.url }, library: 'svg' };
@@ -1772,6 +1789,9 @@ function buildIconList(node, nodes, allocId) {
     icon_color: iconColor,
     text_color: textColor,
   };
+  if (firstTypo && firstTypo.align && /^(left|center|right)$/i.test(firstTypo.align)) {
+    settings.icon_align = firstTypo.align.toLowerCase();
+  }
 
   if (textColor) {
     applyGlobalColor(settings, 'text_color', textColor);
@@ -1814,6 +1834,9 @@ function buildProgress(node, nodes, allocId) {
   if (titleTypo) {
     if (titleTypo.color) settings.title_color = titleTypo.color;
     applyTypographySettings(settings, 'typography', titleTypo, node.responsive);
+    applyTextShadowAndEffects(settings, titleTypo, 'selector .elementor-title');
+    const progGrad = getTextGradientCss(titleTypo);
+    if (progGrad) appendCustomCss(settings, buildTextClipRule('selector .elementor-title', progGrad));
   }
   if (pctNode && pctNode.text) {
     if (pctNode.text.color) settings.bar_inline_color = pctNode.text.color;
@@ -1821,6 +1844,9 @@ function buildProgress(node, nodes, allocId) {
   }
   if (node.style && node.style.background) {
     settings.bar_color = node.style.background;
+  }
+  if (node.style && node.style.borderColor) {
+    settings.bar_bg_color = node.style.borderColor;
   }
   if (node.style && node.style.radius) {
     settings.border_radius = boxValue(node.style.radius);
@@ -1849,10 +1875,14 @@ function buildAlert(node, nodes, allocId) {
   if (titleTypo) {
     if (titleTypo.color) settings.title_color = titleTypo.color;
     applyTypographySettings(settings, 'typography_title', titleTypo, node.responsive);
+    applyTextShadowAndEffects(settings, titleTypo, 'selector .elementor-alert-title');
+    const aTitleGrad = getTextGradientCss(titleTypo);
+    if (aTitleGrad) appendCustomCss(settings, buildTextClipRule('selector .elementor-alert-title', aTitleGrad));
   }
   if (descTypo) {
     if (descTypo.color) settings.description_color = descTypo.color;
     applyTypographySettings(settings, 'typography_description', descTypo, node.responsive);
+    applyTextShadowAndEffects(settings, descTypo, 'selector .elementor-alert-description');
   }
   if (node.style && node.style.background) {
     settings.background_color = node.style.background;
@@ -1889,6 +1919,11 @@ function buildGalleryOrCarousel(node, nodes, wType, allocId, resolveMedia) {
   }
   if (node.style && node.style.radius) {
     settings.image_border_radius = boxValue(node.style.radius);
+  }
+  if (node.style && node.style.borderWidth && node.style.borderColor) {
+    settings.image_border_border = node.style.borderStyle || 'solid';
+    settings.image_border_width = boxValue(node.style.borderWidth);
+    settings.image_border_color = node.style.borderColor;
   }
   return {
     id: allocId(node.id),
@@ -1941,8 +1976,13 @@ function buildTestimonial(node, nodes, allocId, resolveMedia) {
   if (imgs[0] && imgs[0].width) {
     settings.image_size = { unit: 'px', size: Math.round(Number(imgs[0].width)), sizes: [] };
   }
-  if (node.style && node.style.radius) {
-    settings.image_border_radius = boxValue(node.style.radius);
+  if (imgs[0] && imgs[0].radius) {
+    settings.image_border_radius = boxValue(imgs[0].radius);
+  }
+  if (node.style && node.style.borderWidth && node.style.borderColor) {
+    settings.image_border_border = node.style.borderStyle || 'solid';
+    settings.image_border_width = boxValue(node.style.borderWidth);
+    settings.image_border_color = node.style.borderColor;
   }
 
   return {
@@ -2018,6 +2058,10 @@ function buildSocialIcons(node, nodes, allocId) {
   }
 
   const settings = { social_icon_list: list };
+  if (node.layout && node.layout.justify) {
+    const jMap = { CENTER: 'center', MAX: 'right', MIN: 'left' };
+    if (jMap[node.layout.justify]) settings.align = jMap[node.layout.justify];
+  }
   if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
     settings.icon_spacing = { unit: 'px', size: node.layout.gap, sizes: [] };
   }
@@ -2106,6 +2150,11 @@ function buildCounter(node, nodes, allocId) {
       applyGlobalColor(settings, 'title_color', lblColor);
     }
     applyTypographySettings(settings, 'typography_title', lblTypo, labelNode.responsive || node.responsive);
+    applyTextShadowAndEffects(settings, lblTypo, 'selector .elementor-counter-title');
+    const lblGrad = getTextGradientCss(lblTypo);
+    if (lblGrad) {
+      appendCustomCss(settings, buildTextClipRule('selector .elementor-counter-title', lblGrad));
+    }
   }
 
   if (gradCss) {

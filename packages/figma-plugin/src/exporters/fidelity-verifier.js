@@ -1,20 +1,4 @@
-/**
- * Post-Convert Fidelity Verifier & Auto-Healer
- *
- * Automatically audits compiled Elementor v3 / Clipboard JSON against the Figma Intermediate Representation (IR)
- * and Elementor rendering laws, detecting and auto-healing layout/style/asset defects before export:
- *
- * 1. Bogus `__globals__` Sanitizer: Prevents unverified Elementor default global colors/fonts (like cyan #6EC1E4
- *    or non-existent IDs 848461d/31b945e) from overriding exact Figma hex colors (#16A34A, #FFFFFF, #000000) and fonts.
- * 2. Broken `icon-box` Inline SVG Auto-Healer: Elementor's `Icons_Manager` rejects raw `<svg>...</svg>` strings
- *    in `selected_icon.value` when `library === 'svg'`. Auto-heals single-text or inline-SVG icon boxes into
- *    pixel-perfect Flexbox Containers containing `[HTML Inline SVG + Text Editor]`.
- * 3. Multi-Column Row Auto-Healer: Prevents `_element_width: 'inherit'` (100% width) + `flex_wrap: 'wrap'` from
- *    collapsing horizontal multi-column rows into vertical stacks.
- * 4. Tight Fixed-Width HUG Text Wrapper Auto-Healer: Removes tight pixel widths (e.g. `157px` on `Eyebrow`) on
- *    HUG containers wrapping single-line text so browser font rendering never wraps the last word onto a 2nd line.
- * 5. Content & Style Completeness Audit: Verifies text nodes, colors, font sizes, and layout directions against Figma IR.
- */
+/** Post-Convert Fidelity Verifier & Auto-Healer: audits and heals Elementor v3 JSON before export. */
 
 import { shortId } from '../utils/crypto.js';
 import { escapeHtml, appendCustomCss, scopeSvgIds } from './compiler-helpers.js';

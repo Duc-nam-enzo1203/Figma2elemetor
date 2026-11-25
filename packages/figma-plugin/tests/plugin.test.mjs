@@ -3291,6 +3291,255 @@ test('Auto-detect Slides widget from pagination dots and prev/next arrows withou
   assert.equal(slidesWidget.settings.arrows_color, '#FFFFFF');
 });
 
+test('Widget Dev Mode Style Fidelity Audit: button residual CSS targets .elementor-button, divider preserves gradient, testimonial preserves avatar vs card radius, form preserves fieldPadding', () => {
+  const irDoc = {
+    title: 'Widget Fidelity Audit',
+    roots: ['sec-1'],
+    nodes: {
+      'sec-1': {
+        id: 'sec-1',
+        widget: 'container',
+        layout: { width: 1200, direction: 'column', gap: 16 },
+        children: ['btn-glass', 'div-grad', 'testi-card', 'pro-form'],
+      },
+      'btn-glass': {
+        id: 'btn-glass',
+        widget: 'button',
+        content: { name: 'Glass CTA', characters: 'Explore' },
+        layout: { padding: { top: 12, right: 24, bottom: 12, left: 24 } },
+        style: {
+          background: '#16A34A',
+          devModeBoxShadow: '0px 4px 14px rgba(0,0,0,0.2), 0px 1px 2px rgba(0,0,0,0.1)',
+          devModeExtraCss: { 'backdrop-filter': 'blur(12px)' },
+        },
+        text: { characters: 'Explore', color: '#FFFFFF', fontFamily: 'Inter', fontSize: 16, fontWeight: '600' },
+      },
+      'div-grad': {
+        id: 'div-grad',
+        widget: 'divider',
+        layout: { width: 200, height: 4 },
+        style: {
+          gradient: { type: 'linear', angle: 90, color1: '#16A34A', stop1: 0, color2: '#0EA5E9', stop2: 100 },
+        },
+      },
+      'testi-card': {
+        id: 'testi-card',
+        widget: 'testimonial',
+        layout: { width: 380, direction: 'column', padding: { top: 24, right: 24, bottom: 24, left: 24 } },
+        style: { background: '#FFFFFF', radius: { top: 12, right: 12, bottom: 12, left: 12 } },
+        children: ['testi-quote', 'testi-name', 'testi-avatar'],
+      },
+      'testi-quote': { id: 'testi-quote', widget: 'text-editor', text: { characters: 'Amazing product and great support!', color: '#334155', fontSize: 16 } },
+      'testi-name': { id: 'testi-name', widget: 'heading', text: { characters: 'Alice', color: '#0F172A', fontSize: 18 } },
+      'testi-avatar': { id: 'testi-avatar', widget: 'image', image: { dataUri: 'data:image/png;base64,iVBORw0KGgo=' }, layout: { width: 64, height: 64 }, style: { radius: { top: 999, right: 999, bottom: 999, left: 999 } } },
+      'pro-form': {
+        id: 'pro-form',
+        widget: 'form',
+        content: {
+          name: 'Lead Form',
+          formFields: [{ label: 'Email', type: 'email', placeholder: 'you@company.com', required: true }],
+          fieldPadding: { top: 14, right: 18, bottom: 14, left: 18 },
+          fieldStyle: { background: '#F8FAFC', borderColor: '#CBD5E1', boxShadow: { horizontal: 0, vertical: 2, blur: 6, spread: 0, color: 'rgba(15,23,42,0.08)' } },
+        },
+      },
+    },
+  };
+
+  const v3 = compileElementorV3(irDoc);
+  const children = v3.content[0].elements;
+
+  // 1. Button residual CSS targets selector .elementor-button
+  const btn = children[0];
+  assert.ok(btn.settings.custom_css.includes('selector .elementor-button {'), 'Button Dev Mode residual CSS must target selector .elementor-button');
+  assert.ok(btn.settings.custom_css.includes('backdrop-filter: blur(12px);'));
+
+  // 2. Gradient divider
+  const div = children[1];
+  assert.ok(div.settings.custom_css.includes('border-image: linear-gradient(90deg, #16A34A 0%, #0EA5E9 100%) 1 !important;'));
+
+  // 3. Testimonial card radius vs avatar radius
+  const testi = children[2];
+  assert.equal(testi.settings._border_radius.top, '12');
+  assert.equal(testi.settings.image_border_radius.top, '999');
+
+  // 4. Form fieldPadding & fieldStyle boxShadow
+  const form = children[3];
+  assert.ok(form.settings.custom_css.includes('selector .elementor-field { padding: 14px 18px 14px 18px; }'));
+  assert.ok(form.settings.custom_css.includes('selector .elementor-field { box-shadow: 0px 2px 6px 0px rgba(15,23,42,0.08); }'));
+});
+
+test('Flip Box Front/Back Auto-Split: extracts hidden Hover Card inside Mask Group into Back settings and locks 429x620 card width', async () => {
+  const rowFrame = {
+    id: '2209:2251',
+    name: 'Frame 1049',
+    type: 'FRAME',
+    layoutMode: 'HORIZONTAL',
+    width: 1920,
+    height: 620,
+    visible: true,
+    children: [
+      {
+        id: '2209:2252',
+        name: 'Mask Group',
+        type: 'GROUP',
+        width: 429,
+        height: 620,
+        visible: true,
+        getPluginData: (k) => (k === 'f2e-widget' ? 'flip-box' : ''),
+        children: [
+          {
+            id: '2209:2253',
+            name: 'Rectangle 373',
+            type: 'RECTANGLE',
+            width: 429,
+            height: 620,
+            isMask: true,
+            visible: true,
+          },
+          {
+            id: '2209:2254',
+            name: 'unsplash-photo',
+            type: 'RECTANGLE',
+            width: 452,
+            height: 915,
+            visible: true,
+            fills: [{ type: 'IMAGE', visible: true, imageHash: 'hash-front-photo' }],
+            exportAsync: async () => new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+          },
+          {
+            id: '2209:2267',
+            name: 'Hover Card',
+            type: 'FRAME',
+            layoutMode: 'VERTICAL',
+            width: 429,
+            height: 620,
+            visible: false, // Designer hid Hover Card on canvas!
+            paddingTop: 295,
+            paddingRight: 180,
+            paddingBottom: 295,
+            paddingLeft: 180,
+            fills: [{ type: 'SOLID', color: { r: 226 / 255, g: 49 / 255, b: 37 / 255 }, visible: true }], // #E23125
+            children: [
+              {
+                id: '2209:2268',
+                name: 'cela',
+                type: 'TEXT',
+                characters: 'cela',
+                visible: true,
+                fontSize: 16,
+                fontName: { family: 'Inter', style: 'Bold' },
+                textCase: 'UPPER',
+                letterSpacing: { unit: 'PIXELS', value: 8 },
+                fills: [{ type: 'SOLID', color: { r: 249 / 255, g: 224 / 255, b: 226 / 255 }, opacity: 0.8, visible: true }],
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: '2209:2255',
+        name: 'Mask Group 2',
+        type: 'GROUP',
+        width: 429,
+        height: 620,
+        visible: true,
+        getPluginData: (k) => (k === 'f2e-widget' ? 'flip-box' : ''),
+        children: [
+          {
+            id: '2209:2256',
+            name: 'photo-2',
+            type: 'RECTANGLE',
+            width: 429,
+            height: 620,
+            visible: true,
+            fills: [{ type: 'IMAGE', visible: true, imageHash: 'hash-front-2' }],
+            exportAsync: async () => new Uint8Array([137, 80, 78, 71, 13, 10, 26, 10]),
+          },
+        ],
+      },
+    ],
+  };
+
+  const { document } = await extractDesignSelection([rowFrame], { fileKey: 'flipbox-split-test' });
+  const v3 = compileElementorV3(document);
+  const flipBox = v3.content[0].elements[0];
+
+  assert.equal(flipBox.widgetType, 'flip-box');
+  assert.equal(flipBox.settings._element_width, 'initial');
+  assert.equal(flipBox.settings._element_custom_width.size, 429);
+  assert.equal(flipBox.settings.height.size, 620);
+
+  // Front must stay clean (photo only, no "Mask Group" or "cela" leaked onto Front)
+  assert.equal(flipBox.settings.title_text_a, '');
+  assert.ok(flipBox.settings.background_a_image.url.length > 0);
+  assert.equal(flipBox.settings.background_a_size, 'cover');
+
+  // Back must capture hidden Hover Card (#E23125 + "cela" + padding)
+  assert.equal(flipBox.settings.title_text_b, 'cela');
+  assert.equal(flipBox.settings.background_b_color, '#E23125');
+  assert.equal(flipBox.settings.padding_b.top, '295');
+  assert.equal(flipBox.settings.title_typography_b_font_family, 'Inter');
+  assert.equal(flipBox.settings.title_typography_b_text_transform, 'uppercase');
+  assert.equal(flipBox.settings.button_text, '');
+});
+
+test('Container Standards: FIXED sidebar stays px beside FILL column, 2-col row wraps on tablet, and standalone HUG root preserves width', () => {
+  const doc = {
+    title: 'Container Standards',
+    roots: ['row-sidebar', 'standalone-hug'],
+    nodes: {
+      'row-sidebar': {
+        id: 'row-sidebar',
+        widget: 'container',
+        layout: { width: 1200, direction: 'row', gap: 24, padding: { top: 40, right: 0, bottom: 40, left: 0 } },
+        children: ['sidebar', 'main-fill'],
+      },
+      'sidebar': {
+        id: 'sidebar',
+        widget: 'container',
+        layout: { width: 300, sizingH: 'FIXED', direction: 'column' },
+        children: ['sb-txt'],
+      },
+      'sb-txt': { id: 'sb-txt', widget: 'text-editor', text: { characters: 'Sidebar' } },
+      'main-fill': {
+        id: 'main-fill',
+        widget: 'container',
+        layout: { width: 876, sizingH: 'FILL', direction: 'column' },
+        children: ['main-txt'],
+      },
+      'main-txt': { id: 'main-txt', widget: 'text-editor', text: { characters: 'Main' } },
+      'standalone-hug': {
+        id: 'standalone-hug',
+        widget: 'container',
+        layout: { width: 420, sizingH: 'HUG', direction: 'column', padding: { top: 24, right: 24, bottom: 24, left: 24 } },
+        style: { background: '#FFFFFF' },
+        children: ['card-txt'],
+      },
+      'card-txt': { id: 'card-txt', widget: 'heading', text: { characters: 'Card' } },
+    },
+  };
+
+  const v3 = compileElementorV3(doc);
+  const row = v3.content[0];
+  assert.equal(row.settings.flex_wrap_tablet, 'wrap', '2-column row must enable flex_wrap_tablet');
+
+  const sidebar = row.elements[0];
+  assert.equal(sidebar.settings._flex_size, 'none');
+  assert.equal(sidebar.settings.width.unit, 'px');
+  assert.equal(sidebar.settings.width.size, 300, 'FIXED sidebar beside FILL column must stay 300px, not %');
+
+  const mainFill = row.elements[1];
+  assert.equal(mainFill.settings._flex_size, 'grow');
+
+  const standaloneCard = v3.content[1];
+  assert.equal(standaloneCard.settings.content_width, 'full');
+  assert.equal(standaloneCard.settings.width.unit, 'px');
+  assert.equal(standaloneCard.settings.width.size, 420, 'Standalone HUG root < 960px must preserve 420px width');
+});
+
+
+
+
 
 
 

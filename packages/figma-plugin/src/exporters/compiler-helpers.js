@@ -364,28 +364,34 @@ export function collectSubtreeImages(node, nodes) {
   }
   const out = [];
   const seen = new Set();
-  const pushUnique = (imgObj) => {
+  const pushUnique = (imgObj, ownerNode = null) => {
     if (!imgObj || (!imgObj.sha256 && !imgObj.dataUri)) return;
     const key = `${imgObj.sha256 || ''}|${(imgObj.dataUri || '').slice(0, 48)}`;
     if (seen.has(key)) return;
     seen.add(key);
-    out.push(imgObj);
+    const radius = imgObj.radius || (ownerNode && ownerNode.style && ownerNode.style.radius) || null;
+    const width = imgObj.width || (ownerNode && ownerNode.layout && ownerNode.layout.width) || null;
+    out.push({
+      ...imgObj,
+      ...(radius ? { radius } : {}),
+      ...(width ? { width } : {}),
+    });
   };
   const walk = (n) => {
     if (!n) return;
     if (Array.isArray(n.extractedImages) && n.extractedImages.length > 0) {
-      for (const ei of n.extractedImages) pushUnique(ei);
+      for (const ei of n.extractedImages) pushUnique(ei, n);
     }
-    if (n.image) pushUnique(n.image);
-    if (n.raster) pushUnique(n.raster);
+    if (n.image) pushUnique(n.image, n);
+    if (n.raster) pushUnique(n.raster, n);
     if (!n.image && !n.raster && n.style && n.style.backgroundImage) {
-      pushUnique({ sha256: n.style.backgroundImage, dataUri: n.style.backgroundImageDataUri || '' });
+      pushUnique({ sha256: n.style.backgroundImage, dataUri: n.style.backgroundImageDataUri || '' }, n);
     }
     if (!n.image && !n.raster && !(n.style && n.style.backgroundImage) && n.svg) {
       pushUnique({
         sha256: n.svg.sha256 || '',
         dataUri: n.svg.markup ? svgMarkupToDataUri(n.svg.markup) : '',
-      });
+      }, n);
     }
     for (const cid of n.children || []) walk(nodes[cid]);
   };

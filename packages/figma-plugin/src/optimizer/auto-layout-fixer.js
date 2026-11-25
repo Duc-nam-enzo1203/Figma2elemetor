@@ -1,15 +1,4 @@
-/**
- * Auto-Layout Fixer & Optimizer (Works directly on Figma Canvas AND provides Virtual Auto-Layout inference)
- *
- * Two modes:
- * 1. Read-only Virtual Inference (`inferVirtualLayout(node)`):
- *    When a designer forgets to enable Auto Layout on a Frame or Group, this analyzes child bounding boxes
- *    to determine whether children form a Horizontal Row, a Vertical Column, or a 2D CSS Grid, and calculates
- *    inferred `padding`, `gap`, `justify`, and `align`.
- * 2. Canvas Fixer (`fixAndOptimizeCanvasSelection(selection)`):
- *    Like UIChemy's Layout Optimizer, converts non-auto-layout frames/groups on the Figma canvas into real
- *    Figma Auto-Layout frames and groups scattered vector paths into clean Icon Frames.
- */
+/** Auto-Layout Fixer & Virtual Auto-Layout Inference for Figma frames and groups. */
 
 import { visibleChildren, isVectorGraphic, isDividerNode, detectCompositeBackgroundChildren } from '../tagging/widget-resolver.js';
 
@@ -203,16 +192,7 @@ function inferCrossAlign(items, posKey, centerKey, sizeKey) {
   return 'MIN';
 }
 
-/**
- * NON-DESTRUCTIVE Smart Layout & Background Analyzer (ZERO visual mutations on Figma canvas!).
- *
- * Unlike destructive Auto-Layout conversion that shifts overlapping/freeform designs on Figma,
- * this function ONLY writes lightweight `f2e-widget` pluginData tags:
- * 1. Tags composite background layers (e.g. BG + Mask + Line + Main + Overlay behind text/menu)
- *    as `background` so they bake cleanly into 1 WebP Container background image at export time.
- * 2. Tags pure vector groups/frames as `icon` so they export as a single SVG instead of scattered paths.
- * 3. Counts freeform frames that will safely use read-only Virtual Auto-Layout in memory during export.
- */
+/** Non-destructively tags composite backgrounds and vector icon groups via `f2e-widget` pluginData without mutating the canvas. */
 export function fixAndOptimizeCanvasSelection(selection) {
   let virtualLayoutFrames = 0;
   let taggedIcons = 0;

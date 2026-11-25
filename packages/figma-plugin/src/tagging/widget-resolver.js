@@ -752,15 +752,7 @@ function boxesOverlap(a, b) {
   return ax1 < bx2 && ax2 > bx1 && ay1 < by2 && ay2 > by1;
 }
 
-/**
- * Identifies composite background layers inside a container frame (such as multi-layer
- * Hero backgrounds: BG + Mask + Line + Main + Overlay stacked behind Menu/Text/Group).
- *
- * Respects explicit `background` tags (via pluginData or `[bg]` prefix) on any frame,
- * and auto-detects non-text visual layers stacked strictly behind foreground content
- * (plus full-frame translucent overlays above foreground content) inside freeform
- * (non-Auto-Layout) frames without mutating the Figma canvas.
- */
+/** Separates composite background layers from foreground children in freeform frames without mutating the canvas. */
 export function detectCompositeBackgroundChildren(containerNode) {
   const kids = visibleChildren(containerNode);
   if (kids.length < 2) {

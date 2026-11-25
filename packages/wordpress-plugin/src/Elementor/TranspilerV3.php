@@ -6,16 +6,7 @@ namespace F2EBridge\Elementor;
 
 use F2EBridge\Media\AssetStore;
 
-/**
- * Compiles an `f2e.document` Intermediate Representation into Elementor v3 elements:
- * - Flexbox & CSS Grid Containers (`elType: 'container'`)
- * - Basic Free Widgets: heading, text-editor, button, image, icon (inline SVG), divider, spacer
- * - Interactive & Layout Widgets: icon-box, image-box, nested-accordion, nested-tabs,
- *   image-carousel, image-gallery, testimonial, star-rating, social-icons, counter
- * - Elementor Pro Widgets: form, nav-menu, call-to-action, price-table, flip-box, slides, loop-grid
- * - Binds Global Colors & Global Fonts via `__globals__`
- * - Embeds `_f2e_node_id` for deterministic Incremental Re-sync
- */
+/** Compiles an `f2e.document` IR into Elementor v3 containers and widgets with `_f2e_node_id` tracking. */
 final class TranspilerV3
 {
     private const ALIGN_MAP = [
@@ -73,7 +64,7 @@ final class TranspilerV3
      * @param array<string,mixed> $nodes
      * @return array<string,mixed>|null
      */
-    private function buildNode(string $nodeId, array $nodes, bool $isRoot = false): ?array
+    private function buildNode(string $nodeId, array $nodes, bool $isRoot = false, ?array $parentNode = null): ?array
     {
         $node = $nodes[$nodeId] ?? null;
         if (!is_array($node)) {
@@ -114,7 +105,7 @@ final class TranspilerV3
             'theme-post-featured-image' => (defined('ELEMENTOR_PRO_VERSION') || class_exists('\\ElementorPro\\Plugin'))
                 ? $this->wrapElement('widget', 'theme-post-featured-image', ['image_size' => 'full'], [], [])
                 : $this->buildImage($node),
-            default => $this->buildContainer($node, $nodes, $isRoot),
+            default => $this->buildContainer($node, $nodes, $isRoot, $parentNode),
         };
 
         $element['settings']['_f2e_node_id'] = (string) ($node['sourceNodeId'] ?? $node['id'] ?? $nodeId);
@@ -173,7 +164,7 @@ final class TranspilerV3
         return $result;
     }
 
-    private function buildContainer(array $node, array $nodes, bool $isRoot): array
+    private function buildContainer(array $node, array $nodes, bool $isRoot, ?array $parentNode = null): array
     {
         $layout = is_array($node['layout'] ?? null) ? $node['layout'] : [];
         $style = is_array($node['style'] ?? null) ? $node['style'] : [];
@@ -197,6 +188,10 @@ final class TranspilerV3
             $settings['flex_align_items'] = self::ALIGN_MAP[(string) ($layout['align'] ?? 'MIN')] ?? 'flex-start';
             if (!empty($layout['wrap'])) {
                 $settings['flex_wrap'] = 'wrap';
+                $settings['flex_wrap_tablet'] = 'wrap';
+            } elseif ($dir === 'row' && count((array) ($node['children'] ?? [])) >= 2) {
+                $settings['flex_wrap'] = 'nowrap';
+                $settings['flex_wrap_tablet'] = 'wrap';
             }
 
             if (!empty($responsive['tablet']['direction'])) {
@@ -298,8 +293,11 @@ final class TranspilerV3
                     $sizingH = (string) ($layout['sizingH'] ?? 'HUG');
                     if ($sizingH === 'FILL' || ($sizingH === 'HUG' && $nodeW >= 240 && $nodeW < $parentW)) {
                         $settings['_flex_size'] = 'grow';
-                        $pct = round(($nodeW / $parentW) * 100, 1);
-                        $settings['width'] = ['unit' => '%', 'size' => min(100, $pct), 'sizes' => []];
+                        $pct = min(100, round(($nodeW / $parentW) * 100, 1));
+                        if (!empty($parentLayout['wrap']) && (int) ($parentLayout['gap'] ?? 0) > 0 && $pct >= 48 && $pct <= 52) {
+                            $pct = 48.5;
+                        }
+                        $settings['width'] = ['unit' => '%', 'size' => $pct, 'sizes' => []];
                         if ($pct >= 42 && $pct <= 68) {
                             $settings['width_tablet'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
                             $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
@@ -307,6 +305,7 @@ final class TranspilerV3
                             $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
                         }
                     } elseif ($nodeW < $parentW * 0.92) {
+                        $settings['_flex_size'] = 'none';
                         $settings['width'] = ['unit' => 'px', 'size' => $nodeW, 'sizes' => []];
                         $settings['width_mobile'] = ['unit' => '%', 'size' => 100, 'sizes' => []];
                     }
@@ -483,7 +482,7 @@ final class TranspilerV3
 
         $children = [];
         foreach ($activeChildIds as $cid) {
-            $childEl = $this->buildNode((string) $cid, $nodes, false);
+            $childEl = $this->buildNode((string) $cid, $nodes, false, $node);
             if ($childEl !== null) {
                 if ($childEl['elType'] === 'container') {
                     $childEl['isInner'] = true;
@@ -1521,14 +1520,72 @@ final class TranspilerV3
     /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
     private function buildProFlipBox(array $node, array $nodes): array
     {
+        $fb = is_array($node['content']['flipBox'] ?? null) ? $node['content']['flipBox'] : null;
+        $front = is_array($fb['front'] ?? null) ? $fb['front'] : null;
+        $back = is_array($fb['back'] ?? null) ? $fb['back'] : null;
         $texts = array_map(static fn (array $n): string => (string) ($n['text']['characters'] ?? ''), $this->collectSubtreeTexts($node, $nodes));
-        return $this->wrapElement('widget', 'flip-box', [
-            'title_text_a' => $texts[0] ?? (string) ($node['content']['name'] ?? 'Front Title'),
-            'description_text_a' => $texts[1] ?? '',
-            'title_text_b' => $texts[2] ?? $texts[0] ?? 'Back Title',
-            'description_text_b' => $texts[3] ?? $texts[1] ?? '',
-            'button_text' => $texts[4] ?? 'Read More',
-        ], [], []);
+        $imgs = $this->collectSubtreeImages($node, $nodes);
+        $fTexts = is_array($front['texts'] ?? null) ? $front['texts'] : [];
+        $bTexts = is_array($back['texts'] ?? null) ? $back['texts'] : [];
+        $frontImg = is_array($front['image'] ?? null) ? $front['image'] : ($imgs[0] ?? null);
+        $backImg = is_array($back['image'] ?? null) ? $back['image'] : ($fb === null ? ($imgs[1] ?? null) : null);
+
+        $settings = [
+            'title_text_a' => $fb !== null ? (string) ($fTexts[0]['characters'] ?? '') : ($texts[0] ?? ($frontImg !== null ? '' : (string) ($node['content']['name'] ?? 'Front Title'))),
+            'description_text_a' => $fb !== null ? (string) ($fTexts[1]['characters'] ?? '') : ($texts[1] ?? ''),
+            'title_text_b' => $fb !== null ? (string) ($bTexts[0]['characters'] ?? '') : ($texts[2] ?? $texts[0] ?? ($frontImg !== null ? '' : 'Back Title')),
+            'description_text_b' => $fb !== null ? (string) ($bTexts[1]['characters'] ?? '') : ($texts[3] ?? $texts[1] ?? ''),
+            'button_text' => $fb !== null ? (string) ($bTexts[2]['characters'] ?? '') : ($texts[4] ?? ''),
+        ];
+        $globals = [];
+        $responsive = is_array($node['responsive'] ?? null) ? $node['responsive'] : [];
+
+        if (!empty($fTexts[0])) {
+            if (!empty($fTexts[0]['color'])) {
+                $this->bindColor($settings, $globals, 'title_color_a', (string) $fTexts[0]['color']);
+            }
+            $this->bindTypography($settings, $globals, 'title_typography_a', $fTexts[0], $responsive);
+        }
+        if (!empty($bTexts[0])) {
+            if (!empty($bTexts[0]['color'])) {
+                $this->bindColor($settings, $globals, 'title_color_b', (string) $bTexts[0]['color']);
+            }
+            $this->bindTypography($settings, $globals, 'title_typography_b', $bTexts[0], $responsive);
+        }
+        $bgA = (string) ($front['background'] ?? $node['style']['background'] ?? '');
+        if ($bgA !== '') {
+            $settings['background_a_background'] = 'classic';
+            $settings['background_a_color'] = $bgA;
+        }
+        $bgB = (string) ($back['background'] ?? $node['style']['background'] ?? '');
+        if ($bgB !== '') {
+            $settings['background_b_background'] = 'classic';
+            $settings['background_b_color'] = $bgB;
+        }
+        if (is_array($frontImg)) {
+            $mediaA = $this->resolveMedia((string) ($frontImg['sha256'] ?? ''), (string) ($frontImg['dataUri'] ?? ''));
+            if ($mediaA['id'] > 0 || $mediaA['url'] !== '') {
+                $settings['background_a_background'] = 'classic';
+                $settings['background_a_image'] = $mediaA;
+                $settings['background_a_size'] = 'cover';
+                $settings['background_a_position'] = 'center center';
+                $settings['background_a_repeat'] = 'no-repeat';
+            }
+        }
+        if (is_array($backImg)) {
+            $mediaB = $this->resolveMedia((string) ($backImg['sha256'] ?? ''), (string) ($backImg['dataUri'] ?? ''));
+            if ($mediaB['id'] > 0 || $mediaB['url'] !== '') {
+                $settings['background_b_background'] = 'classic';
+                $settings['background_b_image'] = $mediaB;
+                $settings['background_b_size'] = 'cover';
+                $settings['background_b_position'] = 'center center';
+                $settings['background_b_repeat'] = 'no-repeat';
+            }
+        }
+        if (!empty($node['layout']['height'])) {
+            $settings['height'] = ['unit' => 'px', 'size' => max(200, (int) $node['layout']['height']), 'sizes' => []];
+        }
+        return $this->wrapElement('widget', 'flip-box', $settings, $globals, []);
     }
 
     /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */

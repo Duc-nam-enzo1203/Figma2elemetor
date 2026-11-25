@@ -2,7 +2,7 @@
  * Elementor Pro Widget Builders (`form`, `nav-menu`, `call-to-action`, `price-table`, `flip-box`, `slides`, `loop-grid`).
  */
 import { shortId } from '../utils/crypto.js';
-import { boxValue, appendCustomCss, applyTypographySettings, collectSubtreeTexts, collectSubtreeImages, svgMarkupToDataUri } from './compiler-helpers.js';
+import { boxValue, appendCustomCss, applyTypographySettings, applyTextShadowAndEffects, getTextGradientCss, buildTextClipRule, collectSubtreeTexts, collectSubtreeImages, svgMarkupToDataUri } from './compiler-helpers.js';
 
 export function buildProForm(node, nodes, allocId) {
   const formFields = [];
@@ -107,6 +107,14 @@ export function buildProForm(node, nodes, allocId) {
     if (content.fieldStyle.borderColor) settings.field_border_color = content.fieldStyle.borderColor;
     if (content.fieldStyle.borderWidth) settings.field_border_width = boxValue(content.fieldStyle.borderWidth);
     if (content.fieldStyle.radius) settings.field_border_radius = boxValue(content.fieldStyle.radius);
+    if (content.fieldStyle.boxShadow) {
+      const s = content.fieldStyle.boxShadow;
+      appendCustomCss(settings, `selector .elementor-field { box-shadow: ${s.position === 'inset' ? 'inset ' : ''}${s.horizontal || 0}px ${s.vertical || 0}px ${s.blur || 0}px ${s.spread || 0}px ${s.color || 'rgba(0,0,0,0.1)'}; }`);
+    }
+  }
+  if (content.fieldPadding && (content.fieldPadding.top || content.fieldPadding.right || content.fieldPadding.bottom || content.fieldPadding.left)) {
+    const fp = content.fieldPadding;
+    appendCustomCss(settings, `selector .elementor-field { padding: ${Math.round(fp.top || 0)}px ${Math.round(fp.right || 0)}px ${Math.round(fp.bottom || 0)}px ${Math.round(fp.left || 0)}px; }`);
   }
   if (content.buttonTypography) {
     if (content.buttonTypography.color) settings.button_text_color = content.buttonTypography.color;
@@ -126,6 +134,10 @@ export function buildProForm(node, nodes, allocId) {
       settings.button_border_color = content.buttonStyle.borderColor;
     }
     if (content.buttonStyle.radius) settings.button_border_radius = boxValue(content.buttonStyle.radius);
+    if (content.buttonStyle.boxShadow) {
+      const bs = content.buttonStyle.boxShadow;
+      appendCustomCss(settings, `selector .elementor-button { box-shadow: ${bs.position === 'inset' ? 'inset ' : ''}${bs.horizontal || 0}px ${bs.vertical || 0}px ${bs.blur || 0}px ${bs.spread || 0}px ${bs.color || 'rgba(0,0,0,0.2)'}; }`);
+    }
   }
   if (content.buttonPadding) {
     settings.button_text_padding = boxValue(content.buttonPadding);
@@ -204,10 +216,14 @@ export function buildProCta(node, nodes, allocId, resolveMedia) {
     if (textItems[0].text.align) settings.alignment = textItems[0].text.align;
     if (textItems[0].text.color) settings.title_color = textItems[0].text.color;
     applyTypographySettings(settings, 'title_typography', textItems[0].text, node.responsive);
+    applyTextShadowAndEffects(settings, textItems[0].text, 'selector .elementor-cta__title');
+    const ctaTitleGrad = getTextGradientCss(textItems[0].text);
+    if (ctaTitleGrad) appendCustomCss(settings, buildTextClipRule('selector .elementor-cta__title', ctaTitleGrad));
   }
   if (textItems[1] && textItems[1].text) {
     if (textItems[1].text.color) settings.description_color = textItems[1].text.color;
     applyTypographySettings(settings, 'description_typography', textItems[1].text, node.responsive);
+    applyTextShadowAndEffects(settings, textItems[1].text, 'selector .elementor-cta__description');
   }
   if (textItems[2] && textItems[2].text) {
     if (textItems[2].text.color) settings.button_text_color = textItems[2].text.color;
@@ -227,6 +243,10 @@ export function buildProCta(node, nodes, allocId, resolveMedia) {
     if (ctaBtnNode.style.borderWidth) {
       const bw = Math.max(Number(ctaBtnNode.style.borderWidth.top) || 0, Number(ctaBtnNode.style.borderWidth.right) || 0, Number(ctaBtnNode.style.borderWidth.bottom) || 0, Number(ctaBtnNode.style.borderWidth.left) || 0);
       if (bw > 0) settings.button_border_width = { unit: 'px', size: bw, sizes: [] };
+    }
+    if (ctaBtnNode.layout && ctaBtnNode.layout.padding && (ctaBtnNode.layout.padding.top || ctaBtnNode.layout.padding.right || ctaBtnNode.layout.padding.bottom || ctaBtnNode.layout.padding.left)) {
+      const bp = ctaBtnNode.layout.padding;
+      appendCustomCss(settings, `selector .elementor-cta__button { padding: ${Math.round(bp.top || 0)}px ${Math.round(bp.right || 0)}px ${Math.round(bp.bottom || 0)}px ${Math.round(bp.left || 0)}px; }`);
     }
   }
   if (node.layout && node.layout.height && Number(node.layout.height) >= 160) {
@@ -284,6 +304,7 @@ export function buildProPriceTable(node, nodes, allocId) {
   if (headingNode && headingNode.text) {
     if (headingNode.text.color) settings.heading_color = headingNode.text.color;
     applyTypographySettings(settings, 'heading_typography', headingNode.text, node.responsive);
+    applyTextShadowAndEffects(settings, headingNode.text, 'selector .elementor-price-table__heading');
   }
   if (subHeadingNode && subHeadingNode.text) {
     if (subHeadingNode.text.color) settings.sub_heading_color = subHeadingNode.text.color;
@@ -292,6 +313,8 @@ export function buildProPriceTable(node, nodes, allocId) {
   if (priceNode && priceNode.text) {
     if (priceNode.text.color) settings.price_color = priceNode.text.color;
     applyTypographySettings(settings, 'price_typography', priceNode.text, node.responsive);
+    const priceGrad = getTextGradientCss(priceNode.text);
+    if (priceGrad) appendCustomCss(settings, buildTextClipRule('selector .elementor-price-table__price', priceGrad));
   }
   if (textItems[2] && textItems[2].text) {
     if (textItems[2].text.color) settings.features_color = textItems[2].text.color;
@@ -307,6 +330,10 @@ export function buildProPriceTable(node, nodes, allocId) {
     if (priceBtnChild.style.radius) settings.button_border_radius = boxValue(priceBtnChild.style.radius);
     if (priceBtnChild.style.borderColor) settings.button_border_color = priceBtnChild.style.borderColor;
     if (priceBtnChild.style.borderWidth) settings.button_border_width = boxValue(priceBtnChild.style.borderWidth);
+    if (priceBtnChild.layout && priceBtnChild.layout.padding && (priceBtnChild.layout.padding.top || priceBtnChild.layout.padding.right || priceBtnChild.layout.padding.bottom || priceBtnChild.layout.padding.left)) {
+      const pbp = priceBtnChild.layout.padding;
+      appendCustomCss(settings, `selector .elementor-price-table__button { padding: ${Math.round(pbp.top || 0)}px ${Math.round(pbp.right || 0)}px ${Math.round(pbp.bottom || 0)}px ${Math.round(pbp.left || 0)}px; }`);
+    }
   }
   if (node.style && node.style.background) {
     settings.pricing_element_bg_color = node.style.background;
@@ -323,63 +350,115 @@ export function buildProPriceTable(node, nodes, allocId) {
 }
 
 export function buildProFlipBox(node, nodes, allocId, resolveMedia) {
+  const fb = (node.content && node.content.flipBox) ? node.content.flipBox : null;
   const textItems = collectSubtreeTexts(node, nodes);
   const texts = textItems.map((t) => t.text.characters);
   const imgs = collectSubtreeImages(node, nodes);
+
+  const front = (fb && fb.front) ? fb.front : null;
+  const back = (fb && fb.back) ? fb.back : null;
+  const fTexts = (front && Array.isArray(front.texts)) ? front.texts : [];
+  const bTexts = (back && Array.isArray(back.texts)) ? back.texts : [];
+
+  const frontImgRef = (front && front.image) || imgs[0] || null;
+  const backImgRef = (back && back.image) || (!fb ? imgs[1] : null) || null;
+  const hasFrontImg = Boolean(frontImgRef);
+
+  const titleTypoA = fb ? (fTexts[0] || null) : ((textItems[0] && textItems[0].text) || null);
+  const descTypoA = fb ? (fTexts[1] || null) : ((textItems[1] && textItems[1].text) || null);
+  const titleTypoB = fb ? (bTexts[0] || null) : ((textItems[2] && textItems[2].text) || (textItems[0] && textItems[0].text) || null);
+  const descTypoB = fb ? (bTexts[1] || null) : ((textItems[3] && textItems[3].text) || (textItems[1] && textItems[1].text) || null);
+
   const settings = {
-    title_text_a: texts[0] || (node.content && node.content.name) || 'Front Title',
-    description_text_a: texts[1] || '',
-    title_text_b: texts[2] || texts[0] || 'Back Title',
-    description_text_b: texts[3] || texts[1] || '',
-    button_text: texts[4] || 'Read More',
+    title_text_a: fb ? ((titleTypoA && titleTypoA.characters) || '') : (texts[0] || (hasFrontImg ? '' : ((node.content && node.content.name) || 'Front Title'))),
+    description_text_a: fb ? ((descTypoA && descTypoA.characters) || '') : (texts[1] || ''),
+    title_text_b: fb ? ((titleTypoB && titleTypoB.characters) || '') : (texts[2] || texts[0] || (hasFrontImg ? '' : 'Back Title')),
+    description_text_b: fb ? ((descTypoB && descTypoB.characters) || '') : (texts[3] || texts[1] || ''),
+    button_text: fb ? ((bTexts[2] && bTexts[2].characters) || '') : (texts[4] || ''),
   };
-  if (textItems[0] && textItems[0].text) {
-    if (textItems[0].text.align) settings.alignment = textItems[0].text.align;
-    if (textItems[0].text.color) settings.title_color_a = textItems[0].text.color;
-    applyTypographySettings(settings, 'title_typography_a', textItems[0].text, node.responsive);
+
+  if (titleTypoA) {
+    if (titleTypoA.align) settings.alignment = titleTypoA.align;
+    if (titleTypoA.color) settings.title_color_a = titleTypoA.color;
+    applyTypographySettings(settings, 'title_typography_a', titleTypoA, node.responsive);
+    applyTextShadowAndEffects(settings, titleTypoA, 'selector .elementor-flip-box__front .elementor-flip-box__layer__title');
+  } else if (titleTypoB && titleTypoB.align) {
+    settings.alignment = titleTypoB.align;
   }
-  if (node.layout && node.layout.padding && (node.layout.padding.top || node.layout.padding.right || node.layout.padding.bottom || node.layout.padding.left)) {
-    settings.padding_a = boxValue(node.layout.padding);
-    settings.padding_b = boxValue(node.layout.padding);
+
+  const padA = (front && front.padding) || (node.layout && node.layout.padding);
+  if (padA && (padA.top || padA.right || padA.bottom || padA.left)) {
+    settings.padding_a = boxValue(padA);
   }
-  if (textItems[1] && textItems[1].text) {
-    if (textItems[1].text.color) settings.description_color_a = textItems[1].text.color;
-    applyTypographySettings(settings, 'description_typography_a', textItems[1].text, node.responsive);
+  const padB = (back && back.padding) || (node.layout && node.layout.padding);
+  if (padB && (padB.top || padB.right || padB.bottom || padB.left)) {
+    settings.padding_b = boxValue(padB);
   }
-  const titleTypoB = (textItems[2] && textItems[2].text) || (textItems[0] && textItems[0].text) || null;
+
+  if (descTypoA) {
+    if (descTypoA.color) settings.description_color_a = descTypoA.color;
+    applyTypographySettings(settings, 'description_typography_a', descTypoA, node.responsive);
+  }
   if (titleTypoB) {
     if (titleTypoB.color) settings.title_color_b = titleTypoB.color;
     applyTypographySettings(settings, 'title_typography_b', titleTypoB, node.responsive);
+    applyTextShadowAndEffects(settings, titleTypoB, 'selector .elementor-flip-box__back .elementor-flip-box__layer__title');
   }
-  const descTypoB = (textItems[3] && textItems[3].text) || (textItems[1] && textItems[1].text) || null;
   if (descTypoB) {
     if (descTypoB.color) settings.description_color_b = descTypoB.color;
     applyTypographySettings(settings, 'description_typography_b', descTypoB, node.responsive);
   }
-  if (node.style && node.style.background) {
+
+  const bgA = (front && front.background) || (node.style && node.style.background);
+  const gradA = (front && front.gradient) || (node.style && node.style.gradient);
+  if (gradA) {
+    settings.background_a_background = 'gradient';
+    settings.background_a_gradient_type = gradA.type || 'linear';
+    settings.background_a_color = gradA.color1;
+    settings.background_a_color_b = gradA.color2;
+    settings.background_a_gradient_angle = { unit: 'deg', size: gradA.angle ?? 180, sizes: [] };
+  } else if (bgA) {
     settings.background_a_background = 'classic';
-    settings.background_a_color = node.style.background;
-    settings.background_b_background = 'classic';
-    settings.background_b_color = node.style.background;
+    settings.background_a_color = bgA;
   }
+
+  const bgB = (back && back.background) || (node.style && node.style.background);
+  const gradB = (back && back.gradient) || (node.style && node.style.gradient);
+  if (gradB) {
+    settings.background_b_background = 'gradient';
+    settings.background_b_gradient_type = gradB.type || 'linear';
+    settings.background_b_color = gradB.color1;
+    settings.background_b_color_b = gradB.color2;
+    settings.background_b_gradient_angle = { unit: 'deg', size: gradB.angle ?? 180, sizes: [] };
+  } else if (bgB) {
+    settings.background_b_background = 'classic';
+    settings.background_b_color = bgB;
+  }
+
   if (node.style && node.style.radius) {
     settings.border_radius = boxValue(node.style.radius);
   }
   if (node.layout && node.layout.height) {
     settings.height = { unit: 'px', size: Math.max(200, Math.round(Number(node.layout.height))), sizes: [] };
   }
-  if (imgs[0] && resolveMedia) {
-    const mediaA = resolveMedia(imgs[0].sha256, imgs[0].dataUri);
+  if (frontImgRef && resolveMedia) {
+    const mediaA = resolveMedia(frontImgRef.sha256, frontImgRef.dataUri);
     if (mediaA && mediaA.url) {
       settings.background_a_background = 'classic';
       settings.background_a_image = mediaA;
+      settings.background_a_size = 'cover';
+      settings.background_a_position = 'center center';
+      settings.background_a_repeat = 'no-repeat';
     }
   }
-  if (imgs[1] && resolveMedia) {
-    const mediaB = resolveMedia(imgs[1].sha256, imgs[1].dataUri);
+  if (backImgRef && resolveMedia) {
+    const mediaB = resolveMedia(backImgRef.sha256, backImgRef.dataUri);
     if (mediaB && mediaB.url) {
       settings.background_b_background = 'classic';
       settings.background_b_image = mediaB;
+      settings.background_b_size = 'cover';
+      settings.background_b_position = 'center center';
+      settings.background_b_repeat = 'no-repeat';
     }
   }
   return {
@@ -447,10 +526,12 @@ export function buildProSlides(node, nodes, allocId, resolveMedia) {
     if (firstSlideTexts[0].align) slidesSettings.text_align = firstSlideTexts[0].align;
     if (firstSlideTexts[0].color) slidesSettings.heading_color = firstSlideTexts[0].color;
     applyTypographySettings(slidesSettings, 'heading_typography', firstSlideTexts[0], node.responsive);
+    applyTextShadowAndEffects(slidesSettings, firstSlideTexts[0], 'selector .elementor-slide-heading');
   }
   if (firstSlideTexts[1]) {
     if (firstSlideTexts[1].color) slidesSettings.description_color = firstSlideTexts[1].color;
     applyTypographySettings(slidesSettings, 'description_typography', firstSlideTexts[1], node.responsive);
+    applyTextShadowAndEffects(slidesSettings, firstSlideTexts[1], 'selector .elementor-slide-description');
   }
   if (firstSlideTexts[2]) {
     if (firstSlideTexts[2].color) slidesSettings.button_color = firstSlideTexts[2].color;
