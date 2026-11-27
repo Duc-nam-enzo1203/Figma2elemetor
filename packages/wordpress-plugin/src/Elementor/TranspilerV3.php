@@ -82,29 +82,41 @@ final class TranspilerV3
             'image' => $this->buildImage($node),
             'icon' => $this->buildIcon($node),
             'html' => $this->buildHtml($node),
+            'video' => $this->buildVideo($node),
+            'google_maps' => $this->buildGoogleMaps($node),
             'divider' => $this->buildDivider($node),
             'spacer' => $this->buildSpacer($node),
             'icon-box', 'image-box' => $this->buildBoxWidget($node, $nodes, $widget),
             'icon-list' => $this->buildIconList($node, $nodes),
+            'progress' => $this->buildProgress($node, $nodes),
+            'alert' => $this->buildAlert($node, $nodes),
             'nested-accordion', 'accordion', 'toggle' => $this->buildNestedAccordion($node, $nodes),
             'nested-tabs', 'tabs' => $this->buildNestedTabs($node, $nodes),
-            'image-gallery', 'image-carousel', 'gallery', 'media-carousel', 'nested-carousel' => $this->buildGalleryOrCarousel($node, $nodes, $widget),
-            'testimonial', 'testimonial-carousel', 'reviews' => $this->buildTestimonial($node, $nodes),
+            'image-gallery', 'image-carousel', 'media-carousel' => $this->buildGalleryOrCarousel($node, $nodes, $widget),
+            'gallery' => $this->buildProGallery($node, $nodes),
+            'nested-carousel' => $this->buildProNestedCarousel($node, $nodes),
+            'testimonial' => $this->buildTestimonial($node, $nodes),
+            'testimonial-carousel', 'reviews' => $this->buildProTestimonialCarousel($node, $nodes, $widget),
             'star-rating' => $this->buildStarRating($node),
             'social-icons', 'share-buttons' => $this->buildSocialIcons($node, $nodes),
             'counter', 'countdown' => $this->buildCounter($node, $nodes),
             // Elementor Pro
-            'form', 'login', 'search-form' => $this->buildProForm($node, $nodes),
-            'nav-menu', 'mega-menu' => $this->buildProNavMenu($node, $nodes),
+            'form' => $this->buildProForm($node, $nodes),
+            'search-form' => $this->buildProSearchForm($node, $nodes),
+            'login' => $this->buildProLogin($node, $nodes),
+            'nav-menu' => $this->buildProNavMenu($node, $nodes),
+            'mega-menu' => $this->buildProMegaMenu($node, $nodes),
             'call-to-action' => $this->buildProCta($node, $nodes),
             'price-table', 'price-list' => $this->buildProPriceTable($node, $nodes),
             'flip-box' => $this->buildProFlipBox($node, $nodes),
             'slides' => $this->buildProSlides($node, $nodes),
-            'loop-grid', 'loop-carousel', 'posts', 'portfolio', 'woocommerce-products' => $this->buildProLoopGrid($node),
+            'hotspot' => $this->buildProHotspot($node, $nodes),
+            'loop-grid', 'loop-carousel', 'posts', 'portfolio', 'woocommerce-products' => $this->buildProLoopGrid($node, $nodes, $widget),
             'theme-site-logo', 'site-logo' => $this->buildSiteLogo($node),
             'theme-post-featured-image' => (defined('ELEMENTOR_PRO_VERSION') || class_exists('\\ElementorPro\\Plugin'))
                 ? $this->wrapElement('widget', 'theme-post-featured-image', ['image_size' => 'full'], [], [])
                 : $this->buildImage($node),
+            'author-box', 'table-of-contents', 'lottie', 'blockquote', 'animated-headline', 'breadcrumbs', 'post-info', 'woocommerce-menu-cart', 'woocommerce-product-add-to-cart' => $this->buildGenericProWidget($node, $nodes, $widget),
             default => $this->buildContainer($node, $nodes, $isRoot, $parentNode),
         };
 
@@ -1614,16 +1626,248 @@ final class TranspilerV3
         ], [], []);
     }
 
-    /** @param array<string,mixed> $node @return array<string,mixed> */
-    private function buildProLoopGrid(array $node): array
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildProLoopGrid(array $node, array $nodes = [], string $widget = 'loop-grid'): array
     {
-        $cols = max(1, (int) ($node['layout']['columns'] ?? 3));
-        return $this->wrapElement('widget', 'loop-grid', [
-            'template_id' => '',
-            'posts_per_page' => 6,
-            'columns' => (string) $cols,
-            'row_gap' => ['unit' => 'px', 'size' => (int) ($node['layout']['gap'] ?? 24), 'sizes' => []],
+        $childIds = is_array($node['children'] ?? null) ? $node['children'] : [];
+        $cols = max(1, (int) ($node['layout']['columns'] ?? (count($childIds) > 0 && count($childIds) <= 4 ? count($childIds) : 3)));
+        $gap = (int) ($node['layout']['gap'] ?? 24);
+        $isCarousel = $widget === 'loop-carousel';
+        $isWoo = $widget === 'woocommerce-products';
+        $settings = $isCarousel
+            ? [
+                'skin' => $isWoo ? 'product' : 'post',
+                'template_id' => '',
+                'posts_per_page' => max(6, count($childIds)),
+                'slides_to_show' => (string) max(1, min(4, $cols)),
+                'image_spacing_custom' => ['unit' => 'px', 'size' => $gap, 'sizes' => []],
+            ]
+            : [
+                'skin' => $isWoo ? 'product' : 'post',
+                'template_id' => '',
+                'posts_per_page' => max(6, count($childIds)),
+                'columns' => (string) $cols,
+                'row_gap' => ['unit' => 'px', 'size' => $gap, 'sizes' => []],
+                'column_gap' => ['unit' => 'px', 'size' => $gap, 'sizes' => []],
+            ];
+
+        if (($widget === 'loop-grid' || $widget === 'loop-carousel') && $childIds !== []) {
+            $firstCardId = (string) $childIds[0];
+            $cardEl = $this->buildNode($firstCardId, $nodes, true, null);
+            if ($cardEl !== null) {
+                if (($cardEl['elType'] ?? '') === 'container') {
+                    $cardEl['isInner'] = false;
+                    $cardEl['settings']['content_width'] = 'full';
+                    unset($cardEl['settings']['boxed_width'], $cardEl['settings']['boxed_width_tablet'], $cardEl['settings']['boxed_width_mobile']);
+                }
+                $settings['_f2e_loop_template'] = [
+                    'title' => (string) ($node['content']['name'] ?? 'Loop') . ' — Item Template',
+                    'source' => $isWoo ? 'product' : 'post',
+                    'sourceNodeId' => (string) ($node['sourceNodeId'] ?? $node['id'] ?? ''),
+                    'elements' => [$cardEl],
+                ];
+            }
+        }
+        return $this->wrapElement('widget', $widget, $settings, [], []);
+    }
+
+    /** @param array<string,mixed> $node @return array<string,mixed> */
+    private function buildVideo(array $node): array
+    {
+        $settings = [
+            'video_type' => 'youtube',
+            'youtube_url' => (string) ($node['link'] ?? 'https://www.youtube.com/watch?v=XHOmBV4js_E'),
+        ];
+        $sha = (string) ($node['image']['sha256'] ?? $node['raster']['sha256'] ?? '');
+        $fallback = (string) ($node['image']['dataUri'] ?? $node['raster']['dataUri'] ?? '');
+        if ($sha !== '' || $fallback !== '') {
+            $media = $this->resolveMedia($sha, $fallback);
+            if ($media['id'] > 0 || $media['url'] !== '') {
+                $settings['show_image_overlay'] = 'yes';
+                $settings['image_overlay'] = $media;
+            }
+        }
+        return $this->wrapElement('widget', 'video', $settings, [], []);
+    }
+
+    /** @param array<string,mixed> $node @return array<string,mixed> */
+    private function buildGoogleMaps(array $node): array
+    {
+        return $this->wrapElement('widget', 'google_maps', [
+            'address' => (string) ($node['content']['name'] ?? 'Hanoi, Vietnam'),
+            'zoom' => ['unit' => 'px', 'size' => 14, 'sizes' => []],
+            'height' => ['unit' => 'px', 'size' => max(200, (int) ($node['layout']['height'] ?? 360)), 'sizes' => []],
         ], [], []);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildProgress(array $node, array $nodes): array
+    {
+        $texts = array_map(static fn (array $n): string => (string) ($n['text']['characters'] ?? ''), $this->collectSubtreeTexts($node, $nodes));
+        return $this->wrapElement('widget', 'progress', [
+            'title' => $texts[0] ?? (string) ($node['content']['name'] ?? 'Skill'),
+            'percent' => ['unit' => '%', 'size' => 85, 'sizes' => []],
+        ], [], []);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildAlert(array $node, array $nodes): array
+    {
+        $texts = array_map(static fn (array $n): string => (string) ($n['text']['characters'] ?? ''), $this->collectSubtreeTexts($node, $nodes));
+        return $this->wrapElement('widget', 'alert', [
+            'alert_title' => $texts[0] ?? (string) ($node['content']['name'] ?? 'Notice'),
+            'alert_description' => $texts[1] ?? '',
+        ], [], []);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildProSearchForm(array $node, array $nodes): array
+    {
+        $texts = array_map(static fn (array $n): string => (string) ($n['text']['characters'] ?? ''), $this->collectSubtreeTexts($node, $nodes));
+        return $this->wrapElement('widget', 'search-form', [
+            'skin' => 'classic',
+            'placeholder' => $texts[0] ?? 'Search...',
+            'button_text' => $texts[1] ?? 'Search',
+        ], [], []);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildProLogin(array $node, array $nodes): array
+    {
+        return $this->wrapElement('widget', 'login', [
+            'show_labels' => 'yes',
+            'custom_labels' => 'yes',
+            'user_label' => 'Username or Email Address',
+            'password_label' => 'Password',
+            'button_text' => (string) ($node['content']['submitLabel'] ?? 'Log In'),
+        ], [], []);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildProMegaMenu(array $node, array $nodes): array
+    {
+        $items = (array) ($node['content']['menuItems'] ?? []);
+        if ($items === []) {
+            foreach ($this->collectSubtreeTexts($node, $nodes) as $t) {
+                $items[] = ['name' => (string) ($t['text']['characters'] ?? ''), 'link' => '#'];
+            }
+        }
+        $menuItems = [];
+        foreach ($items as $it) {
+            $menuItems[] = [
+                '_id' => $this->nextId(),
+                'item_title' => is_array($it) ? (string) ($it['name'] ?? 'Item') : (string) $it,
+                'item_link' => ['url' => is_array($it) ? (string) ($it['link'] ?? '#') : '#'],
+                'item_dropdown_content' => 'no',
+            ];
+        }
+        return $this->wrapElement('widget', 'mega-menu', ['menu_items' => $menuItems], [], []);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildProGallery(array $node, array $nodes): array
+    {
+        $imgs = [];
+        foreach ($this->collectSubtreeImages($node, $nodes) as $img) {
+            $m = $this->resolveMedia((string) ($img['sha256'] ?? ''), (string) ($img['dataUri'] ?? ''));
+            if ($m['id'] > 0 || $m['url'] !== '') {
+                $imgs[] = $m;
+            }
+        }
+        return $this->wrapElement('widget', 'gallery', [
+            'gallery' => $imgs,
+            'gallery_layout' => 'grid',
+            'columns' => max(1, min(6, (int) ($node['layout']['columns'] ?? 3))),
+        ], [], []);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildProNestedCarousel(array $node, array $nodes): array
+    {
+        $carouselItems = [];
+        $elements = [];
+        foreach ((array) ($node['children'] ?? []) as $idx => $cid) {
+            $child = $nodes[(string) $cid] ?? null;
+            if (!is_array($child)) continue;
+            $carouselItems[] = [
+                '_id' => $this->nextId(),
+                'slide_title' => (string) ($child['content']['name'] ?? ('Slide #' . ($idx + 1))),
+            ];
+            $panel = $this->buildNode((string) $cid, $nodes, false, $node);
+            if ($panel !== null) {
+                $panel['elType'] = 'container';
+                $panel['isInner'] = true;
+                $elements[] = $panel;
+            }
+        }
+        return $this->wrapElement('widget', 'nested-carousel', ['carousel_items' => $carouselItems], [], $elements);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildProTestimonialCarousel(array $node, array $nodes, string $widget): array
+    {
+        $slides = [];
+        foreach ((array) ($node['content']['slides'] ?? []) as $idx => $sl) {
+            $texts = array_values(array_filter(array_map(static fn ($t) => is_array($t) ? (string) ($t['characters'] ?? '') : (string) $t, (array) ($sl['texts'] ?? []))));
+            $entry = [
+                '_id' => $this->nextId(),
+                'content' => $texts[0] ?? 'Great experience.',
+                'name' => $texts[1] ?? (string) ($sl['name'] ?? ('Client ' . ($idx + 1))),
+                'title' => $texts[2] ?? 'Customer',
+                'image' => is_array($sl['image'] ?? null) ? $this->resolveMedia((string) ($sl['image']['sha256'] ?? ''), (string) ($sl['image']['dataUri'] ?? '')) : ['id' => 0, 'url' => ''],
+            ];
+            if ($widget === 'reviews') {
+                $entry['rating'] = 5;
+            }
+            $slides[] = $entry;
+        }
+        return $this->wrapElement('widget', $widget, ['slides' => $slides, 'slides_per_view' => '3'], [], []);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildProHotspot(array $node, array $nodes): array
+    {
+        $sha = (string) ($node['image']['sha256'] ?? $node['raster']['sha256'] ?? '');
+        $fallback = (string) ($node['image']['dataUri'] ?? $node['raster']['dataUri'] ?? '');
+        $media = $this->resolveMedia($sha, $fallback);
+        $hotspots = [];
+        foreach ((array) ($node['content']['hotspots'] ?? []) as $hp) {
+            $hotspots[] = [
+                '_id' => $this->nextId(),
+                'hotspot_label' => (string) ($hp['label'] ?? 'Hotspot'),
+                'hotspot_offset_x' => ['unit' => '%', 'size' => (int) ($hp['xPct'] ?? 50), 'sizes' => []],
+                'hotspot_offset_y' => ['unit' => '%', 'size' => (int) ($hp['yPct'] ?? 50), 'sizes' => []],
+                'hotspot_tooltip_content' => !empty($hp['tooltip']) ? '<p>' . htmlspecialchars((string) $hp['tooltip'], ENT_QUOTES, 'UTF-8') . '</p>' : '',
+            ];
+        }
+        return $this->wrapElement('widget', 'hotspot', ['image' => $media, 'hotspot' => $hotspots], [], []);
+    }
+
+    /** @param array<string,mixed> $node @param array<string,mixed> $nodes @return array<string,mixed> */
+    private function buildGenericProWidget(array $node, array $nodes, string $widget): array
+    {
+        $texts = array_map(static fn (array $n): string => (string) ($n['text']['characters'] ?? ''), $this->collectSubtreeTexts($node, $nodes));
+        $settings = [];
+        if ($widget === 'author-box') {
+            $settings['source'] = 'custom';
+            $settings['author_name'] = $texts[0] ?? (string) ($node['content']['name'] ?? 'Author');
+            $settings['author_bio'] = $texts[1] ?? '';
+            $sha = (string) ($node['image']['sha256'] ?? $node['raster']['sha256'] ?? '');
+            $fallback = (string) ($node['image']['dataUri'] ?? $node['raster']['dataUri'] ?? '');
+            $settings['author_avatar'] = $this->resolveMedia($sha, $fallback);
+        } elseif ($widget === 'table-of-contents') {
+            $settings['title'] = $texts[0] ?? (string) ($node['content']['name'] ?? 'Table of Contents');
+        } elseif ($widget === 'lottie') {
+            $settings['source'] = 'external_url';
+            $settings['source_external_url'] = ['url' => (string) ($node['link'] ?? 'https://assets3.lottiefiles.com/packages/lf20_UJNc2t.json')];
+        } elseif ($widget === 'blockquote') {
+            $settings['blockquote_content'] = $texts[0] ?? '';
+            $settings['author_name'] = $texts[1] ?? '';
+        } elseif ($widget === 'animated-headline') {
+            $settings['before_text'] = $texts[0] ?? '';
+            $settings['highlighted_text'] = $texts[1] ?? '';
+        }
+        return $this->wrapElement('widget', $widget, $settings, [], []);
     }
 
     // ── Helpers ──

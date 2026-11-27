@@ -405,14 +405,30 @@ final class RestController
             $elements = $this->globalStyles->bindGlobalsToElements($elements);
         }
 
+        // 4B. Auto-create/re-sync Elementor Loop Item templates for loop-grid & loop-carousel widgets
+        $elements = $this->materializeLoopTemplates($elements, $elVersion, $attachmentMap, $nodeLookup, $assetErrors, $assetLookupById);
+
+        $targetType = (string) ($options['targetType'] ?? $payload['targetType'] ?? 'page');
+        $templateType = (string) ($options['templateType'] ?? $payload['templateType'] ?? 'page');
+        $targetPostId = (int) ($options['targetPostId'] ?? $payload['targetPostId'] ?? 0);
+        $loopSourceNodeId = trim((string) ($options['loopSourceNodeId'] ?? $payload['loopSourceNodeId'] ?? ''));
+        if ($targetType === 'elementor_library' && $templateType === 'loop-item' && $targetPostId === 0 && $loopSourceNodeId !== '') {
+            $existingLoopId = $this->writer->findExistingLoopTemplateId($loopSourceNodeId);
+            if ($existingLoopId > 0) {
+                $targetPostId = $existingLoopId;
+            }
+        }
+
         $saveResult = $this->writer->saveOrSync($elements, [
             'title' => $title,
-            'targetType' => $options['targetType'] ?? $payload['targetType'] ?? 'page',
-            'templateType' => $options['templateType'] ?? $payload['templateType'] ?? 'page',
-            'targetPostId' => (int) ($options['targetPostId'] ?? $payload['targetPostId'] ?? 0),
+            'targetType' => $targetType,
+            'templateType' => $templateType,
+            'targetPostId' => $targetPostId,
             'postStatus' => $options['postStatus'] ?? $payload['postStatus'] ?? 'draft',
             'pageLayout' => $options['pageLayout'] ?? $payload['pageLayout'] ?? 'elementor_canvas',
             'importMode' => $options['importMode'] ?? $payload['importMode'] ?? 'resync',
+            'loopSource' => $options['loopSource'] ?? $payload['loopSource'] ?? 'post',
+            'loopSourceNodeId' => $loopSourceNodeId,
         ]);
 
         if ((function_exists('is_wp_error') && is_wp_error($saveResult)) || $saveResult instanceof \WP_Error) {
@@ -421,6 +437,72 @@ final class RestController
 
         $saveResult['assetErrors'] = $assetErrors;
         return $saveResult;
+    }
+
+    /**
+     * Materializes `_f2e_loop_template` embedded in `loop-grid` / `loop-carousel` widgets
+     * into real `elementor_library` (`loop-item`) posts and links `settings.template_id`.
+     *
+     * @param list<array<string,mixed>> $elements
+     * @param array<string,array{id:int,url:string}> $attachmentMap
+     * @param array<string,array<string,mixed>> $nodeLookup
+     * @param list<array<string,mixed>> $assetErrors
+     * @param array<string,array{id:int,url:string}> $assetLookupById
+     * @return list<array<string,mixed>>
+     */
+    private function materializeLoopTemplates(
+        array $elements,
+        string $elVersion,
+        array $attachmentMap,
+        array $nodeLookup,
+        array &$assetErrors,
+        array $assetLookupById
+    ): array {
+        foreach ($elements as &$el) {
+            if (!is_array($el)) {
+                continue;
+            }
+            $wType = (string) ($el['widgetType'] ?? '');
+            if (
+                ($wType === 'loop-grid' || $wType === 'loop-carousel')
+                && is_array($el['settings']['_f2e_loop_template'] ?? null)
+            ) {
+                $tpl = $el['settings']['_f2e_loop_template'];
+                $tplElements = is_array($tpl['elements'] ?? null) ? $tpl['elements'] : [];
+                if ($tplElements !== []) {
+                    $tplTitle = (string) ($tpl['title'] ?? 'F2E Loop Item');
+                    $tplSource = (string) ($tpl['source'] ?? 'post');
+                    $tplSourceNodeId = trim((string) ($tpl['sourceNodeId'] ?? ($el['settings']['_f2e_node_id'] ?? '')));
+
+                    $tplElements = $this->hydrateCompiledElementAssets($tplElements, $tplTitle, $attachmentMap, $nodeLookup, $assetErrors, $assetLookupById);
+                    $tplElements = $this->sanitizeCompiledElementHtml($tplElements);
+                    if ($elVersion !== 'v4') {
+                        $tplElements = $this->globalStyles->bindGlobalsToElements($tplElements);
+                    }
+
+                    $existingId = $tplSourceNodeId !== '' ? $this->writer->findExistingLoopTemplateId($tplSourceNodeId) : 0;
+                    $saved = $this->writer->saveOrSync($tplElements, [
+                        'title' => $tplTitle,
+                        'targetType' => 'elementor_library',
+                        'templateType' => 'loop-item',
+                        'targetPostId' => $existingId,
+                        'postStatus' => 'publish',
+                        'importMode' => $existingId > 0 ? 'replace' : 'resync',
+                        'loopSource' => $tplSource,
+                        'loopSourceNodeId' => $tplSourceNodeId,
+                    ]);
+                    if (is_array($saved) && !empty($saved['postId'])) {
+                        $el['settings']['template_id'] = (string) $saved['postId'];
+                    }
+                }
+                unset($el['settings']['_f2e_loop_template']);
+            }
+            if (!empty($el['elements']) && is_array($el['elements'])) {
+                $el['elements'] = $this->materializeLoopTemplates($el['elements'], $elVersion, $attachmentMap, $nodeLookup, $assetErrors, $assetLookupById);
+            }
+        }
+        unset($el);
+        return $elements;
     }
 
     public function hydrateElements(array $elements, string $title = 'Figma Asset'): array

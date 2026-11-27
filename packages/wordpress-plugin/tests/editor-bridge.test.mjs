@@ -186,3 +186,39 @@ test('paste listener registers in capture phase and calls stopImmediatePropagati
   assert.equal(stoppedImmediate, true);
   assert.equal(createdElements.length, 1);
 });
+
+test('hydrateElementAssets materializes _f2e_loop_template via /import and sets template_id', async () => {
+  const calls = [];
+  const { bridge } = createSandbox({
+    fetchImpl: async (url, opts) => {
+      calls.push({ url, body: JSON.parse(opts.body) });
+      if (url.endsWith('/import')) {
+        return { ok: true, async json() { return { success: true, data: { postId: 777 } }; } };
+      }
+      return { ok: true, async json() { return { success: true, data: { id: 101, url: 'https://example.test/img.png' } }; } };
+    },
+  });
+
+  const loopEl = {
+    id: 'lg1',
+    elType: 'widget',
+    widgetType: 'loop-grid',
+    settings: {
+      template_id: '',
+      _f2e_loop_template: {
+        title: 'Blog Grid — Item Template',
+        source: 'post',
+        sourceNodeId: '99:1',
+        elements: [{ id: 'c1', elType: 'container', settings: {}, elements: [] }],
+      },
+    },
+    elements: [],
+  };
+
+  const out = await bridge.hydrateElementAssets(loopEl);
+  assert.equal(out.settings.template_id, '777');
+  assert.equal(out.settings._f2e_loop_template, undefined);
+  assert.equal(calls.length, 1);
+  assert.equal(calls[0].body.templateType, 'loop-item');
+  assert.equal(calls[0].body.loopSource, 'post');
+});

@@ -113,6 +113,14 @@ final class DocumentWriter
                 if (function_exists('wp_set_object_terms')) {
                     wp_set_object_terms($postId, $templateType, 'elementor_library_type');
                 }
+                if ($templateType === 'loop-item') {
+                    $loopSource = (string) ($options['loopSource'] ?? 'post');
+                    update_post_meta($postId, '_elementor_source', $loopSource !== '' ? $loopSource : 'post');
+                    $loopSourceNodeId = trim((string) ($options['loopSourceNodeId'] ?? ''));
+                    if ($loopSourceNodeId !== '') {
+                        update_post_meta($postId, '_f2e_loop_source_node_id', $loopSourceNodeId);
+                    }
+                }
             } elseif ($pageLayout !== '') {
                 update_post_meta($postId, '_wp_page_template', $pageLayout);
                 $pageSettings = function_exists('get_post_meta') ? get_post_meta($postId, '_elementor_page_settings', true) : [];
@@ -136,6 +144,30 @@ final class DocumentWriter
             'viewUrl' => $viewUrl,
             'elementCount' => count($finalTree),
         ];
+    }
+
+    public function findExistingLoopTemplateId(string $sourceNodeId): int
+    {
+        $sourceNodeId = trim($sourceNodeId);
+        if ($sourceNodeId === '' || !function_exists('get_posts')) {
+            return 0;
+        }
+        $found = get_posts([
+            'post_type' => 'elementor_library',
+            'post_status' => ['publish', 'draft', 'private'],
+            'numberposts' => 1,
+            'fields' => 'ids',
+            'meta_query' => [
+                'relation' => 'AND',
+                ['key' => '_elementor_template_type', 'value' => 'loop-item'],
+                ['key' => '_f2e_loop_source_node_id', 'value' => $sourceNodeId],
+            ],
+        ]);
+        if (is_array($found) && !empty($found)) {
+            $first = $found[0];
+            return is_object($first) ? (int) ($first->ID ?? 0) : (int) $first;
+        }
+        return 0;
     }
 
     /**

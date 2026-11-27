@@ -1190,6 +1190,50 @@ assertTrue(
     'TranspilerV3: Root container with edge-to-edge content is full-width'
 );
 
+// RestController: Auto-create & link Loop Item template for loop-grid / loop-carousel
+$loopRest = new RestController(new TokenAuth(), new AssetStore(), new GlobalStyles(), new DocumentWriter());
+$loopImport = $loopRest->processBundleOrTemplateArray([
+    'title' => 'Page With Loop Grid',
+    'targetType' => 'page',
+    'content' => [
+        [
+            'id' => 'lg-el-1',
+            'elType' => 'widget',
+            'widgetType' => 'loop-grid',
+            'settings' => [
+                'template_id' => '',
+                'columns' => '3',
+                '_f2e_loop_template' => [
+                    'title' => 'Blog Grid — Item Template',
+                    'source' => 'post',
+                    'sourceNodeId' => '99:1',
+                    'elements' => [
+                        [
+                            'id' => 'card-el-1',
+                            'elType' => 'container',
+                            'isInner' => false,
+                            'settings' => ['content_width' => 'full'],
+                            'elements' => [],
+                        ],
+                    ],
+                ],
+            ],
+            'elements' => [],
+        ],
+    ],
+]);
+$savedPageId = (int) ($loopImport['postId'] ?? 0);
+$savedPageJson = (string) ($GLOBALS['f2e_test_state']['post_meta'][$savedPageId]['_elementor_data'] ?? '');
+$savedPageEls = json_decode($savedPageJson, true);
+$linkedTplId = (int) ($savedPageEls[0]['settings']['template_id'] ?? 0);
+assertTrue(
+    $linkedTplId > 0
+    && !isset($savedPageEls[0]['settings']['_f2e_loop_template'])
+    && ($GLOBALS['f2e_test_state']['post_meta'][$linkedTplId]['_elementor_template_type'] ?? '') === 'loop-item'
+    && ($GLOBALS['f2e_test_state']['post_meta'][$linkedTplId]['_elementor_source'] ?? '') === 'post',
+    'RestController: Auto-creates loop-item template, sets _elementor_source=post, links template_id, and strips _f2e_loop_template'
+);
+
 foreach ($GLOBALS['f2e_test_state']['files_created'] as $tmpFile) {
     if (is_file($tmpFile)) {
         @unlink($tmpFile);

@@ -244,6 +244,11 @@ export async function extractDesignSelection(selection, options = {}) {
       }
     }
 
+    if (choice.widget === 'button' || choice.widget === 'container') {
+      const hStyle = extractHoverStyleFromVariant(node);
+      if (hStyle) entry.hoverStyle = hStyle;
+    }
+
     if (choice.widget === 'nav-menu' || choice.widget === 'mega-menu') {
       const extractedList = entry.extractedTexts || [];
       const menuItems = extractedList
@@ -395,6 +400,65 @@ export async function extractDesignSelection(selection, options = {}) {
             });
           }
         });
+      }
+    }
+
+    if (choice.widget === 'video' || choice.widget === 'author-box') {
+      const thumbNode = hasImageFill(node)
+        ? node
+        : collectVisualImageDescendants(node, { includeVectors: false })[0];
+      if (thumbNode && typeof thumbNode.exportAsync === 'function') {
+        pendingExports.push({
+          kind: 'raster',
+          node: thumbNode,
+          id,
+          onResult: (ref) => {
+            entry.image = ref;
+            entry.raster = ref;
+          },
+        });
+      }
+    }
+
+    if (choice.widget === 'hotspot') {
+      const bgImgNode = hasImageFill(node)
+        ? node
+        : collectVisualImageDescendants(node, { includeVectors: false })[0];
+      if (bgImgNode && typeof bgImgNode.exportAsync === 'function') {
+        pendingExports.push({
+          kind: 'raster',
+          node: bgImgNode,
+          id,
+          onResult: (ref) => {
+            entry.image = ref;
+            entry.raster = ref;
+          },
+        });
+      }
+      const nodeX = safeNum(node.x, 0);
+      const nodeY = safeNum(node.y, 0);
+      const nodeW = Math.max(1, safeNum(node.width, 1));
+      const nodeH = Math.max(1, safeNum(node.height, 1));
+      const hotspots = [];
+      for (const child of rawKids) {
+        if (!child || child === bgImgNode) continue;
+        const cName = safeStr(child.name, '');
+        const cTexts = collectTextDescendants(child).map((t) => safeStr(t.characters).trim()).filter(Boolean);
+        const isPin = /pin|hotspot|dot|point|marker|badge/i.test(cName) || (safeNum(child.width, 0) <= 64 && safeNum(child.height, 0) <= 64);
+        if (!isPin && cTexts.length === 0) continue;
+        const cx = safeNum(child.x, nodeX) - nodeX + safeNum(child.width, 0) / 2;
+        const cy = safeNum(child.y, nodeY) - nodeY + safeNum(child.height, 0) / 2;
+        hotspots.push({
+          id: child.id,
+          label: cTexts[0] || cName || `Pin ${hotspots.length + 1}`,
+          tooltip: cTexts.slice(1).join('\n') || '',
+          xPct: Math.max(0, Math.min(100, Math.round((cx / nodeW) * 100))),
+          yPct: Math.max(0, Math.min(100, Math.round((cy / nodeH) * 100))),
+          color: extractSolidColor(child.fills) || null,
+        });
+      }
+      if (hotspots.length > 0) {
+        entry.content.hotspots = hotspots;
       }
     }
 
@@ -1422,4 +1486,31 @@ export function findFirstVisualDescendant(node, depth = 0) {
   }
   return null;
 }
+
+function extractHoverStyleFromVariant(node) {
+  if (!node) return null;
+  let hoverVariant = null;
+  try {
+    const parentSet = (node.type === 'INSTANCE' && node.mainComponent && node.mainComponent.parent && node.mainComponent.parent.type === 'COMPONENT_SET')
+      ? node.mainComponent.parent
+      : (node.parent && node.parent.type === 'COMPONENT_SET' ? node.parent : null);
+    if (parentSet && Array.isArray(parentSet.children)) {
+      hoverVariant = parentSet.children.find((v) => v && v !== node && /\bhover\b/i.test(safeStr(v.name))) || null;
+    }
+  } catch (e) { }
+  if (!hoverVariant && Array.isArray(node.children)) {
+    hoverVariant = node.children.find((c) => c && c.visible === false && /\bhover\b/i.test(safeStr(c.name))) || null;
+  }
+  if (!hoverVariant) return null;
+
+  const hStyle = extractStyle(hoverVariant);
+  const hTexts = collectTextDescendants(hoverVariant);
+  const hTextColor = hTexts[0] ? extractSolidColor(hTexts[0].fills) : null;
+  const out = {};
+  if (hStyle.background) out.background = hStyle.background;
+  if (hStyle.borderColor) out.borderColor = hStyle.borderColor;
+  if (hTextColor) out.color = hTextColor;
+  return Object.keys(out).length > 0 ? out : null;
+}
+
 

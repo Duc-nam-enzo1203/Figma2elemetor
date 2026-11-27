@@ -3537,6 +3537,149 @@ test('Container Standards: FIXED sidebar stays px beside FILL column, 2-col row 
   assert.equal(standaloneCard.settings.width.size, 420, 'Standalone HUG root < 960px must preserve 420px width');
 });
 
+test('Group A & B Dedicated Builders + Hover State: search-form, login, carousels, gallery, mega-menu, hotspot, video overlay, author-box, toc & hoverStyle', () => {
+  const doc = {
+    title: 'Pro Widgets & Hover Audit',
+    roots: ['root-sec'],
+    nodes: {
+      'root-sec': {
+        id: 'root-sec',
+        widget: 'container',
+        layout: { width: 1200, direction: 'column', gap: 20 },
+        hoverStyle: { background: '#F8FAFC', borderColor: '#16A34A' },
+        children: ['sf', 'lg', 'tc', 'rv', 'nc', 'mc', 'gl', 'mm', 'hp', 'vid', 'ab', 'toc', 'btn-hv'],
+      },
+      'sf': { id: 'sf', widget: 'search-form', layout: { height: 48 }, style: { background: '#FFFFFF' }, content: { name: 'Search' }, children: ['sf-ph'] },
+      'sf-ph': { id: 'sf-ph', widget: 'text-editor', text: { characters: 'Tìm kiếm sản phẩm...', color: '#64748B' } },
+      'lg': { id: 'lg', widget: 'login', content: { submitLabel: 'Đăng nhập' }, children: [] },
+      'tc': {
+        id: 'tc',
+        widget: 'testimonial-carousel',
+        content: {
+          slides: [
+            { id: 't1', name: 'An', texts: [{ characters: 'Dịch vụ rất tuyệt vời và nhanh chóng!' }, { characters: 'Nguyễn An' }, { characters: 'CEO' }] },
+            { id: 't2', name: 'Bình', texts: [{ characters: 'Sản phẩm chất lượng cao.' }, { characters: 'Trần Bình' }, { characters: 'CTO' }] },
+          ],
+        },
+        children: [],
+      },
+      'rv': {
+        id: 'rv',
+        widget: 'reviews',
+        content: { slides: [{ id: 'r1', name: 'Linh', texts: [{ characters: '5 sao cho đội ngũ hỗ trợ.' }, { characters: 'Linh' }] }] },
+        children: [],
+      },
+      'nc': { id: 'nc', widget: 'nested-carousel', children: ['nc-s1'] },
+      'nc-s1': { id: 'nc-s1', widget: 'container', content: { name: 'Slide Card' }, layout: { direction: 'column' }, children: ['nc-h1'] },
+      'nc-h1': { id: 'nc-h1', widget: 'heading', text: { characters: 'Inside Slide' } },
+      'mc': { id: 'mc', widget: 'media-carousel', children: ['mc-i1'] },
+      'mc-i1': { id: 'mc-i1', widget: 'image', image: { sha256: 'mc1', dataUri: 'data:image/png;base64,AA==' } },
+      'gl': { id: 'gl', widget: 'gallery', layout: { columns: 4, gap: 16 }, children: ['gl-i1'] },
+      'gl-i1': { id: 'gl-i1', widget: 'image', image: { sha256: 'gl1', dataUri: 'data:image/png;base64,BB==' } },
+      'mm': { id: 'mm', widget: 'mega-menu', content: { menuItems: [{ name: 'Sản phẩm', link: '/products' }] }, children: [] },
+      'hp': {
+        id: 'hp',
+        widget: 'hotspot',
+        image: { sha256: 'hp1', dataUri: 'data:image/png;base64,CC==' },
+        content: { hotspots: [{ id: 'p1', label: 'Điểm A', tooltip: 'Chi tiết', xPct: 35, yPct: 60, color: '#EF4444' }] },
+        children: [],
+      },
+      'vid': { id: 'vid', widget: 'video', image: { sha256: 'vid1', dataUri: 'data:image/png;base64,DD==' }, link: 'https://youtu.be/test' },
+      'ab': { id: 'ab', widget: 'author-box', image: { sha256: 'ab1', dataUri: 'data:image/png;base64,EE==' }, children: ['ab-n', 'ab-b'] },
+      'ab-n': { id: 'ab-n', widget: 'heading', text: { characters: 'Minh Khôi', color: '#0F172A' } },
+      'ab-b': { id: 'ab-b', widget: 'text-editor', text: { characters: 'Tech Lead', color: '#475569' } },
+      'toc': { id: 'toc', widget: 'table-of-contents', style: { background: '#F1F5F9' }, children: ['toc-t'] },
+      'toc-t': { id: 'toc-t', widget: 'heading', text: { characters: 'Mục lục bài viết', color: '#1E293B' } },
+      'btn-hv': {
+        id: 'btn-hv',
+        widget: 'button',
+        content: { characters: 'Hover Me' },
+        style: { background: '#16A34A' },
+        text: { characters: 'Hover Me', color: '#FFFFFF' },
+        hoverStyle: { background: '#15803D', color: '#F0FDF4', borderColor: '#166534' },
+      },
+    },
+  };
+
+  const v3 = compileElementorV3(doc);
+  const root = v3.content[0];
+  assert.equal(root.settings.background_hover_color, '#F8FAFC');
+  assert.equal(root.settings.border_hover_color, '#16A34A');
+
+  const byType = new Map(root.elements.map((e) => [e.widgetType, e]));
+  assert.equal(byType.get('search-form').settings.placeholder, 'Tìm kiếm sản phẩm...');
+  assert.equal(byType.get('login').settings.button_text, 'Đăng nhập');
+  assert.equal(byType.get('testimonial-carousel').settings.slides.length, 2);
+  assert.equal(byType.get('reviews').settings.slides[0].rating, 5);
+  assert.equal(byType.get('nested-carousel').settings.carousel_items.length, 1);
+  assert.equal(byType.get('nested-carousel').elements[0].elType, 'container');
+  assert.equal(byType.get('media-carousel').settings.slides.length, 1);
+  assert.equal(byType.get('gallery').settings.columns, 4);
+  assert.equal(byType.get('mega-menu').settings.menu_items[0].item_title, 'Sản phẩm');
+  assert.equal(byType.get('hotspot').settings.hotspot[0].hotspot_offset_x.size, 35);
+  assert.equal(byType.get('video').settings.show_image_overlay, 'yes');
+  assert.equal(byType.get('author-box').settings.author_name, 'Minh Khôi');
+  assert.equal(byType.get('table-of-contents').settings.title, 'Mục lục bài viết');
+  assert.equal(byType.get('button').settings.button_background_hover_color, '#15803D');
+  assert.equal(byType.get('button').settings.hover_color, '#F0FDF4');
+});
+
+test('Loop Grid & Loop Carousel auto-extract first child Card into _f2e_loop_template with dynamic post widgets', () => {
+  const doc = {
+    title: 'Loop Template Test',
+    roots: ['lg-root', 'lc-root'],
+    nodes: {
+      'lg-root': {
+        id: 'lg-root',
+        sourceNodeId: '99:1',
+        widget: 'loop-grid',
+        content: { name: 'Blog Grid' },
+        layout: { width: 1200, columns: 3, gap: 24 },
+        children: ['card-1', 'card-2'],
+      },
+      'card-1': {
+        id: 'card-1',
+        widget: 'container',
+        content: { name: 'Post Card' },
+        layout: { width: 380, direction: 'column', gap: 12, padding: { top: 16, right: 16, bottom: 16, left: 16 } },
+        style: { background: '#FFFFFF', radius: { top: 12, right: 12, bottom: 12, left: 12 } },
+        children: ['c-img', 'c-title', 'c-desc'],
+      },
+      'c-img': { id: 'c-img', widget: 'image', image: { sha256: 'pimg', dataUri: 'data:image/png;base64,AA==' } },
+      'c-title': { id: 'c-title', widget: 'heading', text: { characters: 'Article Title', fontSize: 20, color: '#0F172A' } },
+      'c-desc': { id: 'c-desc', widget: 'text-editor', text: { characters: 'Short excerpt...', fontSize: 14, color: '#64748B' } },
+      'card-2': { id: 'card-2', widget: 'container', content: { name: 'Post Card 2' }, children: [] },
+      'lc-root': {
+        id: 'lc-root',
+        sourceNodeId: '99:2',
+        widget: 'loop-carousel',
+        content: { name: 'Product Slider' },
+        layout: { width: 1200, columns: 3, gap: 20 },
+        children: ['card-1'],
+      },
+    },
+  };
+
+  const v3 = compileElementorV3(doc);
+  const grid = v3.content[0];
+  assert.equal(grid.widgetType, 'loop-grid');
+  assert.equal(grid.elements.length, 0);
+  assert.ok(grid.settings._f2e_loop_template, 'loop-grid must embed _f2e_loop_template');
+  assert.equal(grid.settings._f2e_loop_template.source, 'post');
+  const card = grid.settings._f2e_loop_template.elements[0];
+  assert.equal(card.elType, 'container');
+  assert.equal(card.settings.content_width, 'full');
+  assert.equal(card.elements[0].widgetType, 'theme-post-featured-image');
+  assert.equal(card.elements[1].widgetType, 'theme-post-title');
+  assert.equal(card.elements[2].widgetType, 'theme-post-excerpt');
+
+  const carousel = v3.content[1];
+  assert.equal(carousel.widgetType, 'loop-carousel');
+  assert.equal(carousel.settings.slides_to_show, '3');
+  assert.equal(carousel.settings.image_spacing_custom.size, 20);
+  assert.ok(carousel.settings._f2e_loop_template, 'loop-carousel must embed _f2e_loop_template');
+});
+
 
 
 

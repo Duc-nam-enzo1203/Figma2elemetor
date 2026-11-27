@@ -547,23 +547,343 @@ export function buildProSlides(node, nodes, allocId, resolveMedia) {
   };
 }
 
-export function buildProLoopGrid(node, allocId, wType = 'loop-grid') {
-  const cols = Number(node.layout && node.layout.columns) || 3;
+function mapLoopCardDynamicWidgets(el, state = { img: false, title: false, excerpt: false }) {
+  if (!el || typeof el !== 'object') return el;
+  if (el.elType === 'widget') {
+    if (!state.img && el.widgetType === 'image') {
+      state.img = true;
+      el.widgetType = 'theme-post-featured-image';
+    } else if (!state.title && el.widgetType === 'heading') {
+      state.title = true;
+      el.widgetType = 'theme-post-title';
+    } else if (!state.excerpt && el.widgetType === 'text-editor') {
+      state.excerpt = true;
+      el.widgetType = 'theme-post-excerpt';
+    }
+  }
+  if (Array.isArray(el.elements)) {
+    for (const child of el.elements) {
+      mapLoopCardDynamicWidgets(child, state);
+    }
+  }
+  return el;
+}
+
+export function buildProLoopGrid(node, nodes, allocId, wType = 'loop-grid', buildElement = null) {
+  const childIds = Array.isArray(node.children) ? node.children : [];
+  const cols = Number(node.layout && node.layout.columns) || (childIds.length > 0 && childIds.length <= 4 ? childIds.length : 3);
   const gapVal = Number(node.layout && node.layout.gap) || 24;
+  const isCarousel = wType === 'loop-carousel';
+  const isWoo = wType === 'woocommerce-products';
+  const settings = isCarousel
+    ? {
+        skin: isWoo ? 'product' : 'post',
+        template_id: '',
+        posts_per_page: Math.max(6, childIds.length || 6),
+        slides_to_show: String(Math.max(1, Math.min(4, cols))),
+        image_spacing_custom: { unit: 'px', size: gapVal, sizes: [] },
+      }
+    : {
+        skin: isWoo ? 'product' : 'post',
+        template_id: '',
+        posts_per_page: Math.max(6, childIds.length || 6),
+        columns: String(cols),
+        row_gap: { unit: 'px', size: gapVal, sizes: [] },
+        column_gap: { unit: 'px', size: gapVal, sizes: [] },
+      };
+
+  if ((wType === 'loop-grid' || wType === 'loop-carousel') && typeof buildElement === 'function' && childIds.length > 0) {
+    const firstCardId = childIds.find((cid) => {
+      const cn = nodes && nodes[cid];
+      if (!cn) return false;
+      const nm = String((cn.content && cn.content.name) || '').toLowerCase();
+      return !/\b(arrow|prev|next|dot|dots|pagination|indicator)\b/.test(nm);
+    }) || childIds[0];
+
+    const cardEl = firstCardId ? buildElement(firstCardId, true, null) : null;
+    if (cardEl) {
+      if (cardEl.elType === 'container' && cardEl.settings) {
+        cardEl.isInner = false;
+        cardEl.settings.content_width = 'full';
+        delete cardEl.settings.boxed_width;
+        delete cardEl.settings.boxed_width_tablet;
+        delete cardEl.settings.boxed_width_mobile;
+      }
+      mapLoopCardDynamicWidgets(cardEl);
+      settings._f2e_loop_template = {
+        title: `${(node.content && node.content.name) || 'Loop'} — Item Template`,
+        source: isWoo ? 'product' : 'post',
+        sourceNodeId: node.sourceNodeId || node.id,
+        elements: [cardEl],
+      };
+    }
+  }
+
   return {
     id: allocId(node.id),
     elType: 'widget',
     widgetType: wType,
     isInner: false,
-    settings: {
-      template_id: '',
-      posts_per_page: 6,
-      columns: String(cols),
-      row_gap: { unit: 'px', size: gapVal, sizes: [] },
-      column_gap: { unit: 'px', size: gapVal, sizes: [] },
-    },
+    settings,
     elements: [],
   };
+}
+
+export function buildProSearchForm(node, nodes, allocId) {
+  const textItems = collectSubtreeTexts(node, nodes);
+  const phNode = textItems.find((t) => !/^(search|tìm|go)$/i.test((t.text.characters || '').trim())) || textItems[0] || null;
+  const btnNode = textItems.find((t) => t !== phNode) || null;
+  const st = node.style || {};
+  const settings = {
+    skin: 'classic',
+    placeholder: (phNode && phNode.text && phNode.text.characters) || 'Search...',
+    button_text: (btnNode && btnNode.text && btnNode.text.characters) || 'Search',
+  };
+  if (phNode && phNode.text) {
+    if (phNode.text.color) settings.input_text_color = phNode.text.color;
+    applyTypographySettings(settings, 'input_typography', phNode.text, node.responsive);
+  }
+  if (st.background) settings.input_background_color = st.background;
+  if (st.borderColor) settings.input_border_color = st.borderColor;
+  if (st.radius) settings.border_radius = boxValue(st.radius);
+  if (node.layout && node.layout.height) {
+    settings.size = { unit: 'px', size: Math.max(36, Math.round(Number(node.layout.height))), sizes: [] };
+  }
+  const btnChild = (node.children || []).map((cid) => nodes[cid]).find((c) => c && (c.widget === 'button' || /btn|button/i.test((c.content && c.content.name) || '')));
+  if (btnChild && btnChild.style && btnChild.style.background) {
+    settings.button_background_color = btnChild.style.background;
+  }
+  if (btnNode && btnNode.text && btnNode.text.color) {
+    settings.button_text_color = btnNode.text.color;
+  }
+  return { id: allocId(node.id), elType: 'widget', widgetType: 'search-form', isInner: false, settings, elements: [] };
+}
+
+export function buildProLogin(node, nodes, allocId) {
+  const textItems = collectSubtreeTexts(node, nodes);
+  const content = node.content || {};
+  const fields = Array.isArray(content.formFields) ? content.formFields : [];
+  const userField = fields[0] || null;
+  const passField = fields[1] || null;
+  const btnChild = (node.children || []).map((cid) => nodes[cid]).find((c) => c && c.widget === 'button');
+  const settings = {
+    show_labels: 'yes',
+    custom_labels: 'yes',
+    user_label: (userField && userField.label) || (textItems[0] && textItems[0].text.characters) || 'Username or Email Address',
+    user_placeholder: (userField && userField.placeholder) || 'Username or Email Address',
+    password_label: (passField && passField.label) || (textItems[1] && textItems[1].text.characters) || 'Password',
+    password_placeholder: (passField && passField.placeholder) || 'Password',
+    button_text: content.submitLabel || (btnChild && btnChild.content && btnChild.content.characters) || 'Log In',
+    show_lost_password: 'yes',
+    show_remember_me: 'yes',
+  };
+  if (node.layout && typeof node.layout.gap === 'number') {
+    settings.row_gap = { unit: 'px', size: Math.max(0, Math.round(node.layout.gap)), sizes: [] };
+  }
+  if (content.labelTypography) {
+    if (content.labelTypography.color) settings.label_color = content.labelTypography.color;
+    applyTypographySettings(settings, 'label_typography', content.labelTypography, node.responsive);
+  }
+  const fieldTypo = content.fieldTypography || node.text || null;
+  if (fieldTypo) {
+    if (fieldTypo.color) settings.field_text_color = fieldTypo.color;
+    applyTypographySettings(settings, 'field_typography', fieldTypo, node.responsive);
+  }
+  if (content.fieldStyle) {
+    if (content.fieldStyle.background) settings.field_background_color = content.fieldStyle.background;
+    if (content.fieldStyle.borderColor) settings.field_border_color = content.fieldStyle.borderColor;
+    if (content.fieldStyle.borderWidth) settings.field_border_width = boxValue(content.fieldStyle.borderWidth);
+    if (content.fieldStyle.radius) settings.field_border_radius = boxValue(content.fieldStyle.radius);
+  }
+  if (content.buttonTypography) {
+    if (content.buttonTypography.color) settings.button_text_color = content.buttonTypography.color;
+    applyTypographySettings(settings, 'button_typography', content.buttonTypography, node.responsive);
+  }
+  if (content.buttonStyle && content.buttonStyle.background) {
+    settings.button_background_color = content.buttonStyle.background;
+  }
+  if (content.buttonStyle && content.buttonStyle.radius) settings.button_border_radius = boxValue(content.buttonStyle.radius);
+  if (content.buttonPadding) settings.button_text_padding = boxValue(content.buttonPadding);
+  return { id: allocId(node.id), elType: 'widget', widgetType: 'login', isInner: false, settings, elements: [] };
+}
+
+export function buildProTestimonialCarousel(node, nodes, allocId, resolveMedia) {
+  const extracted = (node.content && Array.isArray(node.content.slides)) ? node.content.slides : [];
+  const slides = [];
+  if (extracted.length > 0) {
+    for (let i = 0; i < extracted.length; i += 1) {
+      const sl = extracted[i];
+      const texts = (sl.texts || []).map((t) => (typeof t === 'string' ? t : t.characters)).filter(Boolean);
+      const sorted = [...texts].sort((a, b) => b.length - a.length);
+      const media = sl.image && resolveMedia ? resolveMedia(sl.image.sha256, sl.image.dataUri) : { id: '', url: '' };
+      slides.push({
+        _id: shortId(sl.id || `${node.id}-tc-${i}`),
+        content: sorted[0] || 'Great experience working with this team.',
+        name: sorted[1] || sl.name || `Client ${i + 1}`,
+        title: sorted[2] || 'Customer',
+        image: media,
+      });
+    }
+  } else {
+    for (const cid of node.children || []) {
+      const child = nodes[cid];
+      if (!child) continue;
+      const texts = collectSubtreeTexts(child, nodes).map((t) => t.text.characters).filter(Boolean);
+      const sorted = [...texts].sort((a, b) => b.length - a.length);
+      const imgs = collectSubtreeImages(child, nodes);
+      slides.push({
+        _id: shortId(cid),
+        content: sorted[0] || 'Great experience.',
+        name: sorted[1] || (child.content && child.content.name) || 'Client',
+        title: sorted[2] || 'Customer',
+        image: imgs[0] && resolveMedia ? resolveMedia(imgs[0].sha256, imgs[0].dataUri) : { id: '', url: '' },
+      });
+    }
+  }
+  const settings = {
+    slides,
+    slides_per_view: String(Math.max(1, Math.min(4, Number(node.layout && node.layout.columns) || Math.min(3, slides.length || 1)))),
+  };
+  const firstTexts = (extracted[0] && Array.isArray(extracted[0].texts)) ? extracted[0].texts : collectSubtreeTexts(node, nodes).map((t) => t.text);
+  const longest = [...firstTexts].filter((t) => t && t.characters).sort((a, b) => b.characters.length - a.characters.length);
+  if (longest[0]) {
+    if (longest[0].color) settings.content_color = longest[0].color;
+    applyTypographySettings(settings, 'content_typography', longest[0], node.responsive);
+  }
+  if (longest[1]) {
+    if (longest[1].color) settings.name_color = longest[1].color;
+    applyTypographySettings(settings, 'name_typography', longest[1], node.responsive);
+  }
+  if (longest[2]) {
+    if (longest[2].color) settings.title_color = longest[2].color;
+    applyTypographySettings(settings, 'title_typography', longest[2], node.responsive);
+  }
+  if (node.style && node.style.background) settings.slide_background_color = node.style.background;
+  if (node.style && node.style.radius) settings.slide_border_radius = boxValue(node.style.radius);
+  return { id: allocId(node.id), elType: 'widget', widgetType: 'testimonial-carousel', isInner: false, settings, elements: [] };
+}
+
+export function buildProReviews(node, nodes, allocId, resolveMedia) {
+  const base = buildProTestimonialCarousel(node, nodes, allocId, resolveMedia);
+  base.widgetType = 'reviews';
+  base.settings.slides = (base.settings.slides || []).map((s) => ({
+    ...s,
+    rating: 5,
+    selected_social_icon: { value: 'fab fa-google', library: 'fa-brands' },
+  }));
+  base.settings.stars_color = '#F59E0B';
+  return base;
+}
+
+export function buildProNestedCarousel(node, nodes, allocId, buildElement) {
+  const carouselItems = [];
+  const elements = [];
+  for (const [idx, cid] of (node.children || []).entries()) {
+    const child = nodes[cid];
+    if (!child) continue;
+    const title = (child.content && child.content.name) || `Slide #${idx + 1}`;
+    carouselItems.push({ _id: shortId(cid), slide_title: title });
+    const panel = buildElement ? buildElement(cid, false, node) : null;
+    if (panel) {
+      panel.elType = 'container';
+      panel.isInner = true;
+      elements.push(panel);
+    }
+  }
+  const settings = { carousel_items: carouselItems };
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.image_spacing_custom = { unit: 'px', size: Math.round(node.layout.gap), sizes: [] };
+  }
+  if (node.style && node.style.radius) settings.border_radius = boxValue(node.style.radius);
+  if (node.layout && node.layout.padding && (node.layout.padding.top || node.layout.padding.right || node.layout.padding.bottom || node.layout.padding.left)) {
+    settings.content_padding = boxValue(node.layout.padding);
+  }
+  return { id: allocId(node.id), elType: 'widget', widgetType: 'nested-carousel', isInner: false, settings, elements };
+}
+
+export function buildProMediaCarousel(node, nodes, allocId, resolveMedia) {
+  const imgs = collectSubtreeImages(node, nodes)
+    .map((img) => resolveMedia(img.sha256, img.dataUri))
+    .filter((m) => m && (m.url || m.id));
+  const slides = imgs.map((media, idx) => ({
+    _id: shortId(`${node.id}-mc-${idx}`),
+    type: 'image',
+    image: media,
+  }));
+  const settings = {
+    slides,
+    skin: 'carousel',
+    slides_per_view: String(Math.max(1, Math.min(5, Number(node.layout && node.layout.columns) || Math.min(3, slides.length || 3)))),
+  };
+  if (node.layout && typeof node.layout.gap === 'number' && node.layout.gap > 0) {
+    settings.space_between = { unit: 'px', size: Math.round(node.layout.gap), sizes: [] };
+  }
+  return { id: allocId(node.id), elType: 'widget', widgetType: 'media-carousel', isInner: false, settings, elements: [] };
+}
+
+export function buildProGallery(node, nodes, allocId, resolveMedia) {
+  const imgs = collectSubtreeImages(node, nodes)
+    .map((img) => resolveMedia(img.sha256, img.dataUri))
+    .filter((m) => m && (m.url || m.id));
+  const settings = {
+    gallery: imgs,
+    gallery_layout: 'grid',
+    columns: Math.max(1, Math.min(6, Number(node.layout && node.layout.columns) || Math.min(3, imgs.length || 3))),
+  };
+  if (node.layout && typeof node.layout.gap === 'number') {
+    settings.gap = { unit: 'px', size: Math.round(node.layout.gap), sizes: [] };
+  }
+  if (node.style && node.style.radius) {
+    settings.image_border_radius = boxValue(node.style.radius);
+  }
+  return { id: allocId(node.id), elType: 'widget', widgetType: 'gallery', isInner: false, settings, elements: [] };
+}
+
+export function buildProMegaMenu(node, nodes, allocId) {
+  const rawItems = (node.content && Array.isArray(node.content.menuItems) && node.content.menuItems.length > 0)
+    ? node.content.menuItems
+    : collectSubtreeTexts(node, nodes).map((t) => ({ name: t.text.characters, link: '#' }));
+  const menuItems = (rawItems.length > 0 ? rawItems : [{ name: 'Home', link: '#' }]).map((it, idx) => ({
+    _id: shortId(`${node.id}-mm-${idx}`),
+    item_title: typeof it === 'string' ? it : (it.name || `Item ${idx + 1}`),
+    item_link: { url: (typeof it === 'object' && it.link) ? it.link : '#' },
+    item_dropdown_content: 'no',
+  }));
+  const settings = { menu_items: menuItems };
+  const textItems = collectSubtreeTexts(node, nodes);
+  const navTypo = node.text || (textItems[0] && textItems[0].text) || null;
+  if (navTypo) {
+    if (navTypo.color) settings.menu_item_color_normal = navTypo.color;
+    applyTypographySettings(settings, 'menu_item_typography', navTypo, node.responsive);
+  }
+  return { id: allocId(node.id), elType: 'widget', widgetType: 'mega-menu', isInner: false, settings, elements: [] };
+}
+
+export function buildProHotspot(node, nodes, allocId, resolveMedia) {
+  const sha = (node.image && node.image.sha256) || (node.raster && node.raster.sha256) || '';
+  const fallback = (node.image && node.image.dataUri) || (node.raster && node.raster.dataUri) || '';
+  let media = resolveMedia ? resolveMedia(sha, fallback) : { id: '', url: fallback };
+  if (!media || !media.url) {
+    const imgs = collectSubtreeImages(node, nodes);
+    if (imgs[0] && resolveMedia) media = resolveMedia(imgs[0].sha256, imgs[0].dataUri);
+  }
+  const rawHotspots = (node.content && Array.isArray(node.content.hotspots)) ? node.content.hotspots : [];
+  const hotspots = (rawHotspots.length > 0 ? rawHotspots : [{ label: 'Hotspot 1', xPct: 50, yPct: 50, tooltip: '' }]).map((hp, idx) => ({
+    _id: shortId(hp.id || `${node.id}-hp-${idx}`),
+    hotspot_label: hp.label || `Hotspot ${idx + 1}`,
+    hotspot_offset_x: { unit: '%', size: typeof hp.xPct === 'number' ? hp.xPct : 50, sizes: [] },
+    hotspot_offset_y: { unit: '%', size: typeof hp.yPct === 'number' ? hp.yPct : 50, sizes: [] },
+    hotspot_tooltip_content: hp.tooltip ? `<p>${hp.tooltip}</p>` : '',
+  }));
+  const settings = {
+    image: media || { id: '', url: '' },
+    hotspot: hotspots,
+  };
+  const pinWithColor = rawHotspots.find((h) => h.color);
+  if (pinWithColor && pinWithColor.color) {
+    settings.style_hotspot_color = pinWithColor.color;
+  }
+  return { id: allocId(node.id), elType: 'widget', widgetType: 'hotspot', isInner: false, settings, elements: [] };
 }
 
 export function buildGenericProWidget(node, nodes, wType, allocId, resolveMedia) {
@@ -591,6 +911,62 @@ export function buildGenericProWidget(node, nodes, wType, allocId, resolveMedia)
     if (node.style && node.style.boxShadow) {
       settings.image_box_shadow_box_shadow_type = 'yes';
       settings.image_box_shadow_box_shadow = node.style.boxShadow;
+    }
+  } else if (wType === 'author-box') {
+    const sha = (node.image && node.image.sha256) || (node.raster && node.raster.sha256) || '';
+    const fallback = (node.image && node.image.dataUri) || (node.raster && node.raster.dataUri) || '';
+    const avatar = (sha || fallback) && resolveMedia ? resolveMedia(sha, fallback) : (collectSubtreeImages(node, nodes)[0] && resolveMedia ? resolveMedia(collectSubtreeImages(node, nodes)[0].sha256, collectSubtreeImages(node, nodes)[0].dataUri) : { id: '', url: '' });
+    settings.source = 'custom';
+    settings.author_avatar = avatar;
+    settings.author_name = texts[0] || (node.content && node.content.name) || 'Author Name';
+    settings.author_bio = texts[1] || '';
+    if (firstTypo) {
+      if (firstTypo.color) settings.name_color = firstTypo.color;
+      applyTypographySettings(settings, 'name_typography', firstTypo, node.responsive);
+    }
+    if (textItems[1] && textItems[1].text) {
+      if (textItems[1].text.color) settings.bio_color = textItems[1].text.color;
+      applyTypographySettings(settings, 'bio_typography', textItems[1].text, node.responsive);
+    }
+    if (node.layout && node.layout.direction === 'row') settings.layout = 'left';
+  } else if (wType === 'table-of-contents') {
+    settings.title = texts[0] || (node.content && node.content.name) || 'Table of Contents';
+    if (node.style && node.style.background) {
+      settings.background_color = node.style.background;
+      settings.header_background_color = node.style.background;
+    }
+    if (node.style && node.style.borderColor) settings.border_color = node.style.borderColor;
+    if (node.style && node.style.radius) settings.border_radius = boxValue(node.style.radius);
+    if (firstTypo) {
+      if (firstTypo.color) settings.header_text_color = firstTypo.color;
+      applyTypographySettings(settings, 'header_typography', firstTypo, node.responsive);
+    }
+    if (textItems[1] && textItems[1].text && textItems[1].text.color) {
+      settings.item_text_color_normal = textItems[1].text.color;
+    }
+  } else if (wType === 'lottie') {
+    settings.source = 'external_url';
+    settings.source_external_url = { url: node.link || 'https://assets3.lottiefiles.com/packages/lf20_UJNc2t.json' };
+    if (texts[0]) {
+      settings.caption_source = 'custom';
+      settings.caption = texts[0];
+    }
+  } else if (wType === 'breadcrumbs' || wType === 'post-info') {
+    if (firstTypo) {
+      if (firstTypo.color) settings.text_color = firstTypo.color;
+      applyTypographySettings(settings, 'text_typography', firstTypo, node.responsive);
+    }
+    if (textItems[1] && textItems[1].text && textItems[1].text.color) {
+      settings.link_color = textItems[1].text.color;
+    }
+  } else if (wType === 'woocommerce-menu-cart') {
+    if (node.style && node.style.background) settings.background_color = node.style.background;
+    if (node.style && node.style.borderColor) settings.border_color = node.style.borderColor;
+    if (firstTypo && firstTypo.color) settings.toggle_button_text_color = firstTypo.color;
+  } else if (wType === 'woocommerce-product-add-to-cart') {
+    if (firstTypo) {
+      if (firstTypo.color) settings.button_text_color = firstTypo.color;
+      applyTypographySettings(settings, 'button_typography', firstTypo, node.responsive);
     }
   } else if (wType === 'blockquote') {
     settings.blockquote_content = texts[0] || (node.content && node.content.name) || '';

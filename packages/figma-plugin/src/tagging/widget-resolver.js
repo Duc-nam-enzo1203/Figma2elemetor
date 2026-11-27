@@ -120,6 +120,8 @@ export const CONTAINER_WIDGETS = new Set([
   'accordion',
   'toggle',
   'nested-carousel',
+  'loop-grid',
+  'loop-carousel',
   'off-canvas',
 ]);
 

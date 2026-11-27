@@ -98,6 +98,44 @@
       return uploadPromise;
     },
 
+    async materializeLoopTemplateIfNeeded(tpl) {
+      if (!tpl || typeof tpl !== 'object' || !Array.isArray(tpl.elements) || tpl.elements.length === 0) {
+        return null;
+      }
+      for (const el of tpl.elements) {
+        await this.hydrateElementAssets(el);
+      }
+      const baseUrl = (window.f2eEditorConfig?.restUrl || '/wp-json/f2e-bridge/v1').replace(/\/+$/, '');
+      try {
+        const res = await fetch(`${baseUrl}/import`, {
+          method: 'POST',
+          credentials: 'same-origin',
+          headers: {
+            'Content-Type': 'application/json',
+            'X-WP-Nonce': window.f2eEditorConfig?.nonce || '',
+          },
+          body: JSON.stringify({
+            title: tpl.title || 'F2E Loop Item',
+            targetType: 'elementor_library',
+            templateType: 'loop-item',
+            postStatus: 'publish',
+            importMode: 'replace',
+            loopSource: tpl.source || 'post',
+            loopSourceNodeId: tpl.sourceNodeId || '',
+            content: tpl.elements,
+          }),
+        });
+        if (!res.ok) return null;
+        const json = await res.json();
+        if (json && json.success && json.data && json.data.postId) {
+          return String(json.data.postId);
+        }
+      } catch (e) {
+        console.warn('[F2E Bridge] Could not auto-create Loop Item template:', e);
+      }
+      return null;
+    },
+
     _isInlineAssetString(val) {
       return typeof val === 'string' && (val.startsWith('data:image/') || val.includes('<svg'));
     },
@@ -255,6 +293,19 @@
       // Elementor v4 e-image
       if (settings.image && settings.image.$$type === 'image') {
         this._hydrateV4ImageProp(settings.image, `${title} v4 image`, tasks);
+      }
+
+      // Auto-create and link Elementor Pro Loop Item template for loop-grid / loop-carousel
+      if (settings._f2e_loop_template && typeof settings._f2e_loop_template === 'object') {
+        const loopTpl = settings._f2e_loop_template;
+        tasks.push(
+          this.materializeLoopTemplateIfNeeded(loopTpl).then((postId) => {
+            if (postId) {
+              settings.template_id = postId;
+            }
+            delete settings._f2e_loop_template;
+          })
+        );
       }
 
       // Elementor v4 e-svg
