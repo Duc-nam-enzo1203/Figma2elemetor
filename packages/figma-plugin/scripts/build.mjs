@@ -25,6 +25,8 @@ const moduleOrder = [
   'src/exporters/compiler-helpers.js',
   'src/exporters/fidelity-verifier.js',
   'src/exporters/elementor-v4.js',
+  'src/exporters/basic-widgets.js',
+  'src/exporters/general-widgets.js',
   'src/exporters/nested-widgets.js',
   'src/exporters/pro-widgets.js',
   'src/exporters/elementor-compiler.js',
